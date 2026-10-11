@@ -290,8 +290,10 @@ int main()
 
     const auto private_public = root / "published-tree";
     ownership::OwnedOutputs private_outputs;
+    ownership::ProtectedStaging private_staging;
     const auto private_root =
-        ownership::create_private_directory(private_public, private_outputs, error);
+        ownership::create_private_directory(
+            private_public, private_staging, private_outputs, error);
     if (!require(!private_root.empty() && write_text(private_root / "child", "private"),
                  "could not create private publication fixture")) {
         return 34;
@@ -302,7 +304,7 @@ int main()
     }
     error.clear();
     if (!require(!ownership::publish_private_tree(
-                     private_root, private_public, private_outputs, error) &&
+                     private_staging, private_root, private_public, private_outputs, error) &&
                      error == std::errc::file_exists &&
                      read_text(private_public) == "competing writer" &&
                      read_text(private_root / "child") == "private",
@@ -371,9 +373,10 @@ int main()
 
     const auto symlink_public = root / "published-link";
     ownership::OwnedOutputs symlink_outputs;
+    ownership::ProtectedStaging symlink_staging;
     error.clear();
     const auto private_link = ownership::create_private_symlink(
-        symlink_public, fs::path{"owned-target"}, symlink_outputs, error);
+        symlink_public, fs::path{"owned-target"}, symlink_staging, symlink_outputs, error);
     if (!require(!private_link.empty() && !error,
                  "could not create private symlink fixture")) {
         return 45;
@@ -384,7 +387,7 @@ int main()
     }
     error.clear();
     if (!require(!ownership::publish_private_output(
-                     private_link, symlink_public, symlink_outputs.front(), error) &&
+                     symlink_staging, private_link, symlink_public, symlink_outputs.front(), error) &&
                      error == std::errc::file_exists &&
                      fs::read_symlink(symlink_public, error) == "competing-target" &&
                      !error,
@@ -501,6 +504,126 @@ int main()
                      !has_internal_residue(unsupported_root_two),
                  "ENOTSUP capability failure mutated the source, destination, or hidden state")) {
         return 67;
+    }
+
+
+
+    // A replacement of the visible staging-container pathname must not redirect
+    // writes or publication away from the directory descriptor Files owns.
+    const auto protected_public = root / "protected-published-tree";
+    const auto displaced_stage = root / "displaced-stage-container";
+    ownership::OwnedOutputs protected_outputs;
+    ownership::ProtectedStaging protected_staging;
+    error.clear();
+    const auto protected_root = ownership::create_private_directory(
+        protected_public, protected_staging, protected_outputs, error);
+    if (!require(!protected_root.empty() && !error,
+                 "could not create protected staging fixture")) {
+        return 68;
+    }
+    const auto visible_stage = protected_staging.container_path;
+    fs::rename(visible_stage, displaced_stage, error);
+    if (!require(!error && fs::create_directory(visible_stage, error) &&
+                     write_text(visible_stage / "competitor", "competitor"),
+                 "could not replace visible staging container")) {
+        return 69;
+    }
+    if (!require(write_text(protected_root / "child", "owned") &&
+                     ownership::record(protected_root / "child", protected_outputs, error),
+                 "protected staging path no longer referenced the owned directory")) {
+        return 70;
+    }
+    error.clear();
+    if (!require(ownership::publish_private_tree(protected_staging,
+                                                  protected_root,
+                                                  protected_public,
+                                                  protected_outputs,
+                                                  error) &&
+                     read_text(protected_public / "child") == "owned" &&
+                     read_text(visible_stage / "competitor") == "competitor",
+                 "visible staging replacement redirected private publication")) {
+        return 71;
+    }
+
+    // Once owned data is quarantined, replacing the visible staging-container
+    // name must not redirect deletion; the open staging descriptor remains the
+    // authority for the quarantined payload.
+    const auto protected_cleanup_source = root / "protected-cleanup-source";
+    const auto displaced_cleanup_stage = root / "displaced-cleanup-stage";
+    if (!require(write_text(protected_cleanup_source, "owned cleanup"),
+                 "could not create protected cleanup fixture")) {
+        return 72;
+    }
+    ownership::OwnedOutputs protected_cleanup_outputs;
+    if (!require(ownership::record(protected_cleanup_source,
+                                   protected_cleanup_outputs,
+                                   error),
+                 "could not record protected cleanup identity")) {
+        return 73;
+    }
+    ownership::ProtectedStaging cleanup_staging;
+    std::filesystem::path cleanup_quarantine;
+    std::filesystem::path cleanup_retained;
+    error.clear();
+    if (!require(ownership::quarantine_owned(protected_cleanup_outputs.front(),
+                                             cleanup_staging,
+                                             cleanup_quarantine,
+                                             error,
+                                             &cleanup_retained),
+                 "could not quarantine protected cleanup fixture")) {
+        return 74;
+    }
+    const auto visible_cleanup_stage = cleanup_staging.container_path;
+    fs::rename(visible_cleanup_stage, displaced_cleanup_stage, error);
+    if (!require(!error && fs::create_directory(visible_cleanup_stage, error) &&
+                     write_text(visible_cleanup_stage / "competitor", "competitor"),
+                 "could not replace cleanup staging container")) {
+        return 75;
+    }
+    error.clear();
+    if (!require(fs::remove(cleanup_quarantine, error) && !error &&
+                     read_text(visible_cleanup_stage / "competitor") == "competitor",
+                 "quarantine cleanup removed a competing staging replacement")) {
+        return 76;
+    }
+    ownership::release_staging(cleanup_staging);
+
+    // If the original source name is claimed before a protected quarantine can
+    // be restored, the displaced data is published to an exact retained path.
+    const auto retained_source = root / "retained-source";
+    if (!require(write_text(retained_source, "owned retained"),
+                 "could not create retained-source fixture")) {
+        return 77;
+    }
+    ownership::OwnedOutputs retained_outputs;
+    if (!require(ownership::record(retained_source, retained_outputs, error),
+                 "could not record retained-source identity")) {
+        return 78;
+    }
+    ownership::ProtectedStaging retained_staging;
+    std::filesystem::path retained_payload;
+    std::filesystem::path retained_path;
+    error.clear();
+    if (!require(ownership::quarantine_owned(retained_outputs.front(),
+                                             retained_staging,
+                                             retained_payload,
+                                             error,
+                                             &retained_path) &&
+                     write_text(retained_source, "competitor"),
+                 "could not prepare retained-source restoration race")) {
+        return 79;
+    }
+    error.clear();
+    if (!require(!ownership::restore_quarantine(retained_staging,
+                                                retained_source,
+                                                error,
+                                                &retained_path) &&
+                     error == std::errc::file_exists &&
+                     !retained_path.empty() &&
+                     read_text(retained_source) == "competitor" &&
+                     read_text(retained_path) == "owned retained",
+                 "blocked source restoration did not surface retained data")) {
+        return 80;
     }
 
     const auto previous_directory = fs::current_path(error);

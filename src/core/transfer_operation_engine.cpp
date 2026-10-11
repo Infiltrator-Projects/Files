@@ -400,17 +400,18 @@ OperationResult copy_exact(const std::filesystem::path &source,
     std::vector<std::pair<std::filesystem::path, std::filesystem::path>> file_metadata;
     std::vector<std::pair<std::filesystem::path, std::filesystem::path>> directory_metadata;
     destination_ownership::OwnedOutputs owned;
+    destination_ownership::ProtectedStaging private_staging;
 
     if (std::filesystem::is_symlink(source_status)) {
         const auto target = std::filesystem::read_symlink(source, error);
         std::filesystem::path private_link;
         if (!error) {
             private_link = destination_ownership::create_private_symlink(
-                destination, target, owned, error);
+                destination, target, private_staging, owned, error);
         }
         if (!error && !private_link.empty()) {
             (void)destination_ownership::publish_private_output(
-                private_link, destination, owned.front(), error);
+                private_staging, private_link, destination, owned.front(), error);
         }
         if (!error && control != nullptr) {
             control->add_item();
@@ -427,7 +428,8 @@ OperationResult copy_exact(const std::filesystem::path &source,
         }
     } else if (std::filesystem::is_directory(source_status)) {
         const std::filesystem::path private_destination =
-            destination_ownership::create_private_directory(destination, owned, error);
+            destination_ownership::create_private_directory(
+                destination, private_staging, owned, error);
         if (private_destination.empty()) {
             return failure(OperationEngine::status_for_error(error),
                            OperationPhase::Execute,
@@ -533,7 +535,7 @@ OperationResult copy_exact(const std::filesystem::path &source,
     if (std::filesystem::is_directory(source_status)) {
         const std::filesystem::path private_destination = owned.front().path;
         if (!destination_ownership::publish_private_tree(
-                private_destination, destination, owned, error)) {
+                private_staging, private_destination, destination, owned, error)) {
             std::error_code cleanup_error;
             const auto status = error == std::errc::file_exists
                                     ? OperationStatus::DestinationConflict
@@ -904,9 +906,14 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
                        !cleaned);
     }
 
-    const std::filesystem::path source_quarantine =
-        destination_ownership::quarantine_owned(source_output, error);
-    if (source_quarantine.empty()) {
+    destination_ownership::ProtectedStaging source_staging;
+    std::filesystem::path source_quarantine;
+    retained_source_quarantine.clear();
+    if (!destination_ownership::quarantine_owned(source_output,
+                                                  source_staging,
+                                                  source_quarantine,
+                                                  error,
+                                                  &retained_source_quarantine)) {
         std::error_code cleanup_error;
         const bool cleaned = destination_ownership::cleanup_owned(copied_outputs, cleanup_error);
         return failure(OperationStatus::VerificationFailure,
@@ -914,14 +921,18 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
                        decision.destination,
                        "The source changed before the cross-volume move could commit." +
                            std::string{cleaned ? " The copied destination was removed."
-                                               : " Concurrently changed destination content was retained."},
-                       !cleaned);
+                                               : " Concurrently changed destination content was retained."} +
+                           (retained_source_quarantine.empty()
+                                ? std::string{}
+                                : " Displaced source data was retained safely at “" +
+                                      retained_source_quarantine.string() + "”."),
+                       !cleaned || !retained_source_quarantine.empty());
     }
 
     if (!destination_ownership::verify_all(copied_outputs, error)) {
         std::error_code restore_error;
         const bool restored = destination_ownership::restore_quarantine(
-            source_quarantine, source, restore_error);
+            source_staging, source, restore_error, &retained_source_quarantine);
         std::error_code cleanup_error;
         const bool cleaned = destination_ownership::cleanup_owned(copied_outputs, cleanup_error);
         return failure(OperationStatus::VerificationFailure,
@@ -933,14 +944,16 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
                            (restored
                                 ? " The source was restored to its original name."
                                 : " The source was retained safely at “" +
-                                      source_quarantine.string() + "”."),
+                                      (retained_source_quarantine.empty()
+                                           ? source_quarantine.string()
+                                           : retained_source_quarantine.string()) + "”."),
                        !cleaned || !restored);
     }
 
     if (!equivalent_copy_shape(source_quarantine, decision.destination, error)) {
         std::error_code restore_error;
         const bool restored = destination_ownership::restore_quarantine(
-            source_quarantine, source, restore_error);
+            source_staging, source, restore_error, &retained_source_quarantine);
         std::error_code cleanup_error;
         const bool cleaned = destination_ownership::cleanup_owned(copied_outputs, cleanup_error);
         return failure(OperationStatus::VerificationFailure,
@@ -952,7 +965,9 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
                            (restored
                                 ? " The source was restored to its original name."
                                 : " The source was retained safely at “" +
-                                      source_quarantine.string() + "”."),
+                                      (retained_source_quarantine.empty()
+                                           ? source_quarantine.string()
+                                           : retained_source_quarantine.string()) + "”."),
                        !cleaned || !restored);
     }
 
@@ -962,9 +977,10 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
         std::error_code restore_error;
         const bool remains = path_present(source_quarantine, restore_error);
         bool restored = false;
+        retained_source_quarantine.clear();
         if (!restore_error && remains) {
             restored = destination_ownership::restore_quarantine(
-                source_quarantine, source, restore_error);
+                source_staging, source, restore_error, &retained_source_quarantine);
         }
         return failure(OperationEngine::status_for_error(remove_error),
                        OperationPhase::Execute,
@@ -973,7 +989,10 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
                            remove_error.message() +
                            (restore_error
                                 ? " Remaining source data was retained at “" +
-                                      source_quarantine.string() + "”: " + restore_error.message()
+                                      (retained_source_quarantine.empty()
+                                           ? source_quarantine.string()
+                                           : retained_source_quarantine.string()) +
+                                      "”: " + restore_error.message()
                                 : (restored
                                        ? " Remaining source data was restored to its original name."
                                        : " No remaining source object required restoration.")),
