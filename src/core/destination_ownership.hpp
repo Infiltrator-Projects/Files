@@ -36,6 +36,9 @@ using OwnedOutputs = std::vector<OwnedOutput>;
 using RenameNoReplaceOperation = bool (*)(const std::filesystem::path &,
                                           const std::filesystem::path &,
                                           std::error_code &) noexcept;
+using IdentityForFdOperation = Identity (*)(int, std::error_code &) noexcept;
+using RemoveAllOperation = std::uintmax_t (*)(const std::filesystem::path &,
+                                               std::error_code &);
 
 struct ProtectedStaging;
 inline void release_staging(ProtectedStaging &staging) noexcept;
@@ -108,9 +111,10 @@ inline bool record(const std::filesystem::path &path,
 inline bool record_fd(const std::filesystem::path &path,
                       const int descriptor,
                       OwnedOutputs &outputs,
-                      std::error_code &error) noexcept
+                      std::error_code &error,
+                      IdentityForFdOperation identity_operation = identity_for_fd) noexcept
 {
-    const Identity identity = identity_for_fd(descriptor, error);
+    const Identity identity = identity_operation(descriptor, error);
     if (error) {
         return false;
     }
@@ -354,6 +358,38 @@ inline std::filesystem::path create_private_directory(
     }
     (void)::unlinkat(staging.descriptor, "payload", AT_REMOVEDIR);
     return {};
+}
+
+inline int create_private_file(
+    const std::filesystem::path &public_path,
+    ProtectedStaging &staging,
+    OwnedOutputs &outputs,
+    std::filesystem::path &private_path,
+    std::error_code &error,
+    IdentityForFdOperation identity_operation = identity_for_fd) noexcept
+{
+    private_path.clear();
+    if (!create_protected_staging(public_path.parent_path(), staging, error)) {
+        return -1;
+    }
+    const int descriptor =
+        ::openat(staging.descriptor, "payload", O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+    if (descriptor < 0) {
+        error = std::error_code(errno, std::generic_category());
+        return -1;
+    }
+
+    private_path = staging.access_root() / "payload";
+    if (record_fd(private_path, descriptor, outputs, error, identity_operation)) {
+        return descriptor;
+    }
+
+    const std::error_code record_error = error;
+    (void)::unlinkat(staging.descriptor, "payload", 0);
+    (void)::close(descriptor);
+    private_path.clear();
+    error = record_error;
+    return -1;
 }
 
 inline std::filesystem::path create_private_symlink(
@@ -665,9 +701,16 @@ inline bool restore_owned(const OwnedOutput &output,
     return false;
 }
 
+inline std::uintmax_t remove_all_path(const std::filesystem::path &path,
+                                     std::error_code &error)
+{
+    return std::filesystem::remove_all(path, error);
+}
+
 inline bool remove_owned_tree(const OwnedOutput &output,
                               std::error_code &error,
-                              std::filesystem::path *retained_quarantine = nullptr) noexcept
+                              std::filesystem::path *retained_quarantine = nullptr,
+                              RemoveAllOperation remove_operation = remove_all_path) noexcept
 {
     if (retained_quarantine != nullptr) {
         retained_quarantine->clear();
@@ -679,7 +722,7 @@ inline bool remove_owned_tree(const OwnedOutput &output,
         return false;
     }
 
-    std::filesystem::remove_all(quarantine, error);
+    (void)remove_operation(quarantine, error);
     if (!error) {
         release_staging(staging);
         return true;
@@ -709,10 +752,15 @@ inline bool remove_owned_tree(const OwnedOutput &output,
     return false;
 }
 
-inline bool cleanup_owned(OwnedOutputs &outputs, std::error_code &first_error) noexcept
+inline bool cleanup_owned(OwnedOutputs &outputs,
+                         std::error_code &first_error,
+                         std::vector<std::filesystem::path> *retained_paths = nullptr) noexcept
 {
     bool complete = true;
     first_error.clear();
+    if (retained_paths != nullptr) {
+        retained_paths->clear();
+    }
 
     for (auto iterator = outputs.rbegin(); iterator != outputs.rend(); ++iterator) {
         ProtectedStaging staging;
@@ -731,6 +779,9 @@ inline bool cleanup_owned(OwnedOutputs &outputs, std::error_code &first_error) n
             if (quarantine_error && !first_error) {
                 first_error = quarantine_error;
             }
+            if (retained_paths != nullptr) {
+                retained_paths->push_back(retained.empty() ? iterator->path : retained);
+            }
             complete = false;
             continue;
         }
@@ -744,13 +795,17 @@ inline bool cleanup_owned(OwnedOutputs &outputs, std::error_code &first_error) n
 
         std::error_code restore_error;
         std::filesystem::path restore_retained;
-        if (!restore_quarantine(staging,
-                                iterator->path,
-                                restore_error,
-                                &restore_retained)) {
-            if (restore_error && !first_error) {
-                first_error = restore_error;
-            }
+        const bool restored = restore_quarantine(staging,
+                                                   iterator->path,
+                                                   restore_error,
+                                                   &restore_retained);
+        if (!restored && restore_error && !first_error) {
+            first_error = restore_error;
+        }
+        if (retained_paths != nullptr) {
+            retained_paths->push_back(
+                restored ? iterator->path
+                         : (restore_retained.empty() ? quarantine : restore_retained));
         }
         if (remove_error && !first_error) {
             first_error = remove_error;
@@ -764,10 +819,16 @@ inline bool cleanup_owned(OwnedOutputs &outputs, std::error_code &first_error) n
 // Private copy/link paths have never been published. When a provider rejects
 // atomic no-replace, the normal quarantine-based cleanup is unavailable too;
 // remove only entries whose recorded identity still matches, children first.
-inline bool cleanup_unpublished(OwnedOutputs &outputs, std::error_code &first_error) noexcept
+inline bool cleanup_unpublished(
+    OwnedOutputs &outputs,
+    std::error_code &first_error,
+    std::vector<std::filesystem::path> *retained_paths = nullptr) noexcept
 {
     bool complete = true;
     first_error.clear();
+    if (retained_paths != nullptr) {
+        retained_paths->clear();
+    }
     for (auto iterator = outputs.rbegin(); iterator != outputs.rend(); ++iterator) {
         std::error_code inspect_error;
         if (!same_object(iterator->path, iterator->identity, inspect_error)) {
@@ -777,6 +838,9 @@ inline bool cleanup_unpublished(OwnedOutputs &outputs, std::error_code &first_er
             if (inspect_error && !first_error) {
                 first_error = inspect_error;
             }
+            if (retained_paths != nullptr) {
+                retained_paths->push_back(iterator->path);
+            }
             complete = false;
             continue;
         }
@@ -784,6 +848,9 @@ inline bool cleanup_unpublished(OwnedOutputs &outputs, std::error_code &first_er
         if (!std::filesystem::remove(iterator->path, remove_error) || remove_error) {
             if (remove_error && !first_error) {
                 first_error = remove_error;
+            }
+            if (retained_paths != nullptr) {
+                retained_paths->push_back(iterator->path);
             }
             complete = false;
         }

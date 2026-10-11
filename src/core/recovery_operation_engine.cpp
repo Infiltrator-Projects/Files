@@ -17,9 +17,11 @@ OperationResult result(const OperationStatus status,
                        const OperationPhase phase,
                        const std::filesystem::path &destination,
                        std::string message,
-                       const bool changed = false)
+                       const bool changed = false,
+                       std::vector<std::filesystem::path> retained_paths = {})
 {
-    return OperationResult{status, phase, destination, std::move(message), changed};
+    return OperationResult{
+        status, phase, destination, std::move(message), changed, std::move(retained_paths)};
 }
 
 std::string quoted_name(const std::filesystem::path &path)
@@ -142,7 +144,8 @@ OperationResult cleanup_replaced_destination(const std::filesystem::path &destin
                       std::move(success_message) +
                           " The previous destination was retained at “" + retained.string() +
                           "” because ownership-safe cleanup failed: " + cleanup_error.message(),
-                      true);
+                      true,
+                      {retained});
     }
     return result(OperationStatus::Success,
                   OperationPhase::Complete,
@@ -208,7 +211,10 @@ OperationResult RecoveryOperationEngine::replace_copy(
                       OperationPhase::Execute,
                       destination,
                       staging_failure_message(error, staging_quarantine),
-                      !staging_quarantine.empty());
+                      !staging_quarantine.empty(),
+                      staging_quarantine.empty()
+                          ? std::vector<std::filesystem::path>{}
+                          : std::vector<std::filesystem::path>{staging_quarantine});
     }
 
     OperationResult replacement = ordinary.copy_item(source, destination_parent);
@@ -271,7 +277,10 @@ OperationResult RecoveryOperationEngine::replace_move(
                       OperationPhase::Execute,
                       destination,
                       staging_failure_message(error, staging_quarantine),
-                      !staging_quarantine.empty());
+                      !staging_quarantine.empty(),
+                      staging_quarantine.empty()
+                          ? std::vector<std::filesystem::path>{}
+                          : std::vector<std::filesystem::path>{staging_quarantine});
     }
 
     OperationResult replacement = ordinary.move_item(source, destination_parent);
@@ -442,7 +451,10 @@ OperationResult RecoveryOperationEngine::restore_item(
                           OperationPhase::Execute,
                           original_path,
                           staging_failure_message(error, staging_quarantine),
-                          !staging_quarantine.empty());
+                          !staging_quarantine.empty(),
+                          staging_quarantine.empty()
+                              ? std::vector<std::filesystem::path>{}
+                              : std::vector<std::filesystem::path>{staging_quarantine});
         }
     }
 

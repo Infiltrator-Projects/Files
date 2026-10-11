@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #include <unistd.h>
 
@@ -46,6 +47,21 @@ bool unsupported_enotsup(const std::filesystem::path &,
 {
     error = std::error_code(ENOTSUP, std::generic_category());
     return false;
+}
+
+infiltrator::files::destination_ownership::Identity failing_identity_for_fd(
+    int,
+    std::error_code &error) noexcept
+{
+    error = std::make_error_code(std::errc::io_error);
+    return {};
+}
+
+std::uintmax_t denied_remove_all(const std::filesystem::path &,
+                                 std::error_code &error)
+{
+    error = std::make_error_code(std::errc::permission_denied);
+    return 0;
 }
 
 bool has_internal_residue(const std::filesystem::path &root)
@@ -149,7 +165,11 @@ int main()
         return 11;
     }
     error.clear();
-    if (!require(!ownership::cleanup_owned(directory_outputs, error) &&
+    std::vector<fs::path> retained_cleanup_paths;
+    if (!require(!ownership::cleanup_owned(
+                         directory_outputs, error, &retained_cleanup_paths) &&
+                     retained_cleanup_paths.size() == 1U &&
+                     retained_cleanup_paths.front() == owned_directory &&
                      !fs::exists(owned_file) &&
                      read_text(competing_file) == "competing writer" &&
                      fs::is_directory(owned_directory),
@@ -406,6 +426,33 @@ int main()
         return 48;
     }
 
+    const auto private_file_public = root / "private-file-public";
+    {
+        ownership::ProtectedStaging private_file_staging;
+        ownership::OwnedOutputs private_file_outputs;
+        std::filesystem::path private_file_path;
+        error.clear();
+        const int private_file_descriptor = ownership::create_private_file(
+            private_file_public,
+            private_file_staging,
+            private_file_outputs,
+            private_file_path,
+            error,
+            failing_identity_for_fd);
+        if (!require(private_file_descriptor < 0 &&
+                         error == std::errc::io_error &&
+                         private_file_outputs.empty() &&
+                         private_file_path.empty() &&
+                         !fs::exists(private_file_public),
+                     "record failure left a public or owned regular-file residue")) {
+            return 81;
+        }
+    }
+    if (!require(!has_internal_residue(root),
+                 "record failure retained private regular-file staging residue")) {
+        return 82;
+    }
+
     const auto partial_cleanup = root / "partial-cleanup";
     const auto partial_child = partial_cleanup / "child";
     error.clear();
@@ -419,26 +466,17 @@ int main()
                  "could not record partial tree cleanup fixture")) {
         return 50;
     }
-    fs::permissions(partial_cleanup,
-                    fs::perms::owner_read | fs::perms::owner_exec,
-                    fs::perm_options::replace,
-                    error);
-    if (!require(!error, "could not make partial cleanup fixture non-writable")) {
-        return 51;
-    }
     std::filesystem::path retained_cleanup;
     error.clear();
     const bool removed_partial = ownership::remove_owned_tree(
-        partial_outputs.front(), error, &retained_cleanup);
-    if (!require(!removed_partial && error && retained_cleanup.empty() &&
-                     fs::is_directory(partial_cleanup) && fs::exists(partial_child),
-                 "failed tree cleanup did not restore remaining owned data")) {
+        partial_outputs.front(), error, &retained_cleanup, denied_remove_all);
+    if (!require(!removed_partial &&
+                     error == std::errc::permission_denied &&
+                     retained_cleanup.empty() &&
+                     fs::is_directory(partial_cleanup) &&
+                     fs::exists(partial_child),
+                 "injected tree cleanup failure did not restore remaining owned data")) {
         return 52;
-    }
-    error.clear();
-    fs::permissions(partial_cleanup, fs::perms::owner_all, fs::perm_options::replace, error);
-    if (!require(!error, "could not restore cleanup fixture permissions")) {
-        return 53;
     }
 
     const auto unsupported_root_one = root / "unsupported-eopnotsupp";

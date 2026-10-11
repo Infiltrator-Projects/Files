@@ -20,9 +20,11 @@ OperationResult failure(const OperationStatus status,
                         const OperationPhase phase,
                         const std::filesystem::path &destination,
                         std::string message,
-                        const bool changed = false)
+                        const bool changed = false,
+                        std::vector<std::filesystem::path> retained_paths = {})
 {
-    return OperationResult{status, phase, destination, std::move(message), changed};
+    return OperationResult{
+        status, phase, destination, std::move(message), changed, std::move(retained_paths)};
 }
 
 std::string quoted_name(const std::filesystem::path &path)
@@ -297,11 +299,16 @@ OperationResult OperationEngine::rename_item(const std::filesystem::path &source
             message += " The original item was retained safely at “" +
                        retained_quarantine.string() + "”.";
         }
+        std::vector<std::filesystem::path> retained_paths;
+        if (!retained_quarantine.empty()) {
+            retained_paths.push_back(retained_quarantine);
+        }
         return failure(status,
                        OperationPhase::Execute,
                        destination,
                        std::move(message),
-                       !retained_quarantine.empty());
+                       !retained_quarantine.empty(),
+                       std::move(retained_paths));
     }
 
     const bool destination_is_source =

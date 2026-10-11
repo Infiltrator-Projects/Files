@@ -215,6 +215,8 @@ This is not a promise that every item ships in the first release. It is the comp
 - **CORE** Same-filesystem rename/move takes the strongest atomic path available.
 - **CORE** Browsing remains available when a provider lacks atomic no-replace; affected mutations fail closed with a typed unsupported-capability result and leave source, visible destination and hidden staging paths unchanged. Provider-specific atomic equivalents remain future work.
 - **CORE** Cross-filesystem move is implemented as verified copy plus source removal with explicit partial-failure state.
+- **CORE** Regular files, symbolic links and directory trees remain private until fully copied and metadata-preserved, then publish atomically without replacing an existing destination.
+- **CORE** Failure, cancellation, cleanup and rollback results carry structured exact paths for every retained owned or quarantined object; visible messages surface the same recovery evidence.
 - **CORE** Preserve timestamps when policy and destination allow.
 - **CORE** Preserve permissions/ownership when policy and authority allow.
 - **CORE** Preserve ACLs and extended attributes where supported.
