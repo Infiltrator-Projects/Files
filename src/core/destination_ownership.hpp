@@ -842,6 +842,7 @@ inline bool cleanup_unpublished(
         retained_paths->clear();
     }
     const std::filesystem::path access_root = staging.access_root();
+    bool payload_identity_verified = false;
     for (auto iterator = outputs.rbegin(); iterator != outputs.rend(); ++iterator) {
         const std::filesystem::path relative = iterator->path.lexically_relative(access_root);
         if (relative.empty() || relative == "." || staging.descriptor < 0) {
@@ -862,6 +863,9 @@ inline bool cleanup_unpublished(
             }
             complete = false;
             continue;
+        }
+        if (relative == "payload") {
+            payload_identity_verified = true;
         }
 
         struct stat status {};
@@ -898,6 +902,18 @@ inline bool cleanup_unpublished(
             first_error = std::error_code(errno, std::generic_category());
         }
         complete = false;
+    } else if (!payload_identity_verified) {
+        // Identity recording may fail after the provider has created the private
+        // payload.  Without a recorded identity, even a descriptor-relative
+        // unlink or rename could act on a same-UID replacement.  Keep the
+        // staging container open and report its stable filesystem path.
+        if (!first_error) {
+            first_error = std::make_error_code(std::errc::state_not_recoverable);
+        }
+        if (retained_paths != nullptr) {
+            retained_paths->push_back(staging.container_path / "payload");
+        }
+        return false;
     }
 
     if (complete && staging.descriptor >= 0) {
@@ -938,3 +954,4 @@ inline int open_exclusive(const std::filesystem::path &path, std::error_code &er
 }
 
 } // namespace infiltrator::files::destination_ownership
+

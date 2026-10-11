@@ -56,6 +56,10 @@ private:
 };
 
 struct TransferOperationHooks {
+    using RemoveSourceQuarantineOperation = void (*)(
+        const std::filesystem::path &, std::error_code &) noexcept;
+    using SourceQuarantinePresentOperation = bool (*)(
+        const std::filesystem::path &, std::error_code &) noexcept;
     using MoveOwnedOperation = bool (*)(
         const destination_ownership::OwnedOutput &,
         const std::filesystem::path &,
@@ -92,10 +96,33 @@ struct TransferOperationHooks {
             source, destination, moved, error, retained_quarantine);
     }
 
+    static void remove_source_quarantine_default(
+        const std::filesystem::path &path, std::error_code &error) noexcept
+    {
+        std::filesystem::remove_all(path, error);
+    }
+
+    static bool source_quarantine_present_default(
+        const std::filesystem::path &path, std::error_code &error) noexcept
+    {
+        error.clear();
+        const auto status = std::filesystem::symlink_status(path, error);
+        if (error == std::errc::no_such_file_or_directory ||
+            error == std::errc::not_a_directory) {
+            error.clear();
+            return false;
+        }
+        return !error && status.type() != std::filesystem::file_type::not_found;
+    }
+
     MoveOwnedOperation move_owned{move_owned_default};
     QuarantineOwnedOperation quarantine_owned{destination_ownership::quarantine_owned};
     PublishTreeOperation publish_tree{destination_ownership::publish_private_tree};
     PublishOutputOperation publish_output{destination_ownership::publish_private_output};
+    RemoveSourceQuarantineOperation remove_source_quarantine{
+        remove_source_quarantine_default};
+    SourceQuarantinePresentOperation source_quarantine_present{
+        source_quarantine_present_default};
 };
 
 class TransferOperationEngine final {
@@ -124,3 +151,4 @@ private:
 };
 
 } // namespace infiltrator::files
+

@@ -4,6 +4,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <unistd.h>
@@ -21,6 +22,14 @@ bool write_text(const std::filesystem::path &path, const std::string &text)
     std::ofstream stream(path, std::ios::binary | std::ios::trunc);
     stream << text;
     return stream.good();
+}
+
+std::string read_text(const std::filesystem::path &path)
+{
+    std::ifstream stream(path, std::ios::binary);
+    std::ostringstream buffer;
+    buffer << stream.rdbuf();
+    return buffer.str();
 }
 
 bool force_cross_device(
@@ -49,6 +58,19 @@ bool force_unsupported_quarantine(
         retained->clear();
     }
     error = std::make_error_code(std::errc::operation_not_supported);
+    return false;
+}
+
+void force_quarantine_remove_failure(
+    const std::filesystem::path &, std::error_code &error) noexcept
+{
+    error = std::make_error_code(std::errc::io_error);
+}
+
+bool force_quarantine_presence_failure(
+    const std::filesystem::path &, std::error_code &error) noexcept
+{
+    error = std::make_error_code(std::errc::permission_denied);
     return false;
 }
 
@@ -299,6 +321,36 @@ int main()
         return 22;
     }
 
+    const fs::path durable_source = root / "durable-source.txt";
+    const fs::path durable_destination_parent = root / "durable-destination";
+    fs::create_directories(durable_destination_parent);
+    if (!write_text(durable_source, "durable source payload\n")) {
+        fs::remove_all(root, cleanup_error);
+        return 27;
+    }
+    TransferOperationHooks durable_hooks;
+    durable_hooks.move_owned = force_cross_device;
+    durable_hooks.remove_source_quarantine = force_quarantine_remove_failure;
+    durable_hooks.source_quarantine_present = force_quarantine_presence_failure;
+    TransferOperationEngine durable_engine{durable_hooks};
+    const auto durable_move = durable_engine.move_item(
+        durable_source, durable_destination_parent, ConflictPolicy::Fail);
+    if (durable_move.status != OperationStatus::ExecutionFailure ||
+        !durable_move.changed || durable_move.retained_paths.size() != 1U ||
+        durable_move.retained_paths.front().string().find("/proc/self/fd/") !=
+            std::string::npos ||
+        !fs::exists(durable_move.retained_paths.front()) ||
+        read_text(durable_move.retained_paths.front()) !=
+            "durable source payload\n" ||
+        fs::exists(durable_source) ||
+        read_text(durable_destination_parent / durable_source.filename()) !=
+            "durable source payload\n" ||
+        durable_move.message.find(durable_move.retained_paths.front().string()) ==
+            std::string::npos) {
+        fs::remove_all(root, cleanup_error);
+        return 28;
+    }
+
     const fs::path cancelled_tree = root / "cancelled-tree";
     fs::create_directories(cancelled_tree / "nested");
     if (!write_text(cancelled_tree / "nested" / "data.bin", "cancelled tree payload\n")) {
@@ -350,3 +402,4 @@ int main()
     fs::remove_all(root, cleanup_error);
     return 0;
 }
+

@@ -1105,11 +1105,12 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
                        std::move(retained_paths));
     }
 
-    std::filesystem::remove_all(source_quarantine, error);
+    hooks_.remove_source_quarantine(source_quarantine, error);
     if (error) {
         const std::error_code remove_error = error;
         std::error_code restore_error;
-        const bool remains = path_present(source_quarantine, restore_error);
+        const bool remains =
+            hooks_.source_quarantine_present(source_quarantine, restore_error);
         bool restored = false;
         retained_source_quarantine.clear();
         if (!restore_error && remains) {
@@ -1118,21 +1119,31 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
         }
         std::vector<std::filesystem::path> retained_paths;
         if (restore_error) {
-            retained_paths.push_back(retained_source_quarantine.empty()
-                                         ? source_quarantine
-                                         : retained_source_quarantine);
+            std::error_code retain_error;
+            if (retained_source_quarantine.empty() &&
+                !destination_ownership::retain_staged_payload(
+                    source_staging,
+                    source,
+                    retained_source_quarantine,
+                    retain_error)) {
+                retained_source_quarantine =
+                    source_staging.container_path / "payload";
+            }
+            retained_paths.push_back(retained_source_quarantine);
         }
+        const std::string source_recovery_message =
+            restore_error
+                ? retained_paths_message(retained_paths) + " " +
+                      restore_error.message()
+                : (restored
+                       ? " Remaining source data was restored to its original name."
+                       : " No remaining source object required restoration.");
         return failure(OperationEngine::status_for_error(remove_error),
                        OperationPhase::Execute,
                        decision.destination,
                        "The item was copied, but the original could not be removed: " +
                            remove_error.message() +
-                           (restore_error
-                                ? retained_paths_message(retained_paths) +
-                                      " " + restore_error.message()
-                                : (restored
-                                       ? " Remaining source data was restored to its original name."
-                                       : " No remaining source object required restoration.")),
+                           source_recovery_message,
                        true,
                        std::move(retained_paths));
     }
@@ -1145,3 +1156,4 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
 }
 
 } // namespace infiltrator::files
+

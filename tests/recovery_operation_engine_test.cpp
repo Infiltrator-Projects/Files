@@ -33,6 +33,8 @@ std::string read_text(const std::filesystem::path &path)
 
 unsigned int injected_operation_calls = 0U;
 bool remove_source_on_replacement = false;
+bool retain_replacement_on_failure = false;
+std::filesystem::path replacement_retained_path;
 
 OperationResult conflict_then_failure(const std::filesystem::path &source,
                                       const std::filesystem::path &destination_parent)
@@ -51,12 +53,17 @@ OperationResult conflict_then_failure(const std::filesystem::path &source,
         std::error_code error;
         std::filesystem::remove(source, error);
     }
+    std::vector<std::filesystem::path> retained;
+    if (retain_replacement_on_failure) {
+        (void)write_text(replacement_retained_path, "replacement residue\n");
+        retained.push_back(replacement_retained_path);
+    }
     return OperationResult{OperationStatus::ExecutionFailure,
                            OperationPhase::Execute,
                            destination,
                            "Injected replacement failure.",
-                           false,
-                           {}};
+                           !retained.empty(),
+                           std::move(retained)};
 }
 
 void claim_rollback_destination(const std::filesystem::path &destination)
@@ -160,14 +167,21 @@ int main()
     RecoveryOperationEngine rollback_copy_engine{rollback_copy_hooks};
     injected_operation_calls = 0U;
     remove_source_on_replacement = false;
+    retain_replacement_on_failure = true;
+    replacement_retained_path = root / "copy-replacement-residue";
     const auto rollback_copy = rollback_copy_engine.replace_copy(
         rollback_copy_source, rollback_copy_destination_dir);
     if (rollback_copy.status != OperationStatus::VerificationFailure ||
-        !rollback_copy.changed || rollback_copy.retained_paths.size() != 1U ||
-        !fs::exists(rollback_copy.retained_paths.front()) ||
-        read_text(rollback_copy.retained_paths.front()) != "previous copy\n" ||
+        !rollback_copy.changed || rollback_copy.retained_paths.size() != 2U ||
+        rollback_copy.retained_paths[0] != replacement_retained_path ||
+        !fs::exists(rollback_copy.retained_paths[0]) ||
+        read_text(rollback_copy.retained_paths[0]) != "replacement residue\n" ||
+        !fs::exists(rollback_copy.retained_paths[1]) ||
+        read_text(rollback_copy.retained_paths[1]) != "previous copy\n" ||
         read_text(rollback_copy_destination) != "competing rollback claimant\n" ||
-        rollback_copy.message.find(rollback_copy.retained_paths.front().string()) ==
+        rollback_copy.message.find(rollback_copy.retained_paths[0].string()) ==
+            std::string::npos ||
+        rollback_copy.message.find(rollback_copy.retained_paths[1].string()) ==
             std::string::npos) {
         fs::remove_all(root, cleanup_error);
         return 10;
@@ -191,14 +205,20 @@ int main()
     RecoveryOperationEngine rollback_move_engine{rollback_move_hooks};
     injected_operation_calls = 0U;
     remove_source_on_replacement = false;
+    replacement_retained_path = root / "move-replacement-residue";
     const auto rollback_move = rollback_move_engine.replace_move(
         rollback_move_source, rollback_move_destination_dir);
     if (rollback_move.status != OperationStatus::VerificationFailure ||
-        !rollback_move.changed || rollback_move.retained_paths.size() != 1U ||
-        !fs::exists(rollback_move.retained_paths.front()) ||
-        read_text(rollback_move.retained_paths.front()) != "previous move\n" ||
+        !rollback_move.changed || rollback_move.retained_paths.size() != 2U ||
+        rollback_move.retained_paths[0] != replacement_retained_path ||
+        !fs::exists(rollback_move.retained_paths[0]) ||
+        read_text(rollback_move.retained_paths[0]) != "replacement residue\n" ||
+        !fs::exists(rollback_move.retained_paths[1]) ||
+        read_text(rollback_move.retained_paths[1]) != "previous move\n" ||
         read_text(rollback_move_destination) != "competing rollback claimant\n" ||
-        rollback_move.message.find(rollback_move.retained_paths.front().string()) ==
+        rollback_move.message.find(rollback_move.retained_paths[0].string()) ==
+            std::string::npos ||
+        rollback_move.message.find(rollback_move.retained_paths[1].string()) ==
             std::string::npos) {
         fs::remove_all(root, cleanup_error);
         return 12;
@@ -221,6 +241,7 @@ int main()
     RecoveryOperationEngine uncertain_engine{uncertain_hooks};
     injected_operation_calls = 0U;
     remove_source_on_replacement = true;
+    retain_replacement_on_failure = false;
     const auto uncertain = uncertain_engine.replace_move(
         uncertain_source, uncertain_destination_dir);
     remove_source_on_replacement = false;
@@ -237,3 +258,4 @@ int main()
     fs::remove_all(root, cleanup_error);
     return 0;
 }
+

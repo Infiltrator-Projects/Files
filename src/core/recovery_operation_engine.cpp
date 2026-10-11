@@ -4,6 +4,7 @@
 
 #include <gio/gio.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <string>
@@ -178,6 +179,26 @@ std::string staging_failure_message(const std::error_code &error,
                                    retained.string() + "”.");
 }
 
+void append_unique_retained(
+    std::vector<std::filesystem::path> &paths,
+    const std::filesystem::path &path)
+{
+    if (!path.empty() &&
+        std::find(paths.begin(), paths.end(), path) == paths.end()) {
+        paths.push_back(path);
+    }
+}
+
+std::string retained_paths_message(
+    const std::vector<std::filesystem::path> &paths)
+{
+    std::string message;
+    for (const auto &path : paths) {
+        message += " Remaining data is available at “" + path.string() + "”.";
+    }
+    return message;
+}
+
 } // namespace
 
 OperationResult RecoveryOperationEngine::replace_copy(
@@ -237,13 +258,17 @@ OperationResult RecoveryOperationEngine::replace_copy(
         hooks_.before_rollback(destination);
     }
     if (!rollback_destination(destination, staged, rollback_detail, rollback_retained)) {
+        auto retained_paths = replacement.retained_paths;
+        append_unique_retained(retained_paths, rollback_retained);
+        const std::string failure_message =
+            "The replacement failed and Files could not restore the previous destination. " +
+            rollback_detail + retained_paths_message(retained_paths);
         return result(OperationStatus::VerificationFailure,
                       OperationPhase::Verify,
                       destination,
-                      "The replacement failed and Files could not restore the previous destination. " +
-                          rollback_detail,
+                      failure_message,
                       true,
-                      {rollback_retained});
+                      std::move(retained_paths));
     }
 
     replacement.destination = destination;
@@ -328,13 +353,17 @@ OperationResult RecoveryOperationEngine::replace_move(
             }
             return replacement;
         }
+        auto retained_paths = replacement.retained_paths;
+        append_unique_retained(retained_paths, rollback_retained);
+        const std::string failure_message =
+            "The replacement move failed and Files could not restore the previous destination. " +
+            rollback_detail + retained_paths_message(retained_paths);
         return result(OperationStatus::VerificationFailure,
                       OperationPhase::Verify,
                       destination,
-                      "The replacement move failed and Files could not restore the previous destination. " +
-                          rollback_detail,
+                      failure_message,
                       true,
-                      {rollback_retained});
+                      std::move(retained_paths));
     }
 
     return result(OperationStatus::VerificationFailure,
@@ -650,3 +679,4 @@ OperationResult RecoveryOperationEngine::delete_uri(const std::string_view uri) 
 }
 
 } // namespace infiltrator::files
+

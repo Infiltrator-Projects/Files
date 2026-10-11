@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include <fcntl.h>
 #include <unistd.h>
 
 namespace {
@@ -436,6 +437,7 @@ int main()
     }
 
     const auto private_file_public = root / "private-file-public";
+    const auto displaced_private_file = root / "displaced-private-file";
     fs::path private_file_stage;
     {
         ownership::ProtectedStaging private_file_staging;
@@ -451,6 +453,26 @@ int main()
             failing_identity_for_fd);
         private_file_stage = private_file_staging.container_path;
         const std::error_code record_error = error;
+        const bool displaced =
+            ::renameat(private_file_staging.descriptor,
+                       "payload",
+                       AT_FDCWD,
+                       displaced_private_file.c_str()) == 0;
+        const int replacement_descriptor =
+            ::openat(private_file_staging.descriptor,
+                     "payload",
+                     O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC,
+                     0600);
+        const std::string replacement_text{"same-UID replacement"};
+        const bool replacement_written =
+            replacement_descriptor >= 0 &&
+            ::write(replacement_descriptor,
+                    replacement_text.data(),
+                    replacement_text.size()) ==
+                static_cast<ssize_t>(replacement_text.size());
+        if (replacement_descriptor >= 0) {
+            ::close(replacement_descriptor);
+        }
         std::error_code unpublished_cleanup_error;
         std::vector<fs::path> unpublished_retained;
         const bool unpublished_cleaned = ownership::cleanup_unpublished(
@@ -462,16 +484,24 @@ int main()
         if (!require(private_file_descriptor < 0 &&
                          record_error == std::errc::io_error &&
                          private_file_outputs.empty() &&
-                         unpublished_cleaned && unpublished_retained.empty() &&
+                         displaced && replacement_written &&
+                         !unpublished_cleaned &&
+                         unpublished_retained ==
+                             std::vector<fs::path>{private_file_stage / "payload"} &&
+                         read_text(unpublished_retained.front()) == replacement_text &&
                          !fs::exists(private_file_public),
-                     "record failure left a public or owned regular-file residue")) {
+                     "cleanup touched or hid an unverified same-UID replacement")) {
             return 81;
         }
     }
-    if (!require(!fs::exists(private_file_stage),
-                 "record failure retained private regular-file staging residue")) {
+    if (!require(fs::exists(private_file_stage / "payload") &&
+                     read_text(private_file_stage / "payload") ==
+                         "same-UID replacement",
+                 "unverified replacement did not survive descriptor close")) {
         return 82;
     }
+    fs::remove_all(private_file_stage, error);
+    fs::remove(displaced_private_file, error);
 
     const auto private_directory_public = root / "private-directory-public";
     fs::path private_directory_stage;
@@ -488,16 +518,20 @@ int main()
         const bool cleaned = ownership::cleanup_unpublished(
             staging, private_directory_public, outputs, cleanup_error, &retained);
         if (!require(private_path.empty() && record_error == std::errc::io_error &&
-                         outputs.empty() && cleaned && retained.empty() &&
+                         outputs.empty() && !cleaned &&
+                         retained == std::vector<fs::path>{private_directory_stage /
+                                                           "payload"} &&
+                         fs::is_directory(retained.front()) &&
                          !fs::exists(private_directory_public),
-                     "directory record failure left unreported staging residue")) {
+                     "directory record failure was not durably reported")) {
             return 83;
         }
     }
-    if (!require(!fs::exists(private_directory_stage),
-                 "directory record failure retained its staging container")) {
+    if (!require(fs::is_directory(private_directory_stage / "payload"),
+                 "reported private directory residue did not survive descriptor close")) {
         return 84;
     }
+    fs::remove_all(private_directory_stage, error);
 
     const auto private_symlink_public = root / "private-symlink-public";
     fs::path private_symlink_stage;
@@ -519,16 +553,20 @@ int main()
         const bool cleaned = ownership::cleanup_unpublished(
             staging, private_symlink_public, outputs, cleanup_error, &retained);
         if (!require(private_path.empty() && record_error == std::errc::io_error &&
-                         outputs.empty() && cleaned && retained.empty() &&
+                         outputs.empty() && !cleaned &&
+                         retained == std::vector<fs::path>{private_symlink_stage /
+                                                           "payload"} &&
+                         fs::is_symlink(retained.front()) &&
                          !fs::exists(private_symlink_public),
-                     "symlink record failure left unreported staging residue")) {
+                     "symlink record failure was not durably reported")) {
             return 85;
         }
     }
-    if (!require(!fs::exists(private_symlink_stage),
-                 "symlink record failure retained its staging container")) {
+    if (!require(fs::is_symlink(private_symlink_stage / "payload"),
+                 "reported private symlink residue did not survive descriptor close")) {
         return 86;
     }
+    fs::remove_all(private_symlink_stage, error);
 
     const auto durable_public = root / "durable-unpublished";
     ownership::ProtectedStaging durable_staging;
@@ -808,3 +846,4 @@ int main()
     fs::remove_all(root, error);
     return require(!error, "could not remove test root") ? 0 : 59;
 }
+
