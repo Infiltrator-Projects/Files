@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "recovery_operation_engine.hpp"
+#include "destination_ownership.hpp"
 
 #include <gio/gio.h>
 
@@ -49,8 +50,10 @@ OperationStatus status_for_gerror(const GError *error) noexcept
     if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_EXISTS)) {
         return OperationStatus::DestinationConflict;
     }
-    if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED) ||
-        g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED)) {
+    if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED)) {
+        return OperationStatus::UnsupportedCapability;
+    }
+    if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED)) {
         return OperationStatus::PermissionFailure;
     }
     if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_READ_ONLY)) {
@@ -87,39 +90,58 @@ std::filesystem::path backup_path_for(const std::filesystem::path &destination,
     return {};
 }
 
-bool rollback_destination(const std::filesystem::path &destination,
-                          const std::filesystem::path &backup,
-                          std::string &detail)
+bool stage_destination(const std::filesystem::path &destination,
+                       const std::filesystem::path &backup,
+                       destination_ownership::OwnedOutput &staged,
+                       std::error_code &error,
+                       std::filesystem::path *retained_quarantine = nullptr)
 {
-    std::error_code remove_error;
-    (void)std::filesystem::remove_all(destination, remove_error);
-    if (remove_error) {
-        detail = "The partial replacement could not be removed: " + remove_error.message();
+    const destination_ownership::Identity identity =
+        destination_ownership::identity_for(destination, error);
+    if (error) {
         return false;
     }
+    return destination_ownership::move_owned_no_replace(
+        destination_ownership::OwnedOutput{destination, identity},
+        backup,
+        staged,
+        error,
+        retained_quarantine);
+}
 
+bool rollback_destination(const std::filesystem::path &destination,
+                          const destination_ownership::OwnedOutput &staged,
+                          std::string &detail)
+{
     std::error_code restore_error;
-    std::filesystem::rename(backup, destination, restore_error);
-    if (restore_error) {
-        detail = "The previous destination could not be restored: " + restore_error.message();
+    std::filesystem::path retained_quarantine;
+    if (!destination_ownership::restore_owned(
+            staged, destination, restore_error, &retained_quarantine)) {
+        const std::filesystem::path retained =
+            retained_quarantine.empty() ? staged.path : retained_quarantine;
+        detail = "The previous destination could not be restored safely from “" +
+                 retained.string() + "”: " + restore_error.message();
         return false;
     }
     return true;
 }
 
 OperationResult cleanup_replaced_destination(const std::filesystem::path &destination,
-                                             const std::filesystem::path &backup,
+                                             const destination_ownership::OwnedOutput &staged,
                                              std::string success_message)
 {
     std::error_code cleanup_error;
-    (void)std::filesystem::remove_all(backup, cleanup_error);
-    if (cleanup_error) {
+    std::filesystem::path retained_quarantine;
+    if (!destination_ownership::remove_owned_tree(
+            staged, cleanup_error, &retained_quarantine)) {
+        const std::filesystem::path retained =
+            retained_quarantine.empty() ? staged.path : retained_quarantine;
         return result(OperationStatus::VerificationFailure,
                       OperationPhase::Verify,
                       destination,
                       std::move(success_message) +
-                          " The previous destination was retained at “" + backup.string() +
-                          "” because cleanup failed: " + cleanup_error.message(),
+                          " The previous destination was retained at “" + retained.string() +
+                          "” because ownership-safe cleanup failed: " + cleanup_error.message(),
                       true);
     }
     return result(OperationStatus::Success,
@@ -135,6 +157,19 @@ bool same_existing_object(const std::filesystem::path &left,
     std::error_code error;
     const bool same = std::filesystem::equivalent(left, right, error);
     return !error && same;
+}
+
+std::string staging_failure_message(const std::error_code &error,
+                                    const std::filesystem::path &retained)
+{
+    if (OperationEngine::status_for_error(error) ==
+        OperationStatus::UnsupportedCapability) {
+        return "This location does not provide the atomic no-replace operation required for safe replacement. The source and destination were left unchanged.";
+    }
+    return "The existing destination could not be staged safely: " + error.message() +
+           (retained.empty() ? std::string{}
+                             : " The original destination was retained at “" +
+                                   retained.string() + "”.");
 }
 
 } // namespace
@@ -166,22 +201,24 @@ OperationResult RecoveryOperationEngine::replace_copy(
                       "A safe replacement staging path could not be reserved.");
     }
 
-    std::filesystem::rename(destination, backup, error);
-    if (error) {
+    destination_ownership::OwnedOutput staged;
+    std::filesystem::path staging_quarantine;
+    if (!stage_destination(destination, backup, staged, error, &staging_quarantine)) {
         return result(OperationEngine::status_for_error(error),
                       OperationPhase::Execute,
                       destination,
-                      "The existing destination could not be staged safely: " + error.message());
+                      staging_failure_message(error, staging_quarantine),
+                      !staging_quarantine.empty());
     }
 
     OperationResult replacement = ordinary.copy_item(source, destination_parent);
     if (replacement.ok()) {
         return cleanup_replaced_destination(
-            destination, backup, "Replaced " + quoted_name(destination) + ".");
+            destination, staged, "Replaced " + quoted_name(destination) + ".");
     }
 
     std::string rollback_detail;
-    if (!rollback_destination(destination, backup, rollback_detail)) {
+    if (!rollback_destination(destination, staged, rollback_detail)) {
         return result(OperationStatus::VerificationFailure,
                       OperationPhase::Verify,
                       destination,
@@ -227,25 +264,27 @@ OperationResult RecoveryOperationEngine::replace_move(
                       "A safe replacement staging path could not be reserved.");
     }
 
-    std::filesystem::rename(destination, backup, error);
-    if (error) {
+    destination_ownership::OwnedOutput staged;
+    std::filesystem::path staging_quarantine;
+    if (!stage_destination(destination, backup, staged, error, &staging_quarantine)) {
         return result(OperationEngine::status_for_error(error),
                       OperationPhase::Execute,
                       destination,
-                      "The existing destination could not be staged safely: " + error.message());
+                      staging_failure_message(error, staging_quarantine),
+                      !staging_quarantine.empty());
     }
 
     OperationResult replacement = ordinary.move_item(source, destination_parent);
     if (replacement.ok()) {
         return cleanup_replaced_destination(
-            destination, backup, "Replaced " + quoted_name(destination) + " by moving the selected item.");
+            destination, staged, "Replaced " + quoted_name(destination) + " by moving the selected item.");
     }
 
     std::error_code source_error;
     const bool source_still_exists = path_present(source, source_error);
     if (!source_error && source_still_exists) {
         std::string rollback_detail;
-        if (rollback_destination(destination, backup, rollback_detail)) {
+        if (rollback_destination(destination, staged, rollback_detail)) {
             replacement.destination = destination;
             replacement.changed = false;
             if (!replacement.message.empty()) {
@@ -385,6 +424,7 @@ OperationResult RecoveryOperationEngine::restore_item(
     }
 
     std::filesystem::path backup;
+    destination_ownership::OwnedOutput staged;
     if (destination_exists) {
         backup = backup_path_for(original_path, error);
         if (error || backup.empty()) {
@@ -394,14 +434,15 @@ OperationResult RecoveryOperationEngine::restore_item(
                           original_path,
                           "A safe restore replacement staging path could not be reserved.");
         }
-        std::filesystem::rename(original_path, backup, error);
-        if (error) {
+        std::filesystem::path staging_quarantine;
+        if (!stage_destination(
+                original_path, backup, staged, error, &staging_quarantine)) {
             g_object_unref(trash_file);
             return result(OperationEngine::status_for_error(error),
                           OperationPhase::Execute,
                           original_path,
-                          "The existing item could not be staged safely before restore: " +
-                              error.message());
+                          staging_failure_message(error, staging_quarantine),
+                          !staging_quarantine.empty());
         }
     }
 
@@ -428,7 +469,7 @@ OperationResult RecoveryOperationEngine::restore_item(
             const bool trash_still_exists = g_file_query_exists(trash_file, nullptr) != FALSE;
             if (!error && !destination_now_exists && trash_still_exists) {
                 std::string rollback_detail;
-                if (!rollback_destination(original_path, backup, rollback_detail)) {
+                if (!rollback_destination(original_path, staged, rollback_detail)) {
                     g_object_unref(trash_file);
                     return result(OperationStatus::VerificationFailure,
                                   OperationPhase::Verify,
@@ -468,7 +509,7 @@ OperationResult RecoveryOperationEngine::restore_item(
 
     if (!backup.empty()) {
         return cleanup_replaced_destination(
-            original_path, backup, "Restored and replaced " + quoted_name(original_path) + ".");
+            original_path, staged, "Restored and replaced " + quoted_name(original_path) + ".");
     }
 
     return result(OperationStatus::Success,

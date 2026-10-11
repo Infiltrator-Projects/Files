@@ -449,6 +449,8 @@ void BatchItemOperationController::on_operation_finished(GObject *source_object,
     if (!operation->ok() && operation->status != OperationStatus::Cancelled) {
         self->show_alert(operation->status == OperationStatus::VerificationFailure
                              ? "Batch completed with a verification problem"
+                             : operation->status == OperationStatus::UnsupportedCapability
+                                   ? "Batch operation not supported safely"
                              : "Batch file operation failed",
                          operation->message);
     }

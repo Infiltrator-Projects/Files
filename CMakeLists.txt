@@ -136,6 +136,10 @@ if(BUILD_TESTING)
     target_link_libraries(operation-engine-test PRIVATE infiltrator-files-core)
     add_test(NAME operation-engine COMMAND operation-engine-test)
 
+    add_executable(destination-ownership-test tests/destination_ownership_test.cpp)
+    target_link_libraries(destination-ownership-test PRIVATE infiltrator-files-core)
+    add_test(NAME destination-ownership COMMAND destination-ownership-test)
+
     add_executable(recovery-operation-engine-test tests/recovery_operation_engine_test.cpp)
     target_link_libraries(recovery-operation-engine-test PRIVATE infiltrator-files-core)
     add_test(NAME recovery-operation-engine COMMAND recovery-operation-engine-test)

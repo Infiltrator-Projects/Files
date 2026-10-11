@@ -161,15 +161,34 @@ int main()
         return 15;
     }
 
+    const fs::path link_source = root / "report-link";
+    const fs::path link_destination_parent = root / "link-destination";
+    fs::create_directories(link_destination_parent);
+    fs::create_symlink("report.txt", link_source, metadata_error);
+    if (metadata_error) {
+        fs::remove_all(root, cleanup_error);
+        return 16;
+    }
+    const auto link_copy = engine.copy_item(link_source,
+                                            link_destination_parent,
+                                            ConflictPolicy::Fail);
+    const fs::path copied_link = link_destination_parent / link_source.filename();
+    metadata_error.clear();
+    const fs::path copied_target = fs::read_symlink(copied_link, metadata_error);
+    if (!link_copy.ok() || metadata_error || copied_target != "report.txt") {
+        fs::remove_all(root, cleanup_error);
+        return 17;
+    }
+
     const fs::path movable = root / "movable.txt";
     if (!write_text(movable, "move payload\n")) {
         fs::remove_all(root, cleanup_error);
-        return 16;
+        return 18;
     }
     fs::create_directories(root / "move-destination");
     if (!write_text(root / "move-destination" / "movable.txt", "occupied\n")) {
         fs::remove_all(root, cleanup_error);
-        return 17;
+        return 19;
     }
     const auto moved = engine.move_item(movable,
                                         root / "move-destination",
@@ -178,7 +197,7 @@ int main()
         moved.destination.filename() != "movable (copy).txt" ||
         !fs::exists(moved.destination)) {
         fs::remove_all(root, cleanup_error);
-        return 18;
+        return 20;
     }
 
     fs::remove_all(root, cleanup_error);

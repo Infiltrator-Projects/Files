@@ -354,6 +354,8 @@ void CreateFolderController::on_create_folder_finished(GObject *source_object,
     if (!operation->ok()) {
         self->show_alert(operation->status == OperationStatus::VerificationFailure
                              ? "Folder created with a verification problem"
+                             : operation->status == OperationStatus::UnsupportedCapability
+                                   ? "Folder operation not supported safely"
                              : "Could not create folder",
                          operation->message);
     }

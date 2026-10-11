@@ -35,6 +35,8 @@ std::string status_name(const OperationStatus status)
         return "permission-failure";
     case OperationStatus::ReadOnlyLocation:
         return "read-only-location";
+    case OperationStatus::UnsupportedCapability:
+        return "unsupported-capability";
     case OperationStatus::Cancelled:
         return "cancelled";
     case OperationStatus::ExecutionFailure:

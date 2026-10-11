@@ -5,6 +5,7 @@
 #include <fstream>
 #include <string>
 #include <system_error>
+#include <sys/stat.h>
 #include <unistd.h>
 
 using infiltrator::files::OperationEngine;
@@ -68,6 +69,13 @@ int main()
         return 5;
     }
 
+    if (OperationEngine::status_for_error(
+            std::make_error_code(std::errc::operation_not_supported)) !=
+        OperationStatus::UnsupportedCapability) {
+        fs::remove_all(root, cleanup_error);
+        return 91;
+    }
+
     const fs::path original = root / "original.txt";
     if (!write_text(original, "rename-copy-move\n")) {
         fs::remove_all(root, cleanup_error);
@@ -91,6 +99,27 @@ int main()
         rename_conflict.changed || !fs::exists(renamed)) {
         fs::remove_all(root, cleanup_error);
         return 9;
+    }
+
+    const fs::path previous_directory = fs::current_path(cleanup_error);
+    if (cleanup_error) {
+        fs::remove_all(root, cleanup_error);
+        return 90;
+    }
+    fs::current_path(root, cleanup_error);
+    if (cleanup_error || !write_text("relative-source.txt", "relative rename\n")) {
+        fs::current_path(previous_directory, cleanup_error);
+        fs::remove_all(root, cleanup_error);
+        return 91;
+    }
+    const auto relative_rename = engine.rename_item("relative-source.txt", "relative-destination.txt");
+    const bool relative_rename_ok =
+        relative_rename.ok() && relative_rename.changed &&
+        !fs::exists("relative-source.txt") && fs::is_regular_file("relative-destination.txt");
+    fs::current_path(previous_directory, cleanup_error);
+    if (cleanup_error || !relative_rename_ok) {
+        fs::remove_all(root, cleanup_error);
+        return 92;
     }
 
     const fs::path copy_destination = root / "copy-destination";
@@ -149,6 +178,39 @@ int main()
         fs::remove_all(root, cleanup_error);
         return 16;
     }
+
+    const fs::path cross_volume_parent = fs::path{"/dev/shm"} /
+                                         ("infiltrator-files-cross-volume-" +
+                                          std::to_string(::getpid()));
+    fs::create_directories(cross_volume_parent, cleanup_error);
+    const bool cross_volume_available = !cleanup_error;
+    const fs::path cross_volume_source = root / "cross-volume.txt";
+    if (cross_volume_available &&
+        !write_text(cross_volume_source, "cross-volume payload\n")) {
+        fs::remove_all(cross_volume_parent, cleanup_error);
+        fs::remove_all(root, cleanup_error);
+        return 18;
+    }
+    struct stat source_stat {};
+    struct stat destination_stat {};
+    if (cross_volume_available &&
+        (::stat(root.c_str(), &source_stat) != 0 ||
+        ::stat(cross_volume_parent.c_str(), &destination_stat) != 0 ||
+        source_stat.st_dev == destination_stat.st_dev)) {
+        // A real second writable filesystem is an environmental qualification,
+        // not a correctness failure of the local Release suite.
+    } else if (cross_volume_available) {
+        const auto cross_volume_move = engine.move_item(cross_volume_source, cross_volume_parent);
+        const fs::path cross_volume_destination =
+            cross_volume_parent / cross_volume_source.filename();
+        if (!cross_volume_move.ok() || !cross_volume_move.changed ||
+            fs::exists(cross_volume_source) || !fs::is_regular_file(cross_volume_destination)) {
+            fs::remove_all(cross_volume_parent, cleanup_error);
+            fs::remove_all(root, cleanup_error);
+            return 20;
+        }
+    }
+    fs::remove_all(cross_volume_parent, cleanup_error);
 
     fs::remove_all(root, cleanup_error);
     return 0;
