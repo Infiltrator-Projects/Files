@@ -1076,13 +1076,18 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
 
     if (!destination_ownership::verify_all(copied_outputs, error)) {
         std::error_code restore_error;
+        bool source_absent = false;
         const bool restored = destination_ownership::restore_quarantine(
-            source_staging, source, restore_error, &retained_source_quarantine);
+            source_staging,
+            source,
+            restore_error,
+            &retained_source_quarantine,
+            &source_absent);
         std::error_code cleanup_error;
         std::vector<std::filesystem::path> retained_paths;
         const bool cleaned = destination_ownership::cleanup_owned(
             copied_outputs, cleanup_error, &retained_paths);
-        if (!restored) {
+        if (!restored && !source_absent) {
             retained_paths.push_back(retained_source_quarantine.empty()
                                          ? source_quarantine
                                          : retained_source_quarantine);
@@ -1103,13 +1108,18 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
 
     if (!equivalent_copy_shape(source_quarantine, decision.destination, error)) {
         std::error_code restore_error;
+        bool source_absent = false;
         const bool restored = destination_ownership::restore_quarantine(
-            source_staging, source, restore_error, &retained_source_quarantine);
+            source_staging,
+            source,
+            restore_error,
+            &retained_source_quarantine,
+            &source_absent);
         std::error_code cleanup_error;
         std::vector<std::filesystem::path> retained_paths;
         const bool cleaned = destination_ownership::cleanup_owned(
             copied_outputs, cleanup_error, &retained_paths);
-        if (!restored) {
+        if (!restored && !source_absent) {
             retained_paths.push_back(retained_source_quarantine.empty()
                                          ? source_quarantine
                                          : retained_source_quarantine);
@@ -1150,15 +1160,17 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
                     retained_source_quarantine,
                     retain_error)) {
                 retained_paths.push_back(retained_source_quarantine);
-            } else if (retained_source_quarantine.empty() &&
-                       retain_error != std::errc::no_such_file_or_directory) {
-                std::filesystem::path retained_container;
-                std::error_code locator_error;
-                if (destination_ownership::durable_staging_container(
-                        source_staging, retained_container, locator_error)) {
-                    destination_ownership::preserve_staging_container(
-                        source_staging);
-                    retained_paths.push_back(retained_container);
+            } else if (retained_source_quarantine.empty()) {
+                bool source_absent = false;
+                std::error_code publication_error;
+                if (destination_ownership::publish_staged_payload_evidence(
+                        source_staging,
+                        source,
+                        retained_source_quarantine,
+                        source_absent,
+                        publication_error) &&
+                    !source_absent) {
+                    retained_paths.push_back(retained_source_quarantine);
                 }
             }
         }
