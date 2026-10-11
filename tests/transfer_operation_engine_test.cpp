@@ -61,6 +61,39 @@ bool force_unsupported_quarantine(
     return false;
 }
 
+std::filesystem::path verification_failure_destination;
+
+bool quarantine_then_remove_source_payload(
+    const infiltrator::files::destination_ownership::OwnedOutput &output,
+    infiltrator::files::destination_ownership::ProtectedStaging &staging,
+    std::filesystem::path &quarantine,
+    std::error_code &error,
+    std::filesystem::path *retained) noexcept
+{
+    if (!infiltrator::files::destination_ownership::quarantine_owned(
+            output, staging, quarantine, error, retained)) {
+        return false;
+    }
+    (void)::unlinkat(staging.descriptor, "payload", 0);
+    return true;
+}
+
+bool quarantine_then_remove_source_and_destination(
+    const infiltrator::files::destination_ownership::OwnedOutput &output,
+    infiltrator::files::destination_ownership::ProtectedStaging &staging,
+    std::filesystem::path &quarantine,
+    std::error_code &error,
+    std::filesystem::path *retained) noexcept
+{
+    if (!quarantine_then_remove_source_payload(
+            output, staging, quarantine, error, retained)) {
+        return false;
+    }
+    std::error_code ignored;
+    std::filesystem::remove(verification_failure_destination, ignored);
+    return true;
+}
+
 void force_quarantine_remove_failure(
     const std::filesystem::path &path, std::error_code &error) noexcept
 {
@@ -343,6 +376,63 @@ int main()
         return 22;
     }
 
+    // If descriptor-relative inspection proves that the quarantined source is
+    // gone, neither verification-failure branch may report the expired
+    // /proc/self/fd access path as recovery evidence.
+    const fs::path absent_verify_source = root / "absent-verify-source.txt";
+    const fs::path absent_verify_parent = root / "absent-verify-destination";
+    fs::create_directories(absent_verify_parent);
+    if (!write_text(absent_verify_source, "absent verify payload\n")) {
+        fs::remove_all(root, cleanup_error);
+        return 31;
+    }
+    verification_failure_destination =
+        absent_verify_parent / absent_verify_source.filename();
+    TransferOperationHooks absent_verify_hooks;
+    absent_verify_hooks.move_owned = force_cross_device;
+    absent_verify_hooks.quarantine_owned =
+        quarantine_then_remove_source_and_destination;
+    TransferOperationEngine absent_verify_engine{absent_verify_hooks};
+    const auto absent_verify_move = absent_verify_engine.move_item(
+        absent_verify_source, absent_verify_parent, ConflictPolicy::Fail);
+    if (absent_verify_move.status != OperationStatus::VerificationFailure ||
+        !absent_verify_move.changed || !absent_verify_move.retained_paths.empty() ||
+        fs::exists(absent_verify_source) ||
+        fs::exists(verification_failure_destination) ||
+        absent_verify_move.message.find("/proc/self/fd/") != std::string::npos ||
+        absent_verify_move.message.find("Remaining data is available at") !=
+            std::string::npos ||
+        has_internal_residue(root)) {
+        fs::remove_all(root, cleanup_error);
+        return 32;
+    }
+
+    const fs::path absent_shape_source = root / "absent-shape-source.txt";
+    const fs::path absent_shape_parent = root / "absent-shape-destination";
+    fs::create_directories(absent_shape_parent);
+    if (!write_text(absent_shape_source, "absent shape payload\n")) {
+        fs::remove_all(root, cleanup_error);
+        return 33;
+    }
+    const fs::path absent_shape_destination =
+        absent_shape_parent / absent_shape_source.filename();
+    TransferOperationHooks absent_shape_hooks;
+    absent_shape_hooks.move_owned = force_cross_device;
+    absent_shape_hooks.quarantine_owned = quarantine_then_remove_source_payload;
+    TransferOperationEngine absent_shape_engine{absent_shape_hooks};
+    const auto absent_shape_move = absent_shape_engine.move_item(
+        absent_shape_source, absent_shape_parent, ConflictPolicy::Fail);
+    if (absent_shape_move.status != OperationStatus::VerificationFailure ||
+        !absent_shape_move.changed || !absent_shape_move.retained_paths.empty() ||
+        fs::exists(absent_shape_source) || fs::exists(absent_shape_destination) ||
+        absent_shape_move.message.find("/proc/self/fd/") != std::string::npos ||
+        absent_shape_move.message.find("Remaining data is available at") !=
+            std::string::npos ||
+        has_internal_residue(root)) {
+        fs::remove_all(root, cleanup_error);
+        return 34;
+    }
+
     const fs::path durable_source = root / "durable-source.txt";
     const fs::path durable_destination_parent = root / "durable-destination";
     fs::create_directories(durable_destination_parent);
@@ -388,19 +478,22 @@ int main()
         uncertain_source, uncertain_destination_parent, ConflictPolicy::Fail);
     if (uncertain_move.status != OperationStatus::ExecutionFailure ||
         !uncertain_move.changed || uncertain_move.retained_paths.size() != 1U ||
-        uncertain_move.retained_paths.front() != failed_retention_container ||
-        !fs::is_directory(uncertain_move.retained_paths.front()) ||
-        read_text(uncertain_move.retained_paths.front() / "payload") !=
+        uncertain_move.retained_paths.front() ==
+            failed_retention_container / "payload" ||
+        !fs::is_regular_file(uncertain_move.retained_paths.front()) ||
+        read_text(uncertain_move.retained_paths.front()) !=
             "uncertain source payload\n" ||
+        fs::exists(failed_retention_container) ||
         fs::exists(uncertain_source) ||
         read_text(uncertain_destination_parent / uncertain_source.filename()) !=
             "uncertain source payload\n" ||
-        uncertain_move.message.find(failed_retention_container.string()) ==
+        uncertain_move.message.find(
+            uncertain_move.retained_paths.front().string()) ==
             std::string::npos) {
         fs::remove_all(root, cleanup_error);
         return 30;
     }
-    fs::remove_all(uncertain_move.retained_paths.front(), cleanup_error);
+    fs::remove(uncertain_move.retained_paths.front(), cleanup_error);
 
     const fs::path cancelled_tree = root / "cancelled-tree";
     fs::create_directories(cancelled_tree / "nested");
@@ -430,7 +523,11 @@ int main()
         fs::remove_all(root, cleanup_error);
         return 24;
     }
-    fs::remove_all(cancelled_traversal.retained_paths.front().parent_path(), cleanup_error);
+    fs::remove_all(cancelled_traversal.retained_paths.front(), cleanup_error);
+    if (cleanup_error || has_internal_residue(root)) {
+        fs::remove_all(root, cleanup_error);
+        return 35;
+    }
 
     const fs::path denied_source = root / "permission-publication.txt";
     const fs::path denied_parent = root / "permission-publication-destination";
@@ -455,7 +552,11 @@ int main()
         fs::remove_all(root, cleanup_error);
         return 26;
     }
-    fs::remove_all(denied.retained_paths.front().parent_path(), cleanup_error);
+    fs::remove(denied.retained_paths.front(), cleanup_error);
+    if (cleanup_error || has_internal_residue(root)) {
+        fs::remove_all(root, cleanup_error);
+        return 36;
+    }
 
     fs::remove_all(root, cleanup_error);
     return 0;
