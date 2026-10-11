@@ -224,6 +224,72 @@ int main()
         return 12;
     }
 
+    const fs::path restored_copy_source_dir = root / "restored-copy-source";
+    const fs::path restored_copy_destination_dir = root / "restored-copy-destination";
+    fs::create_directories(restored_copy_source_dir);
+    fs::create_directories(restored_copy_destination_dir);
+    const fs::path restored_copy_source = restored_copy_source_dir / "restored.txt";
+    const fs::path restored_copy_destination =
+        restored_copy_destination_dir / restored_copy_source.filename();
+    if (!write_text(restored_copy_source, "restored copy new\n") ||
+        !write_text(restored_copy_destination, "restored copy previous\n")) {
+        fs::remove_all(root, cleanup_error);
+        return 15;
+    }
+    RecoveryOperationHooks restored_copy_hooks;
+    restored_copy_hooks.copy_item = conflict_then_failure;
+    RecoveryOperationEngine restored_copy_engine{restored_copy_hooks};
+    injected_operation_calls = 0U;
+    remove_source_on_replacement = false;
+    retain_replacement_on_failure = true;
+    replacement_retained_path = root / "restored-copy-residue";
+    const auto restored_copy = restored_copy_engine.replace_copy(
+        restored_copy_source, restored_copy_destination_dir);
+    if (restored_copy.status != OperationStatus::ExecutionFailure ||
+        !restored_copy.changed ||
+        restored_copy.retained_paths !=
+            std::vector<fs::path>{replacement_retained_path} ||
+        read_text(restored_copy_destination) != "restored copy previous\n" ||
+        read_text(replacement_retained_path) != "replacement residue\n" ||
+        restored_copy.message.find(replacement_retained_path.string()) ==
+            std::string::npos) {
+        fs::remove_all(root, cleanup_error);
+        return 16;
+    }
+
+    const fs::path restored_move_source_dir = root / "restored-move-source";
+    const fs::path restored_move_destination_dir = root / "restored-move-destination";
+    fs::create_directories(restored_move_source_dir);
+    fs::create_directories(restored_move_destination_dir);
+    const fs::path restored_move_source = restored_move_source_dir / "restored.txt";
+    const fs::path restored_move_destination =
+        restored_move_destination_dir / restored_move_source.filename();
+    if (!write_text(restored_move_source, "restored move new\n") ||
+        !write_text(restored_move_destination, "restored move previous\n")) {
+        fs::remove_all(root, cleanup_error);
+        return 17;
+    }
+    RecoveryOperationHooks restored_move_hooks;
+    restored_move_hooks.move_item = conflict_then_failure;
+    RecoveryOperationEngine restored_move_engine{restored_move_hooks};
+    injected_operation_calls = 0U;
+    remove_source_on_replacement = false;
+    retain_replacement_on_failure = true;
+    replacement_retained_path = root / "restored-move-residue";
+    const auto restored_move = restored_move_engine.replace_move(
+        restored_move_source, restored_move_destination_dir);
+    if (restored_move.status != OperationStatus::ExecutionFailure ||
+        !restored_move.changed ||
+        restored_move.retained_paths !=
+            std::vector<fs::path>{replacement_retained_path} ||
+        read_text(restored_move_destination) != "restored move previous\n" ||
+        read_text(replacement_retained_path) != "replacement residue\n" ||
+        restored_move.message.find(replacement_retained_path.string()) ==
+            std::string::npos) {
+        fs::remove_all(root, cleanup_error);
+        return 18;
+    }
+
     const fs::path uncertain_source_dir = root / "uncertain-move-source";
     const fs::path uncertain_destination_dir = root / "uncertain-move-destination";
     fs::create_directories(uncertain_source_dir);
@@ -241,15 +307,19 @@ int main()
     RecoveryOperationEngine uncertain_engine{uncertain_hooks};
     injected_operation_calls = 0U;
     remove_source_on_replacement = true;
-    retain_replacement_on_failure = false;
+    retain_replacement_on_failure = true;
+    replacement_retained_path = root / "uncertain-replacement-residue";
     const auto uncertain = uncertain_engine.replace_move(
         uncertain_source, uncertain_destination_dir);
     remove_source_on_replacement = false;
     if (uncertain.status != OperationStatus::VerificationFailure ||
-        !uncertain.changed || uncertain.retained_paths.size() != 1U ||
-        !fs::exists(uncertain.retained_paths.front()) ||
-        read_text(uncertain.retained_paths.front()) != "uncertain previous\n" ||
-        uncertain.message.find(uncertain.retained_paths.front().string()) ==
+        !uncertain.changed || uncertain.retained_paths.size() != 2U ||
+        uncertain.retained_paths[0] != replacement_retained_path ||
+        read_text(uncertain.retained_paths[0]) != "replacement residue\n" ||
+        read_text(uncertain.retained_paths[1]) != "uncertain previous\n" ||
+        uncertain.message.find(uncertain.retained_paths[0].string()) ==
+            std::string::npos ||
+        uncertain.message.find(uncertain.retained_paths[1].string()) ==
             std::string::npos) {
         fs::remove_all(root, cleanup_error);
         return 14;

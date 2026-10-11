@@ -62,8 +62,10 @@ bool force_unsupported_quarantine(
 }
 
 void force_quarantine_remove_failure(
-    const std::filesystem::path &, std::error_code &error) noexcept
+    const std::filesystem::path &path, std::error_code &error) noexcept
 {
+    std::error_code ignored;
+    std::filesystem::remove_all(path, ignored);
     error = std::make_error_code(std::errc::io_error);
 }
 
@@ -336,17 +338,13 @@ int main()
     const auto durable_move = durable_engine.move_item(
         durable_source, durable_destination_parent, ConflictPolicy::Fail);
     if (durable_move.status != OperationStatus::ExecutionFailure ||
-        !durable_move.changed || durable_move.retained_paths.size() != 1U ||
-        durable_move.retained_paths.front().string().find("/proc/self/fd/") !=
-            std::string::npos ||
-        !fs::exists(durable_move.retained_paths.front()) ||
-        read_text(durable_move.retained_paths.front()) !=
-            "durable source payload\n" ||
+        !durable_move.changed || !durable_move.retained_paths.empty() ||
         fs::exists(durable_source) ||
         read_text(durable_destination_parent / durable_source.filename()) !=
             "durable source payload\n" ||
-        durable_move.message.find(durable_move.retained_paths.front().string()) ==
-            std::string::npos) {
+        durable_move.message.find("Remaining data is available at") !=
+            std::string::npos ||
+        has_internal_residue(root)) {
         fs::remove_all(root, cleanup_error);
         return 28;
     }
@@ -369,13 +367,17 @@ int main()
         ConflictPolicy::Fail,
         &traversal_cancel);
     if (cancelled_traversal.status != OperationStatus::Cancelled ||
-        cancelled_traversal.changed || !cancelled_traversal.retained_paths.empty() ||
+        !cancelled_traversal.changed ||
+        cancelled_traversal.retained_paths.size() != 1U ||
+        !fs::is_directory(cancelled_traversal.retained_paths.front()) ||
+        cancelled_traversal.message.find(
+            cancelled_traversal.retained_paths.front().string()) == std::string::npos ||
         unsupported_publication_calls != 0U ||
-        fs::exists(unsupported_private_parent / cancelled_tree.filename()) ||
-        has_internal_residue(unsupported_private_parent)) {
+        fs::exists(unsupported_private_parent / cancelled_tree.filename())) {
         fs::remove_all(root, cleanup_error);
         return 24;
     }
+    fs::remove_all(cancelled_traversal.retained_paths.front().parent_path(), cleanup_error);
 
     const fs::path denied_source = root / "permission-publication.txt";
     const fs::path denied_parent = root / "permission-publication-destination";
@@ -389,15 +391,18 @@ int main()
     TransferOperationEngine denied_engine{denied_hooks};
     const auto denied = denied_engine.copy_item(
         denied_source, denied_parent, ConflictPolicy::Fail);
-    if (denied.status != OperationStatus::PermissionFailure || denied.changed ||
-        !denied.retained_paths.empty() ||
+    if (denied.status != OperationStatus::PermissionFailure || !denied.changed ||
+        denied.retained_paths.size() != 1U ||
+        read_text(denied.retained_paths.front()) != "publication error payload\n" ||
+        denied.message.find(denied.retained_paths.front().string()) ==
+            std::string::npos ||
         denied.message.find("Permission denied") == std::string::npos ||
         denied.message.find("another writer") != std::string::npos ||
-        fs::exists(denied_parent / denied_source.filename()) ||
-        has_internal_residue(denied_parent)) {
+        fs::exists(denied_parent / denied_source.filename())) {
         fs::remove_all(root, cleanup_error);
         return 26;
     }
+    fs::remove_all(denied.retained_paths.front().parent_path(), cleanup_error);
 
     fs::remove_all(root, cleanup_error);
     return 0;

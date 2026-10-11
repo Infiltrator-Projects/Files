@@ -40,6 +40,7 @@ using IdentityForFdOperation = Identity (*)(int, std::error_code &) noexcept;
 using IdentityForAtOperation = Identity (*)(int, const char *, std::error_code &) noexcept;
 using RemoveAllOperation = std::uintmax_t (*)(const std::filesystem::path &,
                                                std::error_code &);
+using AfterUnpublishedIdentityObservation = void (*)(int) noexcept;
 
 struct ProtectedStaging;
 inline void release_staging(ProtectedStaging &staging) noexcept;
@@ -834,110 +835,56 @@ inline bool cleanup_unpublished(
     const std::filesystem::path &near_path,
     OwnedOutputs &outputs,
     std::error_code &first_error,
-    std::vector<std::filesystem::path> *retained_paths = nullptr) noexcept
+    std::vector<std::filesystem::path> *retained_paths = nullptr,
+    AfterUnpublishedIdentityObservation after_identity_observation = nullptr) noexcept
 {
-    bool complete = true;
+    (void)near_path;
     first_error.clear();
     if (retained_paths != nullptr) {
         retained_paths->clear();
     }
-    const std::filesystem::path access_root = staging.access_root();
-    bool payload_identity_verified = false;
-    for (auto iterator = outputs.rbegin(); iterator != outputs.rend(); ++iterator) {
-        const std::filesystem::path relative = iterator->path.lexically_relative(access_root);
-        if (relative.empty() || relative == "." || staging.descriptor < 0) {
-            complete = false;
-            continue;
-        }
-        std::error_code inspect_error;
-        const Identity current = identity_for_at(
-            staging.descriptor, relative.c_str(), inspect_error);
-        if (inspect_error || !current.valid || !iterator->identity.valid ||
-            current.device != iterator->identity.device ||
-            current.inode != iterator->identity.inode) {
-            if (inspect_error == std::errc::no_such_file_or_directory) {
-                continue;
-            }
-            if (inspect_error && !first_error) {
-                first_error = inspect_error;
-            }
-            complete = false;
-            continue;
-        }
-        if (relative == "payload") {
-            payload_identity_verified = true;
-        }
-
-        struct stat status {};
-        if (::fstatat(staging.descriptor,
-                      relative.c_str(),
-                      &status,
-                      AT_SYMLINK_NOFOLLOW) != 0 ||
-            ::unlinkat(staging.descriptor,
-                       relative.c_str(),
-                       S_ISDIR(status.st_mode) ? AT_REMOVEDIR : 0) != 0) {
-            const std::error_code remove_error(errno, std::generic_category());
-            if (!first_error) {
-                first_error = remove_error;
-            }
-            complete = false;
-        }
-    }
-
-    struct stat payload_status {};
     if (staging.descriptor < 0) {
-        if (!first_error) {
-            first_error = std::make_error_code(std::errc::bad_file_descriptor);
-        }
-        complete = false;
-    } else if (::fstatat(staging.descriptor,
-                         "payload",
-                         &payload_status,
-                         AT_SYMLINK_NOFOLLOW) != 0) {
-        if (errno == ENOENT) {
-            release_staging(staging);
-            return complete;
-        }
-        if (!first_error) {
-            first_error = std::error_code(errno, std::generic_category());
-        }
-        complete = false;
-    } else if (!payload_identity_verified) {
-        // Identity recording may fail after the provider has created the private
-        // payload.  Without a recorded identity, even a descriptor-relative
-        // unlink or rename could act on a same-UID replacement.  Keep the
-        // staging container open and report its stable filesystem path.
-        if (!first_error) {
-            first_error = std::make_error_code(std::errc::state_not_recoverable);
-        }
-        if (retained_paths != nullptr) {
-            retained_paths->push_back(staging.container_path / "payload");
-        }
+        first_error = std::make_error_code(std::errc::bad_file_descriptor);
         return false;
     }
 
-    if (complete && staging.descriptor >= 0) {
-        if (::unlinkat(staging.descriptor,
-                       "payload",
-                       S_ISDIR(payload_status.st_mode) ? AT_REMOVEDIR : 0) == 0) {
-            release_staging(staging);
-            return true;
-        }
-        if (!first_error) {
-            first_error = std::error_code(errno, std::generic_category());
+    // Preserve an identity observation for diagnostics and deterministic race
+    // coverage, but never treat that observation as continuing authority.
+    const std::filesystem::path access_root = staging.access_root();
+    for (const auto &output : outputs) {
+        if (output.path.lexically_relative(access_root) == "payload") {
+            std::error_code ignored;
+            (void)identity_for_at(staging.descriptor, "payload", ignored);
+            break;
         }
     }
 
-    std::filesystem::path retained;
-    std::error_code retain_error;
-    if (!retain_staged_payload(staging, near_path, retained, retain_error)) {
-        retained = staging.container_path / "payload";
-        if (!first_error) {
-            first_error = retain_error;
-        }
+    // There is no POSIX primitive that conditionally unlinks a directory entry
+    // by inode identity.  Re-checking immediately before unlinkat still leaves a
+    // same-UID check/mutate race.  Unpublished failures therefore never mutate
+    // the payload namespace entry: they retain the protected staging container
+    // and expose its durable path.  This hook exercises the former critical
+    // interval deterministically without weakening the production rule.
+    if (after_identity_observation != nullptr) {
+        after_identity_observation(staging.descriptor);
     }
-    if (retained_paths != nullptr && !retained.empty()) {
-        retained_paths->push_back(retained);
+
+    struct stat payload_status {};
+    if (::fstatat(staging.descriptor,
+                  "payload",
+                  &payload_status,
+                  AT_SYMLINK_NOFOLLOW) != 0) {
+        if (errno == ENOENT) {
+            release_staging(staging);
+            return true;
+        }
+        first_error = std::error_code(errno, std::generic_category());
+        return false;
+    }
+
+    first_error = std::make_error_code(std::errc::state_not_recoverable);
+    if (retained_paths != nullptr) {
+        retained_paths->push_back(staging.container_path / "payload");
     }
     return false;
 }

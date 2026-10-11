@@ -34,6 +34,31 @@ bool write_text(const std::filesystem::path &path, const std::string &text)
     return output.good();
 }
 
+std::filesystem::path critical_interval_displaced;
+bool critical_interval_replaced = false;
+
+void replace_unpublished_payload(const int directory_descriptor) noexcept
+{
+    critical_interval_replaced =
+        ::renameat(directory_descriptor,
+                   "payload",
+                   AT_FDCWD,
+                   critical_interval_displaced.c_str()) == 0;
+    const int replacement = ::openat(directory_descriptor,
+                                     "payload",
+                                     O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC,
+                                     0600);
+    const std::string text{"critical-interval replacement"};
+    if (replacement < 0 ||
+        ::write(replacement, text.data(), text.size()) !=
+            static_cast<ssize_t>(text.size())) {
+        critical_interval_replaced = false;
+    }
+    if (replacement >= 0) {
+        ::close(replacement);
+    }
+}
+
 bool unsupported_eopnotsupp(const std::filesystem::path &,
                             const std::filesystem::path &,
                             std::error_code &error) noexcept
@@ -436,6 +461,57 @@ int main()
         return 48;
     }
 
+    const auto raced_file_public = root / "raced-file-public";
+    const auto raced_file_displaced = root / "raced-file-displaced";
+    fs::path raced_file_stage;
+    {
+        ownership::ProtectedStaging staging;
+        ownership::OwnedOutputs outputs;
+        fs::path private_path;
+        error.clear();
+        const int descriptor = ownership::create_private_file(
+            raced_file_public, staging, outputs, private_path, error);
+        const std::string owned_text{"owned unpublished payload"};
+        const bool owned_written = descriptor >= 0 &&
+                                   ::write(descriptor,
+                                           owned_text.data(),
+                                           owned_text.size()) ==
+                                       static_cast<ssize_t>(owned_text.size());
+        if (descriptor >= 0) {
+            ::close(descriptor);
+        }
+        raced_file_stage = staging.container_path;
+        critical_interval_displaced = raced_file_displaced;
+        critical_interval_replaced = false;
+        std::error_code cleanup_error;
+        std::vector<fs::path> retained;
+        const bool cleaned = ownership::cleanup_unpublished(
+            staging,
+            raced_file_public,
+            outputs,
+            cleanup_error,
+            &retained,
+            replace_unpublished_payload);
+        if (!require(owned_written && !error && outputs.size() == 1U &&
+                         critical_interval_replaced && !cleaned &&
+                         retained == std::vector<fs::path>{raced_file_stage / "payload"} &&
+                         read_text(retained.front()) ==
+                             "critical-interval replacement" &&
+                         read_text(raced_file_displaced) == owned_text &&
+                         !fs::exists(raced_file_public),
+                     "critical-interval replacement was mutated as owned")) {
+            return 80;
+        }
+    }
+    if (!require(read_text(raced_file_stage / "payload") ==
+                         "critical-interval replacement" &&
+                     read_text(raced_file_displaced) == "owned unpublished payload",
+                 "critical-interval evidence did not survive descriptor close")) {
+        return 90;
+    }
+    fs::remove_all(raced_file_stage, error);
+    fs::remove(raced_file_displaced, error);
+
     const auto private_file_public = root / "private-file-public";
     const auto displaced_private_file = root / "displaced-private-file";
     fs::path private_file_stage;
@@ -589,8 +665,8 @@ int main()
                      durable_retained.size() == 1U &&
                      durable_retained.front().string().find("/proc/self/fd/") ==
                          std::string::npos &&
-                     durable_retained.front().filename().string().starts_with(
-                         ".infiltrator-retained-") &&
+                     durable_retained.front() ==
+                         durable_staging.container_path / "payload" &&
                      read_text(durable_retained.front() / "unrecorded") ==
                          "retained payload",
                  "unpublished residue was not surfaced at one durable exact path")) {
