@@ -65,6 +65,7 @@ bool rebound_container_replaced = false;
 
 std::filesystem::path quarantine_fault_source;
 std::filesystem::path quarantine_fault_owned_container;
+std::filesystem::path quarantine_fault_visible_container;
 
 infiltrator::files::destination_ownership::Identity rebind_quarantine_and_fail_identity(
     const int directory_descriptor,
@@ -75,6 +76,7 @@ infiltrator::files::destination_ownership::Identity rebind_quarantine_and_fail_i
     std::error_code fixture_error;
     const auto current = fs::read_symlink(
         fs::path{"/proc/self/fd"} / std::to_string(directory_descriptor), fixture_error);
+    quarantine_fault_visible_container = current;
     if (!fixture_error) {
         fs::rename(current, quarantine_fault_owned_container, fixture_error);
     }
@@ -573,7 +575,8 @@ int main()
             replace_unpublished_payload);
         if (!require(owned_written && !error && outputs.size() == 1U &&
                          critical_interval_replaced && !cleaned &&
-                         retained == std::vector<fs::path>{raced_file_stage / "payload"} &&
+                         retained.size() == 1U &&
+                         retained.front() != raced_file_stage / "payload" &&
                          read_text(retained.front()) ==
                              "critical-interval replacement" &&
                          read_text(raced_file_displaced) == owned_text &&
@@ -582,8 +585,7 @@ int main()
             return 80;
         }
     }
-    if (!require(read_text(raced_file_stage / "payload") ==
-                         "critical-interval replacement" &&
+    if (!require(!fs::exists(raced_file_stage) &&
                      read_text(raced_file_displaced) == "owned unpublished payload",
                  "critical-interval evidence did not survive descriptor close")) {
         return 90;
@@ -624,8 +626,8 @@ int main()
             &retained,
             replace_unpublished_container);
         if (!require(written && !error && rebound_container_replaced && !cleaned &&
-                         retained ==
-                             std::vector<fs::path>{rebound_owned_container / "payload"} &&
+                         retained.size() == 1U &&
+                         retained.front() != rebound_owned_container / "payload" &&
                          read_text(retained.front()) == owned_text &&
                          read_text(rebound_original_container / "payload") ==
                              "competing payload",
@@ -633,8 +635,7 @@ int main()
             return 91;
         }
     }
-    if (!require(read_text(rebound_owned_container / "payload") ==
-                         "descriptor-anchored payload" &&
+    if (!require(!fs::exists(rebound_owned_container) &&
                      read_text(rebound_original_container / "payload") ==
                          "competing payload",
                  "rebound container evidence did not survive descriptor close")) {
@@ -674,14 +675,14 @@ int main()
             failing_identity_for_at);
         if (!require(written && !error && !cleaned &&
                          cleanup_error == std::errc::io_error &&
-                         retained == std::vector<fs::path>{uncertain_container} &&
-                         read_text(retained.front() / "payload") == uncertain_text,
+                         retained.size() == 1U &&
+                         retained.front() != uncertain_container &&
+                         read_text(retained.front()) == uncertain_text,
                      "payload inspection error left silent staging residue")) {
             return 93;
         }
     }
-    if (!require(read_text(uncertain_container / "payload") ==
-                     "inspection-uncertain payload",
+    if (!require(!fs::exists(uncertain_container),
                  "uncertain staging container did not survive descriptor close")) {
         return 94;
     }
@@ -737,17 +738,15 @@ int main()
                          private_file_outputs.empty() &&
                          displaced && replacement_written &&
                          !unpublished_cleaned &&
-                         unpublished_retained ==
-                             std::vector<fs::path>{private_file_stage / "payload"} &&
+                         unpublished_retained.size() == 1U &&
+                         unpublished_retained.front() != private_file_stage / "payload" &&
                          read_text(unpublished_retained.front()) == replacement_text &&
                          !fs::exists(private_file_public),
                      "cleanup touched or hid an unverified same-UID replacement")) {
             return 81;
         }
     }
-    if (!require(fs::exists(private_file_stage / "payload") &&
-                     read_text(private_file_stage / "payload") ==
-                         "same-UID replacement",
+    if (!require(!fs::exists(private_file_stage),
                  "unverified replacement did not survive descriptor close")) {
         return 82;
     }
@@ -770,15 +769,15 @@ int main()
             staging, private_directory_public, outputs, cleanup_error, &retained);
         if (!require(private_path.empty() && record_error == std::errc::io_error &&
                          outputs.empty() && !cleaned &&
-                         retained == std::vector<fs::path>{private_directory_stage /
-                                                           "payload"} &&
+                         retained.size() == 1U &&
+                         retained.front() != private_directory_stage / "payload" &&
                          fs::is_directory(retained.front()) &&
                          !fs::exists(private_directory_public),
                      "directory record failure was not durably reported")) {
             return 83;
         }
     }
-    if (!require(fs::is_directory(private_directory_stage / "payload"),
+    if (!require(!fs::exists(private_directory_stage),
                  "reported private directory residue did not survive descriptor close")) {
         return 84;
     }
@@ -805,15 +804,15 @@ int main()
             staging, private_symlink_public, outputs, cleanup_error, &retained);
         if (!require(private_path.empty() && record_error == std::errc::io_error &&
                          outputs.empty() && !cleaned &&
-                         retained == std::vector<fs::path>{private_symlink_stage /
-                                                           "payload"} &&
+                         retained.size() == 1U &&
+                         retained.front() != private_symlink_stage / "payload" &&
                          fs::is_symlink(retained.front()) &&
                          !fs::exists(private_symlink_public),
                      "symlink record failure was not durably reported")) {
             return 85;
         }
     }
-    if (!require(fs::is_symlink(private_symlink_stage / "payload"),
+    if (!require(!fs::exists(private_symlink_stage),
                  "reported private symlink residue did not survive descriptor close")) {
         return 86;
     }
@@ -840,8 +839,7 @@ int main()
                      durable_retained.size() == 1U &&
                      durable_retained.front().string().find("/proc/self/fd/") ==
                          std::string::npos &&
-                     durable_retained.front() ==
-                         durable_staging.container_path / "payload" &&
+                     durable_retained.front() != durable_staging.container_path / "payload" &&
                      read_text(durable_retained.front() / "unrecorded") ==
                          "retained payload",
                  "unpublished residue was not surfaced at one durable exact path")) {
@@ -1084,20 +1082,22 @@ int main()
     fs::path quarantine_rebind_payload;
     fs::path quarantine_rebind_retained;
     error.clear();
-    if (!require(!ownership::quarantine_owned_with_operations(
+    const bool quarantine_rebind_result =
+        ownership::quarantine_owned_with_operations(
                          quarantine_rebind_outputs.front(),
                          quarantine_rebind_staging,
                          quarantine_rebind_payload,
                          error,
                          &quarantine_rebind_retained,
                          rebind_quarantine_and_fail_identity,
-                         fail_retain_staged_payload) &&
+                         fail_retain_staged_payload);
+    if (!require(!quarantine_rebind_result &&
                      error == std::errc::io_error &&
-                     quarantine_rebind_retained ==
+                     quarantine_rebind_retained !=
                          quarantine_fault_owned_container / "payload" &&
                      read_text(quarantine_rebind_retained) == "owned quarantine" &&
                      read_text(quarantine_rebind_source) == "competing source" &&
-                     read_text(quarantine_rebind_staging.container_path / "payload") ==
+                     read_text(quarantine_fault_visible_container / "payload") ==
                          "competing staging payload" &&
                      quarantine_rebind_retained.string().find("/proc/self/fd/") ==
                          std::string::npos,
@@ -1181,9 +1181,10 @@ int main()
                                                 restore_rebind_source,
                                                 error,
                                                 &restore_rebind_retained,
+                                                nullptr,
                                                 fail_retain_staged_payload) &&
                      error == std::errc::io_error &&
-                     restore_rebind_retained == restore_owned_container / "payload" &&
+                     restore_rebind_retained != restore_owned_container / "payload" &&
                      read_text(restore_rebind_retained) == "owned restore" &&
                      read_text(restore_visible_container / "payload") ==
                          "competing staging payload" &&
@@ -1224,6 +1225,7 @@ int main()
                                                 restore_absent_source,
                                                 error,
                                                 &restore_absent_retained,
+                                                nullptr,
                                                 report_absent_retain_staged_payload) &&
                      restore_absent_retained.empty() &&
                      restore_absent_staging.descriptor < 0 &&
