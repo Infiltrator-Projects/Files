@@ -33,9 +33,9 @@ jobs:
           path: control
           fetch-depth: 1
 
-      - name: Test coordinator routing
+      - name: Test coordinator routing and trust boundary
         working-directory: control
-        run: python3 -m unittest -v swarm/test_coordinator.py
+        run: python3 -m unittest discover -v -s swarm -p 'test_coordinator*.py'
 
       - name: Reconcile live GitHub into swarm state
         working-directory: control
@@ -43,4 +43,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
-        run: python3 swarm/coordinator.py
+          SWARM_TRUSTED_REVIEWERS: The-First-Infiltrator
+        run: python3 swarm/coordinator_entry.py
