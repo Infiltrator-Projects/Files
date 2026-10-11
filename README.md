@@ -91,6 +91,8 @@ It currently provides:
 - destination names are claimed at the mutation boundary with no-replace semantics, so a competing writer is reported as a conflict rather than overwritten after preflight;
 - browsing remains available on providers that cannot supply atomic no-replace; safe Rename, Move, private publication and replacement instead return a typed unsupported-capability result before changing the source or visible destination, while provider-specific atomic equivalents remain future work;
 - failed or cancelled transfers remove only filesystem objects whose recorded identity still belongs to that operation, leaving competing-writer data intact;
+- regular files, links and directory trees are assembled in descriptor-rooted private staging and only published after copy and metadata work succeeds; cancellation and setup failures leave no visible partial destination;
+- cleanup, rollback and quarantine failures return structured exact retained-path evidence and include those paths in the calm user-facing result;
 - replacement staging records the previous destination identity and first quarantines that exact object; an object swapped into the visible name is restored with no-replace semantics rather than stranded under an internal name;
 - explicit **Replace** handling that stages the existing destination rather than deleting it first;
 - replacement staging that verifies the replacement, restores the previous destination on a safe failure path and retains staged data rather than guessing after an uncertain move;

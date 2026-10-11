@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #include <unistd.h>
 
@@ -46,6 +47,30 @@ bool unsupported_enotsup(const std::filesystem::path &,
 {
     error = std::error_code(ENOTSUP, std::generic_category());
     return false;
+}
+
+infiltrator::files::destination_ownership::Identity failing_identity_for_fd(
+    int,
+    std::error_code &error) noexcept
+{
+    error = std::make_error_code(std::errc::io_error);
+    return {};
+}
+
+infiltrator::files::destination_ownership::Identity failing_identity_for_at(
+    int,
+    const char *,
+    std::error_code &error) noexcept
+{
+    error = std::make_error_code(std::errc::io_error);
+    return {};
+}
+
+std::uintmax_t denied_remove_all(const std::filesystem::path &,
+                                 std::error_code &error)
+{
+    error = std::make_error_code(std::errc::permission_denied);
+    return 0;
 }
 
 bool has_internal_residue(const std::filesystem::path &root)
@@ -149,7 +174,11 @@ int main()
         return 11;
     }
     error.clear();
-    if (!require(!ownership::cleanup_owned(directory_outputs, error) &&
+    std::vector<fs::path> retained_cleanup_paths;
+    if (!require(!ownership::cleanup_owned(
+                         directory_outputs, error, &retained_cleanup_paths) &&
+                     retained_cleanup_paths.size() == 1U &&
+                     retained_cleanup_paths.front() == owned_directory &&
                      !fs::exists(owned_file) &&
                      read_text(competing_file) == "competing writer" &&
                      fs::is_directory(owned_directory),
@@ -406,6 +435,134 @@ int main()
         return 48;
     }
 
+    const auto private_file_public = root / "private-file-public";
+    fs::path private_file_stage;
+    {
+        ownership::ProtectedStaging private_file_staging;
+        ownership::OwnedOutputs private_file_outputs;
+        std::filesystem::path private_file_path;
+        error.clear();
+        const int private_file_descriptor = ownership::create_private_file(
+            private_file_public,
+            private_file_staging,
+            private_file_outputs,
+            private_file_path,
+            error,
+            failing_identity_for_fd);
+        private_file_stage = private_file_staging.container_path;
+        const std::error_code record_error = error;
+        std::error_code unpublished_cleanup_error;
+        std::vector<fs::path> unpublished_retained;
+        const bool unpublished_cleaned = ownership::cleanup_unpublished(
+            private_file_staging,
+            private_file_public,
+            private_file_outputs,
+            unpublished_cleanup_error,
+            &unpublished_retained);
+        if (!require(private_file_descriptor < 0 &&
+                         record_error == std::errc::io_error &&
+                         private_file_outputs.empty() &&
+                         unpublished_cleaned && unpublished_retained.empty() &&
+                         !fs::exists(private_file_public),
+                     "record failure left a public or owned regular-file residue")) {
+            return 81;
+        }
+    }
+    if (!require(!fs::exists(private_file_stage),
+                 "record failure retained private regular-file staging residue")) {
+        return 82;
+    }
+
+    const auto private_directory_public = root / "private-directory-public";
+    fs::path private_directory_stage;
+    {
+        ownership::ProtectedStaging staging;
+        ownership::OwnedOutputs outputs;
+        error.clear();
+        const auto private_path = ownership::create_private_directory(
+            private_directory_public, staging, outputs, error, failing_identity_for_at);
+        private_directory_stage = staging.container_path;
+        const std::error_code record_error = error;
+        std::error_code cleanup_error;
+        std::vector<fs::path> retained;
+        const bool cleaned = ownership::cleanup_unpublished(
+            staging, private_directory_public, outputs, cleanup_error, &retained);
+        if (!require(private_path.empty() && record_error == std::errc::io_error &&
+                         outputs.empty() && cleaned && retained.empty() &&
+                         !fs::exists(private_directory_public),
+                     "directory record failure left unreported staging residue")) {
+            return 83;
+        }
+    }
+    if (!require(!fs::exists(private_directory_stage),
+                 "directory record failure retained its staging container")) {
+        return 84;
+    }
+
+    const auto private_symlink_public = root / "private-symlink-public";
+    fs::path private_symlink_stage;
+    {
+        ownership::ProtectedStaging staging;
+        ownership::OwnedOutputs outputs;
+        error.clear();
+        const auto private_path = ownership::create_private_symlink(
+            private_symlink_public,
+            "target",
+            staging,
+            outputs,
+            error,
+            failing_identity_for_at);
+        private_symlink_stage = staging.container_path;
+        const std::error_code record_error = error;
+        std::error_code cleanup_error;
+        std::vector<fs::path> retained;
+        const bool cleaned = ownership::cleanup_unpublished(
+            staging, private_symlink_public, outputs, cleanup_error, &retained);
+        if (!require(private_path.empty() && record_error == std::errc::io_error &&
+                         outputs.empty() && cleaned && retained.empty() &&
+                         !fs::exists(private_symlink_public),
+                     "symlink record failure left unreported staging residue")) {
+            return 85;
+        }
+    }
+    if (!require(!fs::exists(private_symlink_stage),
+                 "symlink record failure retained its staging container")) {
+        return 86;
+    }
+
+    const auto durable_public = root / "durable-unpublished";
+    ownership::ProtectedStaging durable_staging;
+    ownership::OwnedOutputs durable_outputs;
+    error.clear();
+    const auto durable_private = ownership::create_private_directory(
+        durable_public, durable_staging, durable_outputs, error);
+    if (!require(!durable_private.empty() &&
+                     write_text(durable_private / "unrecorded", "retained payload"),
+                 "could not create durable unpublished-residue fixture")) {
+        return 87;
+    }
+    std::vector<fs::path> durable_retained;
+    error.clear();
+    if (!require(!ownership::cleanup_unpublished(durable_staging,
+                                                  durable_public,
+                                                  durable_outputs,
+                                                  error,
+                                                  &durable_retained) &&
+                     durable_retained.size() == 1U &&
+                     durable_retained.front().string().find("/proc/self/fd/") ==
+                         std::string::npos &&
+                     durable_retained.front().filename().string().starts_with(
+                         ".infiltrator-retained-") &&
+                     read_text(durable_retained.front() / "unrecorded") ==
+                         "retained payload",
+                 "unpublished residue was not surfaced at one durable exact path")) {
+        return 88;
+    }
+    fs::remove_all(durable_retained.front(), error);
+    if (!require(!error, "could not remove durable unpublished-residue fixture")) {
+        return 89;
+    }
+
     const auto partial_cleanup = root / "partial-cleanup";
     const auto partial_child = partial_cleanup / "child";
     error.clear();
@@ -419,26 +576,17 @@ int main()
                  "could not record partial tree cleanup fixture")) {
         return 50;
     }
-    fs::permissions(partial_cleanup,
-                    fs::perms::owner_read | fs::perms::owner_exec,
-                    fs::perm_options::replace,
-                    error);
-    if (!require(!error, "could not make partial cleanup fixture non-writable")) {
-        return 51;
-    }
     std::filesystem::path retained_cleanup;
     error.clear();
     const bool removed_partial = ownership::remove_owned_tree(
-        partial_outputs.front(), error, &retained_cleanup);
-    if (!require(!removed_partial && error && retained_cleanup.empty() &&
-                     fs::is_directory(partial_cleanup) && fs::exists(partial_child),
-                 "failed tree cleanup did not restore remaining owned data")) {
+        partial_outputs.front(), error, &retained_cleanup, denied_remove_all);
+    if (!require(!removed_partial &&
+                     error == std::errc::permission_denied &&
+                     retained_cleanup.empty() &&
+                     fs::is_directory(partial_cleanup) &&
+                     fs::exists(partial_child),
+                 "injected tree cleanup failure did not restore remaining owned data")) {
         return 52;
-    }
-    error.clear();
-    fs::permissions(partial_cleanup, fs::perms::owner_all, fs::perm_options::replace, error);
-    if (!require(!error, "could not restore cleanup fixture permissions")) {
-        return 53;
     }
 
     const auto unsupported_root_one = root / "unsupported-eopnotsupp";

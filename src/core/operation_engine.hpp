@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <vector>
 
 namespace infiltrator::files {
 
@@ -33,6 +34,7 @@ struct OperationResult {
     std::filesystem::path destination;
     std::string message;
     bool changed{false};
+    std::vector<std::filesystem::path> retained_paths;
 
     [[nodiscard]] bool ok() const noexcept { return status == OperationStatus::Success; }
 };
