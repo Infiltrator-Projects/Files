@@ -2,7 +2,7 @@
 
 Infiltrator File Manager is a clean-sheet file-management project for InfiltratorOS.
 
-**Current source version:** 0.1.16\
+**Current source version:** 0.1.17\
 **Shared foundation:** exact Infiltratr Common 1.19.41 gitlink, linked through the full Common target on InfiltratorOS/POSIX\
 **Desktop implementation:** C++20 + GTK 4/GIO\
 **Status:** early implementation; deterministic browsing and mutation foundation with multi-selection batch transfer, interruption inspection and verified metadata preservation
@@ -54,7 +54,7 @@ Common's role is documented separately in [`docs/COMMON-INTEGRATION.md`](docs/CO
 
 Product-level acceptance is defined in [`docs/PRODUCT-QUALITY.md`](docs/PRODUCT-QUALITY.md). It establishes the golden user journeys, engineering/interaction/aesthetic evidence, proportional-complexity rule and release-quality gate used to decide whether a tranche actually makes Files better for a person.
 
-## Current 0.1.16 implementation
+## Current 0.1.17 implementation
 
 File modification timestamps use one shared temporal policy snapshot for both date and time. Explicit clocks use Common's UI-language-aware renderer: English Chinese-time labels use `Shēn hour` or `Shēn, first half`, Chinese-language labels use native characters, and Roman clocks keep Roman numerals and daylight twelfths with translated wording. Edo clocks use Japanese bell numerals and localized branch wording; explicit 12-hour markers and ordering follow the UI language. Selected non-Gregorian dates use Common's optional bridge to Calendar 1.0.86 or newer for matching UI-language presentation, including native Chinese/Dangi cyclic year names without an added Gregorian year or bare cycle counter; Calendar owns conversion. An unavailable date provider is shown as unavailable rather than silently displaying a Gregorian date. Locale Gregorian dates retain their native platform formatting. Existing live policy monitoring refreshes the visible labels; sorting continues to use raw filesystem timestamps.
 
@@ -95,7 +95,7 @@ It currently provides:
 - explicit **Replace** handling that stages the existing destination rather than deleting it first;
 - replacement staging that verifies the replacement, restores the previous destination on a safe failure path and retains staged data rather than guessing after an uncertain move;
 - same-filesystem moves through filesystem rename semantics, with copy-then-remove fallback for cross-volume moves;
-- recursive directory transfer is assembled under a private sibling and atomically published once complete, with symbolic links preserved as links;
+- recursive directory transfer is assembled under descriptor-rooted protected staging and atomically published once complete, with symbolic links preserved as links;
 - ordinary copy and cross-volume move transfer paths that preserve regular-file and directory permissions and modification timestamps when the destination permits them;
 - metadata preservation applied to directories after their children are written so directory modification times are not immediately destroyed by the copy itself;
 - explicit verification failure when copied contents exist but supported permission/timestamp metadata could not be preserved, rather than claiming perfect preservation;
@@ -124,7 +124,7 @@ It currently provides:
 - the full `InfiltratrCommon::Common` build dependency on InfiltratorOS/POSIX, making Common's POSIX/state/I/O contracts available to the non-UI layers as they are introduced; and
 - a hosted build/test gate on every main-branch update, including headless GTK window lifetime, sorted selection, mount-row identity/focus and fresh-profile policy monitoring, mounted-place identity qualification, batch preflight/policy/progress/cancellation, interrupted-journal recovery and permission/timestamp preservation qualification.
 
-Metadata preservation is deliberately honest in 0.1.16: permissions and modification timestamps are qualified for ordinary copy/cross-volume transfer paths, while ownership, ACLs, extended attributes, sparse-file preservation and symlink metadata remain future capability work. Multi-selection batch Copy/Move is present; destructive batch Trash/Delete is not yet claimed.
+Metadata preservation is deliberately honest in 0.1.17: permissions and modification timestamps are qualified for ordinary copy/cross-volume transfer paths, while ownership, ACLs, extended attributes, sparse-file preservation and symlink metadata remain future capability work. Multi-selection batch Copy/Move is present; destructive batch Trash/Delete is not yet claimed.
 
 The next implementation work continues the richer file/object/capability model and remote-location/provider handling; mounted/removable discovery is already part of the browsing foundation rather than a reason to add ad-hoc controls.
 
@@ -143,7 +143,7 @@ ctest --test-dir build --output-on-failure
 ./build/infiltrator-file-manager
 ```
 
-The build rejects a missing, wrong-version or wrong-commit Infiltratr Common checkout. Version 0.1.16 is pinned to Common 1.19.41 at commit `b0387b7ab5d71cda60748e2506b85cdc0e6b5e8b`.
+The build rejects a missing, wrong-version or wrong-commit Infiltratr Common checkout. Version 0.1.17 is pinned to Common 1.19.41 at commit `b0387b7ab5d71cda60748e2506b85cdc0e6b5e8b`.
 
 ## Design documents
 
