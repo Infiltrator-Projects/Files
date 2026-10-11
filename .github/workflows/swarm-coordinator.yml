@@ -10,6 +10,8 @@ on:
   workflow_run:
     workflows: ["Verify"]
     types: [completed]
+  schedule:
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -24,6 +26,11 @@ concurrency:
 
 jobs:
   reconcile:
+    if: >-
+      github.event_name == 'workflow_run' ||
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     steps:
       - name: Check out swarm control plane
