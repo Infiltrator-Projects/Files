@@ -59,6 +59,26 @@ void replace_unpublished_payload(const int directory_descriptor) noexcept
     }
 }
 
+std::filesystem::path rebound_container_original;
+std::filesystem::path rebound_container_owned;
+bool rebound_container_replaced = false;
+
+void replace_unpublished_container(const int) noexcept
+{
+    std::error_code error;
+    std::filesystem::rename(
+        rebound_container_original, rebound_container_owned, error);
+    if (error) {
+        return;
+    }
+    std::filesystem::create_directory(rebound_container_original, error);
+    if (error) {
+        return;
+    }
+    rebound_container_replaced =
+        write_text(rebound_container_original / "payload", "competing payload");
+}
+
 bool unsupported_eopnotsupp(const std::filesystem::path &,
                             const std::filesystem::path &,
                             std::error_code &error) noexcept
@@ -511,6 +531,102 @@ int main()
     }
     fs::remove_all(raced_file_stage, error);
     fs::remove(raced_file_displaced, error);
+
+    const auto rebound_public = root / "rebound-public";
+    const auto rebound_owned_container = root / "rebound-owned-container";
+    fs::path rebound_original_container;
+    {
+        ownership::ProtectedStaging staging;
+        ownership::OwnedOutputs outputs;
+        fs::path private_path;
+        error.clear();
+        const int descriptor = ownership::create_private_file(
+            rebound_public, staging, outputs, private_path, error);
+        const std::string owned_text{"descriptor-anchored payload"};
+        const bool written = descriptor >= 0 &&
+                             ::write(descriptor,
+                                     owned_text.data(),
+                                     owned_text.size()) ==
+                                 static_cast<ssize_t>(owned_text.size());
+        if (descriptor >= 0) {
+            ::close(descriptor);
+        }
+        rebound_original_container = staging.container_path;
+        rebound_container_original = rebound_original_container;
+        rebound_container_owned = rebound_owned_container;
+        rebound_container_replaced = false;
+        std::error_code cleanup_error;
+        std::vector<fs::path> retained;
+        const bool cleaned = ownership::cleanup_unpublished(
+            staging,
+            rebound_public,
+            outputs,
+            cleanup_error,
+            &retained,
+            replace_unpublished_container);
+        if (!require(written && !error && rebound_container_replaced && !cleaned &&
+                         retained ==
+                             std::vector<fs::path>{rebound_owned_container / "payload"} &&
+                         read_text(retained.front()) == owned_text &&
+                         read_text(rebound_original_container / "payload") ==
+                             "competing payload",
+                     "container rebinding produced false retained evidence")) {
+            return 91;
+        }
+    }
+    if (!require(read_text(rebound_owned_container / "payload") ==
+                         "descriptor-anchored payload" &&
+                     read_text(rebound_original_container / "payload") ==
+                         "competing payload",
+                 "rebound container evidence did not survive descriptor close")) {
+        return 92;
+    }
+    fs::remove_all(rebound_owned_container, error);
+    fs::remove_all(rebound_original_container, error);
+
+    const auto uncertain_public = root / "uncertain-inspection-public";
+    fs::path uncertain_container;
+    {
+        ownership::ProtectedStaging staging;
+        ownership::OwnedOutputs outputs;
+        fs::path private_path;
+        error.clear();
+        const int descriptor = ownership::create_private_file(
+            uncertain_public, staging, outputs, private_path, error);
+        const std::string uncertain_text{"inspection-uncertain payload"};
+        const bool written = descriptor >= 0 &&
+                             ::write(descriptor,
+                                     uncertain_text.data(),
+                                     uncertain_text.size()) ==
+                                 static_cast<ssize_t>(uncertain_text.size());
+        if (descriptor >= 0) {
+            ::close(descriptor);
+        }
+        uncertain_container = staging.container_path;
+        std::error_code cleanup_error;
+        std::vector<fs::path> retained;
+        const bool cleaned = ownership::cleanup_unpublished(
+            staging,
+            uncertain_public,
+            outputs,
+            cleanup_error,
+            &retained,
+            nullptr,
+            failing_identity_for_at);
+        if (!require(written && !error && !cleaned &&
+                         cleanup_error == std::errc::io_error &&
+                         retained == std::vector<fs::path>{uncertain_container} &&
+                         read_text(retained.front() / "payload") == uncertain_text,
+                     "payload inspection error left silent staging residue")) {
+            return 93;
+        }
+    }
+    if (!require(read_text(uncertain_container / "payload") ==
+                     "inspection-uncertain payload",
+                 "uncertain staging container did not survive descriptor close")) {
+        return 94;
+    }
+    fs::remove_all(uncertain_container, error);
 
     const auto private_file_public = root / "private-file-public";
     const auto displaced_private_file = root / "displaced-private-file";

@@ -60,6 +60,11 @@ struct TransferOperationHooks {
         const std::filesystem::path &, std::error_code &) noexcept;
     using SourceQuarantinePresentOperation = bool (*)(
         const std::filesystem::path &, std::error_code &) noexcept;
+    using RetainSourceQuarantineOperation = bool (*)(
+        destination_ownership::ProtectedStaging &,
+        const std::filesystem::path &,
+        std::filesystem::path &,
+        std::error_code &) noexcept;
     using MoveOwnedOperation = bool (*)(
         const destination_ownership::OwnedOutput &,
         const std::filesystem::path &,
@@ -115,6 +120,16 @@ struct TransferOperationHooks {
         return !error && status.type() != std::filesystem::file_type::not_found;
     }
 
+    static bool retain_source_quarantine_default(
+        destination_ownership::ProtectedStaging &staging,
+        const std::filesystem::path &near_path,
+        std::filesystem::path &retained,
+        std::error_code &error) noexcept
+    {
+        return destination_ownership::retain_staged_payload(
+            staging, near_path, retained, error);
+    }
+
     MoveOwnedOperation move_owned{move_owned_default};
     QuarantineOwnedOperation quarantine_owned{destination_ownership::quarantine_owned};
     PublishTreeOperation publish_tree{destination_ownership::publish_private_tree};
@@ -123,6 +138,8 @@ struct TransferOperationHooks {
         remove_source_quarantine_default};
     SourceQuarantinePresentOperation source_quarantine_present{
         source_quarantine_present_default};
+    RetainSourceQuarantineOperation retain_source_quarantine{
+        retain_source_quarantine_default};
 };
 
 class TransferOperationEngine final {

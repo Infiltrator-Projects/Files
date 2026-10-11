@@ -69,10 +69,30 @@ void force_quarantine_remove_failure(
     error = std::make_error_code(std::errc::io_error);
 }
 
+void force_quarantine_remove_error_without_deleting(
+    const std::filesystem::path &, std::error_code &error) noexcept
+{
+    error = std::make_error_code(std::errc::io_error);
+}
+
 bool force_quarantine_presence_failure(
     const std::filesystem::path &, std::error_code &error) noexcept
 {
     error = std::make_error_code(std::errc::permission_denied);
+    return false;
+}
+
+std::filesystem::path failed_retention_container;
+
+bool force_quarantine_retention_failure(
+    infiltrator::files::destination_ownership::ProtectedStaging &staging,
+    const std::filesystem::path &,
+    std::filesystem::path &retained,
+    std::error_code &error) noexcept
+{
+    failed_retention_container = staging.container_path;
+    retained.clear();
+    error = std::make_error_code(std::errc::operation_not_supported);
     return false;
 }
 
@@ -348,6 +368,39 @@ int main()
         fs::remove_all(root, cleanup_error);
         return 28;
     }
+
+    const fs::path uncertain_source = root / "uncertain-source.txt";
+    const fs::path uncertain_destination_parent = root / "uncertain-destination";
+    fs::create_directories(uncertain_destination_parent);
+    if (!write_text(uncertain_source, "uncertain source payload\n")) {
+        fs::remove_all(root, cleanup_error);
+        return 29;
+    }
+    TransferOperationHooks uncertain_hooks;
+    uncertain_hooks.move_owned = force_cross_device;
+    uncertain_hooks.remove_source_quarantine =
+        force_quarantine_remove_error_without_deleting;
+    uncertain_hooks.source_quarantine_present = force_quarantine_presence_failure;
+    uncertain_hooks.retain_source_quarantine = force_quarantine_retention_failure;
+    failed_retention_container.clear();
+    TransferOperationEngine uncertain_engine{uncertain_hooks};
+    const auto uncertain_move = uncertain_engine.move_item(
+        uncertain_source, uncertain_destination_parent, ConflictPolicy::Fail);
+    if (uncertain_move.status != OperationStatus::ExecutionFailure ||
+        !uncertain_move.changed || uncertain_move.retained_paths.size() != 1U ||
+        uncertain_move.retained_paths.front() != failed_retention_container ||
+        !fs::is_directory(uncertain_move.retained_paths.front()) ||
+        read_text(uncertain_move.retained_paths.front() / "payload") !=
+            "uncertain source payload\n" ||
+        fs::exists(uncertain_source) ||
+        read_text(uncertain_destination_parent / uncertain_source.filename()) !=
+            "uncertain source payload\n" ||
+        uncertain_move.message.find(failed_retention_container.string()) ==
+            std::string::npos) {
+        fs::remove_all(root, cleanup_error);
+        return 30;
+    }
+    fs::remove_all(uncertain_move.retained_paths.front(), cleanup_error);
 
     const fs::path cancelled_tree = root / "cancelled-tree";
     fs::create_directories(cancelled_tree / "nested");

@@ -1144,12 +1144,22 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
         if (restore_error) {
             std::error_code retain_error;
             if (retained_source_quarantine.empty() &&
-                destination_ownership::retain_staged_payload(
+                hooks_.retain_source_quarantine(
                     source_staging,
                     source,
                     retained_source_quarantine,
                     retain_error)) {
                 retained_paths.push_back(retained_source_quarantine);
+            } else if (retained_source_quarantine.empty() &&
+                       retain_error != std::errc::no_such_file_or_directory) {
+                std::filesystem::path retained_container;
+                std::error_code locator_error;
+                if (destination_ownership::durable_staging_container(
+                        source_staging, retained_container, locator_error)) {
+                    destination_ownership::preserve_staging_container(
+                        source_staging);
+                    retained_paths.push_back(retained_container);
+                }
             }
         }
         const std::string source_recovery_message =

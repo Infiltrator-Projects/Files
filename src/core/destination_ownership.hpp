@@ -98,6 +98,57 @@ inline bool same_object(const std::filesystem::path &path,
            current.device == expected.device && current.inode == expected.inode;
 }
 
+// Resolve the staging directory to a normal filesystem pathname whose current
+// binding still names the directory held open by staging.descriptor.  The
+// original name is preferred; /proc is used only to discover a renamed binding
+// and is never exposed as recovery evidence.
+inline bool durable_staging_container(const ProtectedStaging &staging,
+                                      std::filesystem::path &container,
+                                      std::error_code &error) noexcept
+{
+    container.clear();
+    if (staging.descriptor < 0 || !staging.identity.valid) {
+        error = std::make_error_code(std::errc::bad_file_descriptor);
+        return false;
+    }
+
+    std::error_code original_error;
+    if (!staging.container_path.empty() &&
+        same_object(staging.container_path, staging.identity, original_error)) {
+        container = staging.container_path;
+        error.clear();
+        return true;
+    }
+
+    std::error_code link_error;
+    std::filesystem::path resolved =
+        std::filesystem::read_symlink(staging.access_root(), link_error);
+    if (link_error || resolved.empty() || resolved.is_relative()) {
+        error = link_error ? link_error
+                           : std::make_error_code(std::errc::state_not_recoverable);
+        return false;
+    }
+
+    std::error_code resolved_error;
+    if (!same_object(resolved, staging.identity, resolved_error)) {
+        error = resolved_error ? resolved_error
+                               : std::make_error_code(std::errc::state_not_recoverable);
+        return false;
+    }
+
+    container = std::move(resolved);
+    error.clear();
+    return true;
+}
+
+// Once the verified container itself becomes recovery evidence, closing the
+// descriptor must not opportunistically remove an empty container and make the
+// returned path false.  release_staging will still close the descriptor.
+inline void preserve_staging_container(ProtectedStaging &staging) noexcept
+{
+    staging.identity = {};
+}
+
 inline bool record(const std::filesystem::path &path,
                    OwnedOutputs &outputs,
                    std::error_code &error) noexcept
@@ -836,7 +887,8 @@ inline bool cleanup_unpublished(
     OwnedOutputs &outputs,
     std::error_code &first_error,
     std::vector<std::filesystem::path> *retained_paths = nullptr,
-    AfterUnpublishedIdentityObservation after_identity_observation = nullptr) noexcept
+    AfterUnpublishedIdentityObservation after_identity_observation = nullptr,
+    IdentityForAtOperation payload_identity_operation = identity_for_at) noexcept
 {
     (void)near_path;
     first_error.clear();
@@ -869,22 +921,37 @@ inline bool cleanup_unpublished(
         after_identity_observation(staging.descriptor);
     }
 
-    struct stat payload_status {};
-    if (::fstatat(staging.descriptor,
-                  "payload",
-                  &payload_status,
-                  AT_SYMLINK_NOFOLLOW) != 0) {
-        if (errno == ENOENT) {
+    std::error_code payload_error;
+    const Identity payload_identity =
+        payload_identity_operation(staging.descriptor, "payload", payload_error);
+    if (payload_error || !payload_identity.valid) {
+        if (payload_error == std::errc::no_such_file_or_directory) {
             release_staging(staging);
             return true;
         }
-        first_error = std::error_code(errno, std::generic_category());
+        first_error = payload_error ? payload_error
+                                    : std::make_error_code(
+                                          std::errc::state_not_recoverable);
+        std::filesystem::path container;
+        std::error_code locator_error;
+        if (retained_paths != nullptr &&
+            durable_staging_container(staging, container, locator_error)) {
+            preserve_staging_container(staging);
+            retained_paths->push_back(container);
+        }
         return false;
     }
 
+    std::filesystem::path container;
+    std::error_code locator_error;
+    if (!durable_staging_container(staging, container, locator_error)) {
+        first_error = locator_error;
+        return false;
+    }
     first_error = std::make_error_code(std::errc::state_not_recoverable);
     if (retained_paths != nullptr) {
-        retained_paths->push_back(staging.container_path / "payload");
+        preserve_staging_container(staging);
+        retained_paths->push_back(container / "payload");
     }
     return false;
 }
