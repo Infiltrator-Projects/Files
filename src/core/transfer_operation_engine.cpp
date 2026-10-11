@@ -1156,4 +1156,3 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
 }
 
 } // namespace infiltrator::files
-

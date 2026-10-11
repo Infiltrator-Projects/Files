@@ -846,4 +846,3 @@ int main()
     fs::remove_all(root, error);
     return require(!error, "could not remove test root") ? 0 : 59;
 }
-

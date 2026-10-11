@@ -151,4 +151,3 @@ private:
 };
 
 } // namespace infiltrator::files
-

@@ -954,4 +954,3 @@ inline int open_exclusive(const std::filesystem::path &path, std::error_code &er
 }
 
 } // namespace infiltrator::files::destination_ownership
-

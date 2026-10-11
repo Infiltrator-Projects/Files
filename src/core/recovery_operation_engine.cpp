@@ -679,4 +679,3 @@ OperationResult RecoveryOperationEngine::delete_uri(const std::string_view uri) 
 }
 
 } // namespace infiltrator::files
-
