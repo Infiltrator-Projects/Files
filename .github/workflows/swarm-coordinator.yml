@@ -1,0 +1,46 @@
+name: Swarm Coordinator
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, closed, ready_for_review]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+  workflow_run:
+    workflows: ["Verify"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: files-swarm-coordinator
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out swarm control plane
+        uses: actions/checkout@v4
+        with:
+          ref: swarm/control
+          path: control
+          fetch-depth: 1
+
+      - name: Test coordinator routing
+        working-directory: control
+        run: python3 -m unittest -v swarm/test_coordinator.py
+
+      - name: Reconcile live GitHub into swarm state
+        working-directory: control
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: python3 swarm/coordinator.py
