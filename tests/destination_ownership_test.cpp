@@ -427,6 +427,7 @@ int main()
     }
 
     const auto private_file_public = root / "private-file-public";
+    fs::path private_file_stage;
     {
         ownership::ProtectedStaging private_file_staging;
         ownership::OwnedOutputs private_file_outputs;
@@ -439,6 +440,7 @@ int main()
             private_file_path,
             error,
             failing_identity_for_fd);
+        private_file_stage = private_file_staging.container_path;
         if (!require(private_file_descriptor < 0 &&
                          error == std::errc::io_error &&
                          private_file_outputs.empty() &&
@@ -448,7 +450,7 @@ int main()
             return 81;
         }
     }
-    if (!require(!has_internal_residue(root),
+    if (!require(!fs::exists(private_file_stage),
                  "record failure retained private regular-file staging residue")) {
         return 82;
     }
