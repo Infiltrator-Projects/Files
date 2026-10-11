@@ -213,6 +213,7 @@ This is not a promise that every item ships in the first release. It is the comp
 - **CORE** Cut/copy/paste clipboard workflow.
 - **CORE** Drag/drop copy/move.
 - **CORE** Same-filesystem rename/move takes the strongest atomic path available.
+- **CORE** Browsing remains available when a provider lacks atomic no-replace; affected mutations fail closed with a typed unsupported-capability result and leave source, visible destination and hidden staging paths unchanged. Provider-specific atomic equivalents remain future work.
 - **CORE** Cross-filesystem move is implemented as verified copy plus source removal with explicit partial-failure state.
 - **CORE** Preserve timestamps when policy and destination allow.
 - **CORE** Preserve permissions/ownership when policy and authority allow.

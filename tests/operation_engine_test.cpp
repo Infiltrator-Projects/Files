@@ -69,6 +69,13 @@ int main()
         return 5;
     }
 
+    if (OperationEngine::status_for_error(
+            std::make_error_code(std::errc::operation_not_supported)) !=
+        OperationStatus::UnsupportedCapability) {
+        fs::remove_all(root, cleanup_error);
+        return 91;
+    }
+
     const fs::path original = root / "original.txt";
     if (!write_text(original, "rename-copy-move\n")) {
         fs::remove_all(root, cleanup_error);

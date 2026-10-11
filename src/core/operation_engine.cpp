@@ -85,6 +85,10 @@ OperationStatus OperationEngine::status_for_error(const std::error_code &error) 
     if (!error) {
         return OperationStatus::Success;
     }
+    if (error == std::errc::operation_not_supported ||
+        error == std::errc::function_not_supported) {
+        return OperationStatus::UnsupportedCapability;
+    }
     if (error == std::errc::file_exists) {
         return OperationStatus::DestinationConflict;
     }
@@ -284,6 +288,8 @@ OperationResult OperationEngine::rename_item(const std::filesystem::path &source
             message = "You do not have permission to rename " + quoted_name(source) + ".";
         } else if (status == OperationStatus::ReadOnlyLocation) {
             message = "This location is read-only.";
+        } else if (status == OperationStatus::UnsupportedCapability) {
+            message = "This location does not provide the atomic no-replace operation required for a safe rename. The item was left unchanged.";
         } else {
             message = "The item could not be renamed: " + error.message();
         }

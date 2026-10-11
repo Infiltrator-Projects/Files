@@ -740,6 +740,8 @@ void ItemOperationController::on_operation_finished(GObject *source_object,
     if (!operation->ok() && operation->status != OperationStatus::Cancelled) {
         self->show_alert(operation->status == OperationStatus::VerificationFailure
                              ? "Operation completed with a verification problem"
+                             : operation->status == OperationStatus::UnsupportedCapability
+                                   ? "Operation not supported safely"
                              : "File operation failed",
                          operation->message);
     }

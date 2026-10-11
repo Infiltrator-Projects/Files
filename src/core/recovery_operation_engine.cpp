@@ -50,8 +50,10 @@ OperationStatus status_for_gerror(const GError *error) noexcept
     if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_EXISTS)) {
         return OperationStatus::DestinationConflict;
     }
-    if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED) ||
-        g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED)) {
+    if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED)) {
+        return OperationStatus::UnsupportedCapability;
+    }
+    if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED)) {
         return OperationStatus::PermissionFailure;
     }
     if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_READ_ONLY)) {
@@ -157,6 +159,19 @@ bool same_existing_object(const std::filesystem::path &left,
     return !error && same;
 }
 
+std::string staging_failure_message(const std::error_code &error,
+                                    const std::filesystem::path &retained)
+{
+    if (OperationEngine::status_for_error(error) ==
+        OperationStatus::UnsupportedCapability) {
+        return "This location does not provide the atomic no-replace operation required for safe replacement. The source and destination were left unchanged.";
+    }
+    return "The existing destination could not be staged safely: " + error.message() +
+           (retained.empty() ? std::string{}
+                             : " The original destination was retained at “" +
+                                   retained.string() + "”.");
+}
+
 } // namespace
 
 OperationResult RecoveryOperationEngine::replace_copy(
@@ -192,11 +207,7 @@ OperationResult RecoveryOperationEngine::replace_copy(
         return result(OperationEngine::status_for_error(error),
                       OperationPhase::Execute,
                       destination,
-                      "The existing destination could not be staged safely: " + error.message() +
-                          (staging_quarantine.empty()
-                               ? std::string{}
-                               : " The original destination was retained at “" +
-                                     staging_quarantine.string() + "”."),
+                      staging_failure_message(error, staging_quarantine),
                       !staging_quarantine.empty());
     }
 
@@ -259,11 +270,7 @@ OperationResult RecoveryOperationEngine::replace_move(
         return result(OperationEngine::status_for_error(error),
                       OperationPhase::Execute,
                       destination,
-                      "The existing destination could not be staged safely: " + error.message() +
-                          (staging_quarantine.empty()
-                               ? std::string{}
-                               : " The original destination was retained at “" +
-                                     staging_quarantine.string() + "”."),
+                      staging_failure_message(error, staging_quarantine),
                       !staging_quarantine.empty());
     }
 
@@ -434,12 +441,7 @@ OperationResult RecoveryOperationEngine::restore_item(
             return result(OperationEngine::status_for_error(error),
                           OperationPhase::Execute,
                           original_path,
-                          "The existing item could not be staged safely before restore: " +
-                              error.message() +
-                              (staging_quarantine.empty()
-                                   ? std::string{}
-                                   : " The original destination was retained at “" +
-                                         staging_quarantine.string() + "”."),
+                          staging_failure_message(error, staging_quarantine),
                           !staging_quarantine.empty());
         }
     }

@@ -32,6 +32,35 @@ bool write_text(const std::filesystem::path &path, const std::string &text)
     return output.good();
 }
 
+bool unsupported_eopnotsupp(const std::filesystem::path &,
+                            const std::filesystem::path &,
+                            std::error_code &error) noexcept
+{
+    error = std::error_code(EOPNOTSUPP, std::generic_category());
+    return false;
+}
+
+bool unsupported_enotsup(const std::filesystem::path &,
+                         const std::filesystem::path &,
+                         std::error_code &error) noexcept
+{
+    error = std::error_code(ENOTSUP, std::generic_category());
+    return false;
+}
+
+bool has_internal_residue(const std::filesystem::path &root)
+{
+    std::error_code error;
+    for (std::filesystem::directory_iterator iterator(root, error), end;
+         !error && iterator != end;
+         iterator.increment(error)) {
+        if (iterator->path().filename().string().starts_with(".infiltrator-")) {
+            return true;
+        }
+    }
+    return static_cast<bool>(error);
+}
+
 } // namespace
 
 int main()
@@ -407,6 +436,71 @@ int main()
     fs::permissions(partial_cleanup, fs::perms::owner_all, fs::perm_options::replace, error);
     if (!require(!error, "could not restore cleanup fixture permissions")) {
         return 53;
+    }
+
+    const auto unsupported_root_one = root / "unsupported-eopnotsupp";
+    error.clear();
+    if (!require(fs::create_directory(unsupported_root_one, error) && !error,
+                 "could not create EOPNOTSUPP root")) {
+        return 60;
+    }
+    const auto unsupported_source_one = unsupported_root_one / "source";
+    const auto unsupported_target_one = unsupported_root_one / "target";
+    if (!require(write_text(unsupported_source_one, "untouched"),
+                 "could not create EOPNOTSUPP fixture")) {
+        return 61;
+    }
+    ownership::OwnedOutputs unsupported_outputs_one;
+    if (!require(ownership::record(unsupported_source_one, unsupported_outputs_one, error),
+                 "could not record EOPNOTSUPP fixture")) {
+        return 62;
+    }
+    ownership::OwnedOutput unsupported_moved;
+    error.clear();
+    if (!require(!ownership::move_owned_no_replace(unsupported_outputs_one.front(),
+                                                    unsupported_target_one,
+                                                    unsupported_moved,
+                                                    error,
+                                                    nullptr,
+                                                    unsupported_eopnotsupp) &&
+                     error == std::errc::operation_not_supported &&
+                     read_text(unsupported_source_one) == "untouched" &&
+                     !fs::exists(unsupported_target_one) &&
+                     !has_internal_residue(unsupported_root_one),
+                 "EOPNOTSUPP capability failure mutated the source, destination, or hidden state")) {
+        return 63;
+    }
+
+    const auto unsupported_root_two = root / "unsupported-enotsup";
+    error.clear();
+    if (!require(fs::create_directory(unsupported_root_two, error) && !error,
+                 "could not create ENOTSUP root")) {
+        return 64;
+    }
+    const auto unsupported_source_two = unsupported_root_two / "source";
+    const auto unsupported_target_two = unsupported_root_two / "target";
+    if (!require(write_text(unsupported_source_two, "untouched"),
+                 "could not create ENOTSUP fixture")) {
+        return 65;
+    }
+    ownership::OwnedOutputs unsupported_outputs_two;
+    if (!require(ownership::record(unsupported_source_two, unsupported_outputs_two, error),
+                 "could not record ENOTSUP fixture")) {
+        return 66;
+    }
+    error.clear();
+    if (!require(!ownership::move_owned_no_replace(unsupported_outputs_two.front(),
+                                                    unsupported_target_two,
+                                                    unsupported_moved,
+                                                    error,
+                                                    nullptr,
+                                                    unsupported_enotsup) &&
+                     error == std::errc::operation_not_supported &&
+                     read_text(unsupported_source_two) == "untouched" &&
+                     !fs::exists(unsupported_target_two) &&
+                     !has_internal_residue(unsupported_root_two),
+                 "ENOTSUP capability failure mutated the source, destination, or hidden state")) {
+        return 67;
     }
 
     const auto previous_directory = fs::current_path(error);

@@ -32,6 +32,9 @@ struct OwnedOutput {
 };
 
 using OwnedOutputs = std::vector<OwnedOutput>;
+using RenameNoReplaceOperation = bool (*)(const std::filesystem::path &,
+                                          const std::filesystem::path &,
+                                          std::error_code &) noexcept;
 
 inline Identity identity_for(const std::filesystem::path &path, std::error_code &error) noexcept
 {
@@ -324,7 +327,8 @@ inline bool move_owned_no_replace(const OwnedOutput &source,
                                   const std::filesystem::path &destination,
                                   OwnedOutput &moved,
                                   std::error_code &error,
-                                  std::filesystem::path *retained_quarantine = nullptr) noexcept
+                                  std::filesystem::path *retained_quarantine = nullptr,
+                                  RenameNoReplaceOperation rename_operation = rename_no_replace) noexcept
 {
     if (retained_quarantine != nullptr) {
         retained_quarantine->clear();
@@ -339,19 +343,49 @@ inline bool move_owned_no_replace(const OwnedOutput &source,
         return false;
     }
 
-    const std::filesystem::path quarantine =
-        quarantine_owned(source, error, retained_quarantine);
+    static std::atomic<std::uint64_t> serial{0};
+    std::filesystem::path quarantine;
+    for (std::uint32_t attempt = 0; attempt < 1024U; ++attempt) {
+        const std::uint64_t id = serial.fetch_add(1U, std::memory_order_relaxed);
+        const auto candidate =
+            source.path.parent_path() /
+            (".infiltrator-cleanup-" +
+             std::to_string(static_cast<long long>(::getpid())) + "-" +
+             std::to_string(id));
+        if (rename_operation(source.path, candidate, error)) {
+            quarantine = candidate;
+            break;
+        }
+        if (error != std::errc::file_exists) {
+            return false;
+        }
+    }
     if (quarantine.empty()) {
+        error = std::make_error_code(std::errc::file_exists);
         return false;
     }
-    if (rename_no_replace(quarantine, destination, error)) {
+
+    std::error_code inspect_error;
+    if (!same_object(quarantine, source.identity, inspect_error)) {
+        std::error_code restore_error;
+        if (!rename_operation(quarantine, source.path, restore_error) &&
+            retained_quarantine != nullptr) {
+            *retained_quarantine = quarantine;
+        }
+        error = inspect_error ? inspect_error
+                              : (restore_error ? restore_error
+                                               : std::make_error_code(std::errc::state_not_recoverable));
+        return false;
+    }
+
+    if (rename_operation(quarantine, destination, error)) {
         moved = OwnedOutput{destination, source.identity};
         return true;
     }
 
     const std::error_code publish_error = error;
     std::error_code restore_error;
-    if (!restore_quarantine(quarantine, source.path, restore_error)) {
+    if (!rename_operation(quarantine, source.path, restore_error)) {
         if (retained_quarantine != nullptr) {
             *retained_quarantine = quarantine;
         }
@@ -485,6 +519,36 @@ inline bool cleanup_owned(OwnedOutputs &outputs, std::error_code &first_error) n
         }
     }
 
+    return complete;
+}
+
+// Private copy/link paths have never been published. When a provider rejects
+// atomic no-replace, the normal quarantine-based cleanup is unavailable too;
+// remove only entries whose recorded identity still matches, children first.
+inline bool cleanup_unpublished(OwnedOutputs &outputs, std::error_code &first_error) noexcept
+{
+    bool complete = true;
+    first_error.clear();
+    for (auto iterator = outputs.rbegin(); iterator != outputs.rend(); ++iterator) {
+        std::error_code inspect_error;
+        if (!same_object(iterator->path, iterator->identity, inspect_error)) {
+            if (inspect_error == std::errc::no_such_file_or_directory) {
+                continue;
+            }
+            if (inspect_error && !first_error) {
+                first_error = inspect_error;
+            }
+            complete = false;
+            continue;
+        }
+        std::error_code remove_error;
+        if (!std::filesystem::remove(iterator->path, remove_error) || remove_error) {
+            if (remove_error && !first_error) {
+                first_error = remove_error;
+            }
+            complete = false;
+        }
+    }
     return complete;
 }
 

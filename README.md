@@ -89,6 +89,7 @@ It currently provides:
 - explicit single-item destination-conflict choices for **Skip**, **Keep Both** and **Replace** rather than implicit overwrite behaviour;
 - deterministic Keep Both naming such as `name (copy).ext`, `name (copy 2).ext` and subsequent unique names while preserving file extensions;
 - destination names are claimed at the mutation boundary with no-replace semantics, so a competing writer is reported as a conflict rather than overwritten after preflight;
+- browsing remains available on providers that cannot supply atomic no-replace; safe Rename, Move, private publication and replacement instead return a typed unsupported-capability result before changing the source or visible destination, while provider-specific atomic equivalents remain future work;
 - failed or cancelled transfers remove only filesystem objects whose recorded identity still belongs to that operation, leaving competing-writer data intact;
 - replacement staging records the previous destination identity and first quarantines that exact object; an object swapped into the visible name is restored with no-replace semantics rather than stranded under an internal name;
 - explicit **Replace** handling that stages the existing destination rather than deleting it first;
@@ -116,7 +117,7 @@ It currently provides:
 - conservative interrupted-operation closure as **verification failure**, never inferred success, while retaining the exact operation kind/source/destination for inspection;
 - an explicit warning/inspection surface when interrupted operations are found, including notification if the recovery END itself cannot be persisted;
 - journal completion failures surfaced as verification problems instead of silently inventing a durable completed state;
-- distinct handling for invalid requests, destination conflicts, permission failures, read-only locations, cancellation, execution failures and verification failures;
+- distinct handling for invalid requests, destination conflicts, permission failures, read-only locations, unsupported safe-operation capabilities, cancellation, execution failures and verification failures;
 - asynchronous execution of mutation work so filesystem operations do not block the GTK main loop;
 - monitored refresh and automatic selection of newly created, renamed, copied or moved single items when their result appears in the current view;
 - separate creation, single-item operation, batch operation, destructive/recovery, journal-inspection and theme controllers so interaction policy does not accumulate inside `FileManagerWindow`;

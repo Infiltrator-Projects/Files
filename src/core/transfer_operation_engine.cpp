@@ -361,6 +361,13 @@ OperationResult metadata_failure(const std::filesystem::path &destination,
                    !cleaned);
 }
 
+std::string unsupported_capability_message(const bool cleaned = true)
+{
+    return "This location does not provide the atomic no-replace operation required for this transfer. The source and visible destination were left unchanged." +
+           std::string{cleaned ? " No private staging paths remain."
+                               : " A private staging path was retained for safety."};
+}
+
 OperationResult copy_exact(const std::filesystem::path &source,
                            const std::filesystem::path &destination,
                            TransferControl *control,
@@ -492,12 +499,17 @@ OperationResult copy_exact(const std::filesystem::path &source,
     if (error) {
         const auto status = OperationEngine::status_for_error(error);
         std::error_code cleanup_error;
-        const bool cleaned = destination_ownership::cleanup_owned(owned, cleanup_error);
+        const bool cleaned = status == OperationStatus::UnsupportedCapability
+                                 ? destination_ownership::cleanup_unpublished(owned, cleanup_error)
+                                 : destination_ownership::cleanup_owned(owned, cleanup_error);
         return failure(status,
                        OperationPhase::Execute,
                        destination,
-                       "The transfer failed: " + error.message() +
-                           (cleaned ? std::string{} : " Non-owned destination content was left in place."),
+                       status == OperationStatus::UnsupportedCapability
+                           ? unsupported_capability_message(cleaned)
+                           : "The transfer failed: " + error.message() +
+                                 (cleaned ? std::string{}
+                                          : " Non-owned destination content was left in place."),
                        !cleaned);
     }
 
@@ -523,15 +535,20 @@ OperationResult copy_exact(const std::filesystem::path &source,
         if (!destination_ownership::publish_private_tree(
                 private_destination, destination, owned, error)) {
             std::error_code cleanup_error;
-            const bool cleaned = destination_ownership::cleanup_owned(owned, cleanup_error);
-            return failure(error == std::errc::file_exists
-                               ? OperationStatus::DestinationConflict
-                               : OperationEngine::status_for_error(error),
+            const auto status = error == std::errc::file_exists
+                                    ? OperationStatus::DestinationConflict
+                                    : OperationEngine::status_for_error(error);
+            const bool cleaned = status == OperationStatus::UnsupportedCapability
+                                     ? destination_ownership::cleanup_unpublished(owned, cleanup_error)
+                                     : destination_ownership::cleanup_owned(owned, cleanup_error);
+            return failure(status,
                            OperationPhase::Execute,
                            destination,
-                           "The destination was claimed by another writer before publication." +
-                               std::string{cleaned ? " The private copy was removed."
-                                                   : " The private copy was retained for safety."},
+                           status == OperationStatus::UnsupportedCapability
+                               ? unsupported_capability_message(cleaned)
+                               : "The destination was claimed by another writer before publication." +
+                                     std::string{cleaned ? " The private copy was removed."
+                                                         : " The private copy was retained for safety."},
                            !cleaned);
         }
     }
@@ -853,14 +870,17 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
     }
 
     if (error != std::errc::cross_device_link) {
-        return failure(OperationEngine::status_for_error(error),
+        const auto status = OperationEngine::status_for_error(error);
+        return failure(status,
                        OperationPhase::Execute,
                        decision.destination,
-                       "The item could not be moved: " + error.message() +
-                           (retained_source_quarantine.empty()
-                                ? std::string{}
-                                : " The original item was retained safely at “" +
-                                      retained_source_quarantine.string() + "”."),
+                       status == OperationStatus::UnsupportedCapability
+                           ? unsupported_capability_message()
+                           : "The item could not be moved: " + error.message() +
+                                 (retained_source_quarantine.empty()
+                                      ? std::string{}
+                                      : " The original item was retained safely at “" +
+                                            retained_source_quarantine.string() + "”."),
                        !retained_source_quarantine.empty());
     }
 
