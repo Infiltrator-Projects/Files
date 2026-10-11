@@ -44,6 +44,10 @@ using AfterUnpublishedIdentityObservation = void (*)(int) noexcept;
 
 struct ProtectedStaging;
 inline void release_staging(ProtectedStaging &staging) noexcept;
+using RetainStagedPayloadOperation = bool (*)(ProtectedStaging &,
+                                              const std::filesystem::path &,
+                                              std::filesystem::path &,
+                                              std::error_code &) noexcept;
 
 struct ProtectedStaging {
     std::filesystem::path container_path;
@@ -361,6 +365,45 @@ inline bool retain_staged_payload(ProtectedStaging &staging,
     return false;
 }
 
+// A failed publication attempt does not prove whether the descriptor-relative
+// payload still exists.  Resolve that fact through the open staging directory,
+// and expose only a current, identity-verified ordinary pathname.  ENOENT is
+// proven absence; any other inspection uncertainty is represented by the
+// containing directory rather than an invented payload path.
+inline bool staged_payload_recovery_evidence(
+    ProtectedStaging &staging,
+    std::filesystem::path &retained,
+    bool &payload_absent,
+    std::error_code &error,
+    IdentityForAtOperation identity_operation = identity_for_at) noexcept
+{
+    retained.clear();
+    payload_absent = false;
+
+    std::error_code presence_error;
+    const Identity payload = identity_operation(staging.descriptor, "payload", presence_error);
+    if (presence_error == std::errc::no_such_file_or_directory ||
+        presence_error == std::errc::not_a_directory) {
+        payload_absent = true;
+        release_staging(staging);
+        error = presence_error;
+        return true;
+    }
+
+    std::filesystem::path container;
+    std::error_code locator_error;
+    if (!durable_staging_container(staging, container, locator_error)) {
+        error = locator_error ? locator_error
+                              : std::make_error_code(std::errc::state_not_recoverable);
+        return false;
+    }
+
+    retained = !presence_error && payload.valid ? container / "payload" : container;
+    preserve_staging_container(staging);
+    error = presence_error;
+    return true;
+}
+
 inline bool create_directory_exclusive(const std::filesystem::path &path,
                                        std::error_code &error) noexcept
 {
@@ -540,12 +583,14 @@ inline bool verify_all(const OwnedOutputs &outputs, std::error_code &error) noex
     return !outputs.empty();
 }
 
-inline bool quarantine_owned(
+inline bool quarantine_owned_with_operations(
     const OwnedOutput &output,
     ProtectedStaging &staging,
     std::filesystem::path &quarantine,
     std::error_code &error,
-    std::filesystem::path *retained_quarantine = nullptr) noexcept
+    std::filesystem::path *retained_quarantine,
+    IdentityForAtOperation identity_operation,
+    RetainStagedPayloadOperation retain_operation) noexcept
 {
     quarantine.clear();
     if (retained_quarantine != nullptr) {
@@ -564,7 +609,7 @@ inline bool quarantine_owned(
 
     quarantine = staging.access_root() / "payload";
     std::error_code inspect_error;
-    const Identity current = identity_for_at(staging.descriptor, "payload", inspect_error);
+    const Identity current = identity_operation(staging.descriptor, "payload", inspect_error);
     if (!inspect_error && current.valid && output.identity.valid &&
         current.device == output.identity.device && current.inode == output.identity.inode) {
         error.clear();
@@ -581,12 +626,20 @@ inline bool quarantine_owned(
     } else {
         std::filesystem::path retained;
         std::error_code retain_error;
-        if (retain_staged_payload(staging, output.path, retained, retain_error)) {
+        if (retain_operation(staging, output.path, retained, retain_error)) {
             if (retained_quarantine != nullptr) {
                 *retained_quarantine = retained;
             }
-        } else if (retained_quarantine != nullptr) {
-            *retained_quarantine = staging.container_path / "payload";
+        } else {
+            bool payload_absent = false;
+            std::error_code evidence_error;
+            if (staged_payload_recovery_evidence(staging,
+                                                 retained,
+                                                 payload_absent,
+                                                 evidence_error) &&
+                !payload_absent && retained_quarantine != nullptr) {
+                *retained_quarantine = retained;
+            }
         }
     }
 
@@ -595,10 +648,30 @@ inline bool quarantine_owned(
     return false;
 }
 
+inline bool quarantine_owned(
+    const OwnedOutput &output,
+    ProtectedStaging &staging,
+    std::filesystem::path &quarantine,
+    std::error_code &error,
+    std::filesystem::path *retained_quarantine = nullptr) noexcept
+{
+    return quarantine_owned_with_operations(output,
+                                            staging,
+                                            quarantine,
+                                            error,
+                                            retained_quarantine,
+                                            identity_for_at,
+                                            retain_staged_payload);
+}
+
 inline bool restore_quarantine(ProtectedStaging &staging,
                                const std::filesystem::path &original,
                                std::error_code &error,
-                               std::filesystem::path *retained_quarantine = nullptr) noexcept
+                               std::filesystem::path *retained_quarantine = nullptr,
+                               RetainStagedPayloadOperation retain_operation =
+                                   retain_staged_payload,
+                               IdentityForAtOperation identity_operation =
+                                   identity_for_at) noexcept
 {
     if (retained_quarantine != nullptr) {
         retained_quarantine->clear();
@@ -615,15 +688,22 @@ inline bool restore_quarantine(ProtectedStaging &staging,
     const std::error_code restore_error = error;
     std::filesystem::path retained;
     std::error_code retain_error;
-    if (retain_staged_payload(staging, original, retained, retain_error)) {
+    if (retain_operation(staging, original, retained, retain_error)) {
         if (retained_quarantine != nullptr) {
             *retained_quarantine = retained;
         }
         error = restore_error;
         return false;
     }
-    if (retained_quarantine != nullptr) {
-        *retained_quarantine = staging.container_path / "payload";
+    bool payload_absent = false;
+    std::error_code evidence_error;
+    if (staged_payload_recovery_evidence(staging,
+                                         retained,
+                                         payload_absent,
+                                         evidence_error,
+                                         identity_operation) &&
+        !payload_absent && retained_quarantine != nullptr) {
+        *retained_quarantine = retained;
     }
     error = retain_error ? retain_error : restore_error;
     return false;
