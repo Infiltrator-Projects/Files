@@ -63,6 +63,65 @@ std::filesystem::path rebound_container_original;
 std::filesystem::path rebound_container_owned;
 bool rebound_container_replaced = false;
 
+std::filesystem::path quarantine_fault_source;
+std::filesystem::path quarantine_fault_owned_container;
+
+infiltrator::files::destination_ownership::Identity rebind_quarantine_and_fail_identity(
+    const int directory_descriptor,
+    const char *,
+    std::error_code &error) noexcept
+{
+    namespace fs = std::filesystem;
+    std::error_code fixture_error;
+    const auto current = fs::read_symlink(
+        fs::path{"/proc/self/fd"} / std::to_string(directory_descriptor), fixture_error);
+    if (!fixture_error) {
+        fs::rename(current, quarantine_fault_owned_container, fixture_error);
+    }
+    if (!fixture_error) {
+        fs::create_directory(current, fixture_error);
+    }
+    if (!fixture_error) {
+        (void)write_text(current / "payload", "competing staging payload");
+        (void)write_text(quarantine_fault_source, "competing source");
+    }
+    error = std::make_error_code(std::errc::io_error);
+    return {};
+}
+
+infiltrator::files::destination_ownership::Identity remove_quarantine_and_fail_identity(
+    const int directory_descriptor,
+    const char *,
+    std::error_code &error) noexcept
+{
+    (void)::unlinkat(directory_descriptor, "payload", 0);
+    (void)write_text(quarantine_fault_source, "competing source");
+    error = std::make_error_code(std::errc::io_error);
+    return {};
+}
+
+bool fail_retain_staged_payload(
+    infiltrator::files::destination_ownership::ProtectedStaging &,
+    const std::filesystem::path &,
+    std::filesystem::path &retained,
+    std::error_code &error) noexcept
+{
+    retained.clear();
+    error = std::make_error_code(std::errc::io_error);
+    return false;
+}
+
+bool report_absent_retain_staged_payload(
+    infiltrator::files::destination_ownership::ProtectedStaging &,
+    const std::filesystem::path &,
+    std::filesystem::path &retained,
+    std::error_code &error) noexcept
+{
+    retained.clear();
+    error = std::make_error_code(std::errc::no_such_file_or_directory);
+    return false;
+}
+
 void replace_unpublished_container(const int) noexcept
 {
     std::error_code error;
@@ -1002,6 +1061,175 @@ int main()
                      read_text(retained_path) == "owned retained",
                  "blocked source restoration did not surface retained data")) {
         return 80;
+    }
+
+    // quarantine_owned must follow the descriptor's renamed container after
+    // both restoration and retention publication fail, never the replaced
+    // historical staging pathname.
+    const auto quarantine_rebind_source = root / "quarantine-rebind-source";
+    quarantine_fault_source = quarantine_rebind_source;
+    quarantine_fault_owned_container = root / "quarantine-rebind-owned";
+    if (!require(write_text(quarantine_rebind_source, "owned quarantine"),
+                 "could not create quarantine rebinding fixture")) {
+        return 90;
+    }
+    ownership::OwnedOutputs quarantine_rebind_outputs;
+    if (!require(ownership::record(quarantine_rebind_source,
+                                   quarantine_rebind_outputs,
+                                   error),
+                 "could not record quarantine rebinding fixture")) {
+        return 91;
+    }
+    ownership::ProtectedStaging quarantine_rebind_staging;
+    fs::path quarantine_rebind_payload;
+    fs::path quarantine_rebind_retained;
+    error.clear();
+    if (!require(!ownership::quarantine_owned_with_operations(
+                         quarantine_rebind_outputs.front(),
+                         quarantine_rebind_staging,
+                         quarantine_rebind_payload,
+                         error,
+                         &quarantine_rebind_retained,
+                         rebind_quarantine_and_fail_identity,
+                         fail_retain_staged_payload) &&
+                     error == std::errc::io_error &&
+                     quarantine_rebind_retained ==
+                         quarantine_fault_owned_container / "payload" &&
+                     read_text(quarantine_rebind_retained) == "owned quarantine" &&
+                     read_text(quarantine_rebind_source) == "competing source" &&
+                     read_text(quarantine_rebind_staging.container_path / "payload") ==
+                         "competing staging payload" &&
+                     quarantine_rebind_retained.string().find("/proc/self/fd/") ==
+                         std::string::npos,
+                 "quarantine failure reported the historical staging binding")) {
+        return 92;
+    }
+    ownership::release_staging(quarantine_rebind_staging);
+
+    // The same quarantine failure must not invent evidence when the payload
+    // was removed before restoration/retention could inspect it.
+    const auto quarantine_absent_source = root / "quarantine-absent-source";
+    quarantine_fault_source = quarantine_absent_source;
+    if (!require(write_text(quarantine_absent_source, "remove before evidence"),
+                 "could not create quarantine absence fixture")) {
+        return 93;
+    }
+    ownership::OwnedOutputs quarantine_absent_outputs;
+    if (!require(ownership::record(quarantine_absent_source,
+                                   quarantine_absent_outputs,
+                                   error),
+                 "could not record quarantine absence fixture")) {
+        return 94;
+    }
+    ownership::ProtectedStaging quarantine_absent_staging;
+    fs::path quarantine_absent_payload;
+    fs::path quarantine_absent_retained;
+    error.clear();
+    if (!require(!ownership::quarantine_owned_with_operations(
+                         quarantine_absent_outputs.front(),
+                         quarantine_absent_staging,
+                         quarantine_absent_payload,
+                         error,
+                         &quarantine_absent_retained,
+                         remove_quarantine_and_fail_identity,
+                         report_absent_retain_staged_payload) &&
+                     error == std::errc::io_error &&
+                     quarantine_absent_retained.empty() &&
+                     quarantine_absent_staging.descriptor < 0 &&
+                     read_text(quarantine_absent_source) == "competing source",
+                 "proven-absent quarantine payload produced false evidence")) {
+        return 95;
+    }
+
+    // Descriptor-backed restore_quarantine applies the identical rule after
+    // its direct restore and publication fallback both fail.
+    const auto restore_rebind_source = root / "restore-rebind-source";
+    if (!require(write_text(restore_rebind_source, "owned restore"),
+                 "could not create restore rebinding fixture")) {
+        return 96;
+    }
+    ownership::OwnedOutputs restore_rebind_outputs;
+    if (!require(ownership::record(restore_rebind_source,
+                                   restore_rebind_outputs,
+                                   error),
+                 "could not record restore rebinding fixture")) {
+        return 97;
+    }
+    ownership::ProtectedStaging restore_rebind_staging;
+    fs::path restore_rebind_payload;
+    error.clear();
+    if (!require(ownership::quarantine_owned(restore_rebind_outputs.front(),
+                                             restore_rebind_staging,
+                                             restore_rebind_payload,
+                                             error),
+                 "could not prepare restore rebinding fixture")) {
+        return 98;
+    }
+    const auto restore_visible_container = restore_rebind_staging.container_path;
+    const auto restore_owned_container = root / "restore-rebind-owned";
+    fs::rename(restore_visible_container, restore_owned_container, error);
+    if (!require(!error && fs::create_directory(restore_visible_container, error) &&
+                     write_text(restore_visible_container / "payload",
+                                "competing staging payload") &&
+                     write_text(restore_rebind_source, "competing source"),
+                 "could not replace restore staging binding")) {
+        return 99;
+    }
+    fs::path restore_rebind_retained;
+    error.clear();
+    if (!require(!ownership::restore_quarantine(restore_rebind_staging,
+                                                restore_rebind_source,
+                                                error,
+                                                &restore_rebind_retained,
+                                                fail_retain_staged_payload) &&
+                     error == std::errc::io_error &&
+                     restore_rebind_retained == restore_owned_container / "payload" &&
+                     read_text(restore_rebind_retained) == "owned restore" &&
+                     read_text(restore_visible_container / "payload") ==
+                         "competing staging payload" &&
+                     restore_rebind_retained.string().find("/proc/self/fd/") ==
+                         std::string::npos,
+                 "restore failure reported the historical staging binding")) {
+        return 100;
+    }
+    ownership::release_staging(restore_rebind_staging);
+
+    const auto restore_absent_source = root / "restore-absent-source";
+    if (!require(write_text(restore_absent_source, "remove before restore evidence"),
+                 "could not create restore absence fixture")) {
+        return 101;
+    }
+    ownership::OwnedOutputs restore_absent_outputs;
+    if (!require(ownership::record(restore_absent_source,
+                                   restore_absent_outputs,
+                                   error),
+                 "could not record restore absence fixture")) {
+        return 102;
+    }
+    ownership::ProtectedStaging restore_absent_staging;
+    fs::path restore_absent_payload;
+    error.clear();
+    if (!require(ownership::quarantine_owned(restore_absent_outputs.front(),
+                                             restore_absent_staging,
+                                             restore_absent_payload,
+                                             error) &&
+                     ::unlinkat(restore_absent_staging.descriptor, "payload", 0) == 0 &&
+                     write_text(restore_absent_source, "competing source"),
+                 "could not prepare restore absence fixture")) {
+        return 103;
+    }
+    fs::path restore_absent_retained;
+    error.clear();
+    if (!require(!ownership::restore_quarantine(restore_absent_staging,
+                                                restore_absent_source,
+                                                error,
+                                                &restore_absent_retained,
+                                                report_absent_retain_staged_payload) &&
+                     restore_absent_retained.empty() &&
+                     restore_absent_staging.descriptor < 0 &&
+                     read_text(restore_absent_source) == "competing source",
+                 "proven-absent restore payload produced false evidence")) {
+        return 104;
     }
 
     const auto previous_directory = fs::current_path(error);
