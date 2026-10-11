@@ -12,6 +12,7 @@ using infiltrator::files::ConflictPolicy;
 using infiltrator::files::OperationStatus;
 using infiltrator::files::TransferControl;
 using infiltrator::files::TransferOperationEngine;
+using infiltrator::files::TransferOperationHooks;
 
 namespace {
 
@@ -20,6 +21,81 @@ bool write_text(const std::filesystem::path &path, const std::string &text)
     std::ofstream stream(path, std::ios::binary | std::ios::trunc);
     stream << text;
     return stream.good();
+}
+
+bool force_cross_device(
+    const infiltrator::files::destination_ownership::OwnedOutput &,
+    const std::filesystem::path &,
+    infiltrator::files::destination_ownership::OwnedOutput &,
+    std::error_code &error,
+    std::filesystem::path *retained) noexcept
+{
+    if (retained != nullptr) {
+        retained->clear();
+    }
+    error = std::make_error_code(std::errc::cross_device_link);
+    return false;
+}
+
+bool force_unsupported_quarantine(
+    const infiltrator::files::destination_ownership::OwnedOutput &,
+    infiltrator::files::destination_ownership::ProtectedStaging &,
+    std::filesystem::path &quarantine,
+    std::error_code &error,
+    std::filesystem::path *retained) noexcept
+{
+    quarantine.clear();
+    if (retained != nullptr) {
+        retained->clear();
+    }
+    error = std::make_error_code(std::errc::operation_not_supported);
+    return false;
+}
+
+unsigned int unsupported_publication_calls = 0U;
+
+bool force_unsupported_publication(
+    infiltrator::files::destination_ownership::ProtectedStaging &,
+    const std::filesystem::path &,
+    const std::filesystem::path &,
+    infiltrator::files::destination_ownership::OwnedOutputs &,
+    std::error_code &error) noexcept
+{
+    ++unsupported_publication_calls;
+    error = std::make_error_code(std::errc::operation_not_supported);
+    return false;
+}
+
+bool force_permission_denied_publication(
+    infiltrator::files::destination_ownership::ProtectedStaging &,
+    const std::filesystem::path &,
+    const std::filesystem::path &,
+    infiltrator::files::destination_ownership::OwnedOutputs &,
+    std::error_code &error) noexcept
+{
+    error = std::make_error_code(std::errc::permission_denied);
+    return false;
+}
+
+void cancel_after_private_root(TransferControl &control,
+                               const infiltrator::files::TransferProgress &progress) noexcept
+{
+    if (progress.items_done >= 1U) {
+        control.request_cancel();
+    }
+}
+
+bool has_internal_residue(const std::filesystem::path &root)
+{
+    std::error_code error;
+    for (std::filesystem::directory_iterator iterator(root, error), end;
+         !error && iterator != end;
+         iterator.increment(error)) {
+        if (iterator->path().filename().string().starts_with(".infiltrator-")) {
+            return true;
+        }
+    }
+    return static_cast<bool>(error);
 }
 
 } // namespace
@@ -198,6 +274,77 @@ int main()
         !fs::exists(moved.destination)) {
         fs::remove_all(root, cleanup_error);
         return 20;
+    }
+
+    const fs::path unsupported_source = root / "unsupported-move.txt";
+    const fs::path unsupported_destination_parent = root / "unsupported-destination";
+    fs::create_directories(unsupported_destination_parent);
+    if (!write_text(unsupported_source, "unsupported move payload\n")) {
+        fs::remove_all(root, cleanup_error);
+        return 21;
+    }
+    TransferOperationHooks unsupported_hooks;
+    unsupported_hooks.move_owned = force_cross_device;
+    unsupported_hooks.quarantine_owned = force_unsupported_quarantine;
+    TransferOperationEngine unsupported_engine{unsupported_hooks};
+    const auto unsupported_move = unsupported_engine.move_item(
+        unsupported_source, unsupported_destination_parent, ConflictPolicy::Fail);
+    if (unsupported_move.status != OperationStatus::UnsupportedCapability ||
+        unsupported_move.changed || !unsupported_move.retained_paths.empty() ||
+        !fs::exists(unsupported_source) ||
+        fs::exists(unsupported_destination_parent / unsupported_source.filename()) ||
+        unsupported_move.message.find("source was left in place") == std::string::npos ||
+        unsupported_move.message.find("copied destination was removed") == std::string::npos) {
+        fs::remove_all(root, cleanup_error);
+        return 22;
+    }
+
+    const fs::path cancelled_tree = root / "cancelled-tree";
+    fs::create_directories(cancelled_tree / "nested");
+    if (!write_text(cancelled_tree / "nested" / "data.bin", "cancelled tree payload\n")) {
+        fs::remove_all(root, cleanup_error);
+        return 23;
+    }
+    const fs::path unsupported_private_parent = root / "unsupported-private-destination";
+    fs::create_directories(unsupported_private_parent);
+    unsupported_hooks.publish_tree = force_unsupported_publication;
+    TransferOperationEngine unsupported_private_engine{unsupported_hooks};
+    TransferControl traversal_cancel{cancel_after_private_root};
+    unsupported_publication_calls = 0U;
+    const auto cancelled_traversal = unsupported_private_engine.copy_item(
+        cancelled_tree,
+        unsupported_private_parent,
+        ConflictPolicy::Fail,
+        &traversal_cancel);
+    if (cancelled_traversal.status != OperationStatus::Cancelled ||
+        cancelled_traversal.changed || !cancelled_traversal.retained_paths.empty() ||
+        unsupported_publication_calls != 0U ||
+        fs::exists(unsupported_private_parent / cancelled_tree.filename()) ||
+        has_internal_residue(unsupported_private_parent)) {
+        fs::remove_all(root, cleanup_error);
+        return 24;
+    }
+
+    const fs::path denied_source = root / "permission-publication.txt";
+    const fs::path denied_parent = root / "permission-publication-destination";
+    fs::create_directories(denied_parent);
+    if (!write_text(denied_source, "publication error payload\n")) {
+        fs::remove_all(root, cleanup_error);
+        return 25;
+    }
+    TransferOperationHooks denied_hooks;
+    denied_hooks.publish_tree = force_permission_denied_publication;
+    TransferOperationEngine denied_engine{denied_hooks};
+    const auto denied = denied_engine.copy_item(
+        denied_source, denied_parent, ConflictPolicy::Fail);
+    if (denied.status != OperationStatus::PermissionFailure || denied.changed ||
+        !denied.retained_paths.empty() ||
+        denied.message.find("Permission denied") == std::string::npos ||
+        denied.message.find("another writer") != std::string::npos ||
+        fs::exists(denied_parent / denied_source.filename()) ||
+        has_internal_residue(denied_parent)) {
+        fs::remove_all(root, cleanup_error);
+        return 26;
     }
 
     fs::remove_all(root, cleanup_error);

@@ -338,8 +338,6 @@ bool copy_regular_file(const std::filesystem::path &source,
     if (!destination_ownership::record_fd(destination, output, owned, error)) {
         const std::error_code record_error = error;
         (void)::close(output);
-        std::error_code remove_error;
-        (void)std::filesystem::remove(destination, remove_error);
         error = record_error;
         return false;
     }
@@ -375,13 +373,14 @@ bool preserve_metadata(const std::filesystem::path &source,
 OperationResult metadata_failure(const std::filesystem::path &destination,
                                  destination_ownership::OwnedOutputs &owned,
                                  const std::error_code &error,
-                                 const bool unpublished)
+                                 const bool unpublished,
+                                 destination_ownership::ProtectedStaging &staging)
 {
     std::error_code cleanup_error;
     std::vector<std::filesystem::path> retained_paths;
     const bool cleaned = unpublished
                              ? destination_ownership::cleanup_unpublished(
-                                   owned, cleanup_error, &retained_paths)
+                                   staging, destination, owned, cleanup_error, &retained_paths)
                              : destination_ownership::cleanup_owned(
                                    owned, cleanup_error, &retained_paths);
     return failure(OperationStatus::VerificationFailure,
@@ -405,6 +404,7 @@ std::string unsupported_capability_message(const bool cleaned = true)
 OperationResult copy_exact(const std::filesystem::path &source,
                            const std::filesystem::path &destination,
                            TransferControl *control,
+                           const TransferOperationHooks &hooks,
                            destination_ownership::OwnedOutputs *completed_outputs = nullptr)
 {
     std::error_code error;
@@ -445,7 +445,7 @@ OperationResult copy_exact(const std::filesystem::path &source,
                 destination, target, private_staging, owned, error);
         }
         if (!error && !private_link.empty()) {
-            if (destination_ownership::publish_private_output(
+            if (hooks.publish_output(
                     private_staging, private_link, destination, owned.front(), error)) {
                 unpublished = false;
             }
@@ -464,7 +464,7 @@ OperationResult copy_exact(const std::filesystem::path &source,
             std::error_code cleanup_error;
             std::vector<std::filesystem::path> retained_paths;
             const bool cleaned = destination_ownership::cleanup_unpublished(
-                owned, cleanup_error, &retained_paths);
+                private_staging, destination, owned, cleanup_error, &retained_paths);
             return cancelled_result(destination, !cleaned, std::move(retained_paths));
         }
     } else if (std::filesystem::is_directory(source_status)) {
@@ -472,10 +472,17 @@ OperationResult copy_exact(const std::filesystem::path &source,
             destination_ownership::create_private_directory(
                 destination, private_staging, owned, error);
         if (private_destination.empty()) {
+            std::error_code cleanup_error;
+            std::vector<std::filesystem::path> retained_paths;
+            const bool cleaned = destination_ownership::cleanup_unpublished(
+                private_staging, destination, owned, cleanup_error, &retained_paths);
             return failure(OperationEngine::status_for_error(error),
                            OperationPhase::Execute,
                            destination,
-                           "A private directory copy could not be created: " + error.message());
+                           "A private directory copy could not be created: " + error.message() +
+                               (cleaned ? std::string{} : retained_paths_message(retained_paths)),
+                           !cleaned,
+                           std::move(retained_paths));
         }
         directory_metadata.emplace_back(source, private_destination);
         if (!error && control != nullptr) {
@@ -488,7 +495,7 @@ OperationResult copy_exact(const std::filesystem::path &source,
                 std::error_code cleanup_error;
                 std::vector<std::filesystem::path> retained_paths;
                 const bool cleaned = destination_ownership::cleanup_unpublished(
-                    owned, cleanup_error, &retained_paths);
+                    private_staging, destination, owned, cleanup_error, &retained_paths);
                 return cancelled_result(destination, !cleaned, std::move(retained_paths));
             }
 
@@ -526,7 +533,11 @@ OperationResult copy_exact(const std::filesystem::path &source,
                         std::error_code cleanup_error;
                         std::vector<std::filesystem::path> retained_paths;
                         const bool cleaned = destination_ownership::cleanup_unpublished(
-                            owned, cleanup_error, &retained_paths);
+                            private_staging,
+                            destination,
+                            owned,
+                            cleanup_error,
+                            &retained_paths);
                         return cancelled_result(
                             destination, !cleaned, std::move(retained_paths));
                     }
@@ -550,7 +561,11 @@ OperationResult copy_exact(const std::filesystem::path &source,
         std::vector<std::filesystem::path> retained_paths;
         const bool cleaned = unpublished
                                  ? destination_ownership::cleanup_unpublished(
-                                       owned, cleanup_error, &retained_paths)
+                                       private_staging,
+                                       destination,
+                                       owned,
+                                       cleanup_error,
+                                       &retained_paths)
                                  : destination_ownership::cleanup_owned(
                                        owned, cleanup_error, &retained_paths);
         return failure(status,
@@ -571,7 +586,11 @@ OperationResult copy_exact(const std::filesystem::path &source,
         std::vector<std::filesystem::path> retained_paths;
         const bool cleaned = unpublished
                                  ? destination_ownership::cleanup_unpublished(
-                                       owned, cleanup_error, &retained_paths)
+                                       private_staging,
+                                       destination,
+                                       owned,
+                                       cleanup_error,
+                                       &retained_paths)
                                  : destination_ownership::cleanup_owned(
                                        owned, cleanup_error, &retained_paths);
         return cancelled_result(destination, !cleaned, std::move(retained_paths));
@@ -579,18 +598,18 @@ OperationResult copy_exact(const std::filesystem::path &source,
 
     for (const auto &entry : file_metadata) {
         if (!preserve_metadata(entry.first, entry.second, error)) {
-            return metadata_failure(destination, owned, error, unpublished);
+            return metadata_failure(destination, owned, error, unpublished, private_staging);
         }
     }
     for (auto iterator = directory_metadata.rbegin(); iterator != directory_metadata.rend(); ++iterator) {
         if (!preserve_metadata(iterator->first, iterator->second, error)) {
-            return metadata_failure(destination, owned, error, unpublished);
+            return metadata_failure(destination, owned, error, unpublished, private_staging);
         }
     }
 
     if (!std::filesystem::is_symlink(source_status)) {
         const std::filesystem::path private_destination = owned.front().path;
-        if (!destination_ownership::publish_private_tree(
+        if (!hooks.publish_tree(
                 private_staging, private_destination, destination, owned, error)) {
             std::error_code cleanup_error;
             std::vector<std::filesystem::path> retained_paths;
@@ -598,16 +617,23 @@ OperationResult copy_exact(const std::filesystem::path &source,
                                     ? OperationStatus::DestinationConflict
                                     : OperationEngine::status_for_error(error);
             const bool cleaned = destination_ownership::cleanup_unpublished(
-                owned, cleanup_error, &retained_paths);
+                private_staging, destination, owned, cleanup_error, &retained_paths);
             return failure(status,
                            OperationPhase::Execute,
                            destination,
                            status == OperationStatus::UnsupportedCapability
                                ? unsupported_capability_message(cleaned) +
                                      retained_paths_message(retained_paths)
-                               : "The destination was claimed by another writer before publication." +
-                                     std::string{cleaned ? " The private copy was removed."
-                                                         : retained_paths_message(retained_paths)},
+                               : status == OperationStatus::DestinationConflict
+                                     ? "The destination was claimed by another writer before publication." +
+                                           std::string{cleaned
+                                                           ? " The private copy was removed."
+                                                           : retained_paths_message(retained_paths)}
+                                     : "The private copy could not be published: " +
+                                           error.message() +
+                                           (cleaned
+                                                ? " The private copy was removed."
+                                                : retained_paths_message(retained_paths)),
                            !cleaned,
                            std::move(retained_paths));
         }
@@ -732,14 +758,28 @@ void TransferControl::set_total(const std::uintmax_t bytes, const std::uintmax_t
 
 void TransferControl::add_bytes(const std::uintmax_t bytes) noexcept
 {
-    std::lock_guard<std::mutex> lock(progress_mutex_);
-    progress_.bytes_done += bytes;
+    TransferProgress snapshot;
+    {
+        std::lock_guard<std::mutex> lock(progress_mutex_);
+        progress_.bytes_done += bytes;
+        snapshot = progress_;
+    }
+    if (observer_ != nullptr) {
+        observer_(*this, snapshot);
+    }
 }
 
 void TransferControl::add_item() noexcept
 {
-    std::lock_guard<std::mutex> lock(progress_mutex_);
-    ++progress_.items_done;
+    TransferProgress snapshot;
+    {
+        std::lock_guard<std::mutex> lock(progress_mutex_);
+        ++progress_.items_done;
+        snapshot = progress_;
+    }
+    if (observer_ != nullptr) {
+        observer_(*this, snapshot);
+    }
 }
 
 std::filesystem::path TransferOperationEngine::keep_both_destination(
@@ -825,7 +865,7 @@ OperationResult TransferOperationEngine::copy_item(const std::filesystem::path &
                                false};
     }
 
-    OperationResult result = copy_exact(source, decision.destination, control);
+    OperationResult result = copy_exact(source, decision.destination, control, hooks_);
     if (result.ok()) {
         result.message = "Copied " + quoted_name(source) +
                          (decision.destination.filename() == source.filename()
@@ -906,7 +946,7 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
     const destination_ownership::OwnedOutput source_output{source, moved_identity};
     destination_ownership::OwnedOutput moved_output;
     std::filesystem::path retained_source_quarantine;
-    if (destination_ownership::move_owned_no_replace(
+    if (hooks_.move_owned(
             source_output,
             decision.destination,
             moved_output,
@@ -953,7 +993,8 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
     }
 
     destination_ownership::OwnedOutputs copied_outputs;
-    OperationResult copied = copy_exact(source, decision.destination, control, &copied_outputs);
+    OperationResult copied =
+        copy_exact(source, decision.destination, control, hooks_, &copied_outputs);
     if (!copied.ok()) {
         return copied;
     }
@@ -978,18 +1019,25 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
     destination_ownership::ProtectedStaging source_staging;
     std::filesystem::path source_quarantine;
     retained_source_quarantine.clear();
-    if (!destination_ownership::quarantine_owned(source_output,
-                                                  source_staging,
-                                                  source_quarantine,
-                                                  error,
-                                                  &retained_source_quarantine)) {
+    if (!hooks_.quarantine_owned(source_output,
+                                 source_staging,
+                                 source_quarantine,
+                                 error,
+                                 &retained_source_quarantine)) {
         const auto status = OperationEngine::status_for_error(error);
         std::error_code cleanup_error;
         std::vector<std::filesystem::path> retained_paths;
         const bool cleaned = destination_ownership::cleanup_owned(
             copied_outputs, cleanup_error, &retained_paths);
+        const std::string destination_cleanup_message =
+            cleaned ? " The copied destination was removed."
+                    : retained_paths_message(retained_paths);
+        std::string retained_source_message;
         if (!retained_source_quarantine.empty()) {
             retained_paths.push_back(retained_source_quarantine);
+            retained_source_message =
+                " The source data was retained at “" +
+                retained_source_quarantine.string() + "”.";
         }
         return failure(status,
                        status == OperationStatus::UnsupportedCapability
@@ -998,11 +1046,11 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
                        decision.destination,
                        status == OperationStatus::UnsupportedCapability
                            ? "The source filesystem cannot provide the atomic quarantine required to commit this cross-volume move. The source was left in place." +
-                                 std::string{cleaned ? " The copied destination was removed."
-                                                     : retained_paths_message(retained_paths)}
+                                 destination_cleanup_message +
+                                 retained_source_message
                            : "The source changed before the cross-volume move could commit." +
-                                 std::string{cleaned ? " The copied destination was removed."
-                                                     : retained_paths_message(retained_paths)},
+                                 destination_cleanup_message +
+                                 retained_source_message,
                        !cleaned || !retained_source_quarantine.empty(),
                        std::move(retained_paths));
     }

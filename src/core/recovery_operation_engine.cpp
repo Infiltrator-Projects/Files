@@ -113,14 +113,17 @@ bool stage_destination(const std::filesystem::path &destination,
 
 bool rollback_destination(const std::filesystem::path &destination,
                           const destination_ownership::OwnedOutput &staged,
-                          std::string &detail)
+                          std::string &detail,
+                          std::filesystem::path &retained_path)
 {
+    retained_path.clear();
     std::error_code restore_error;
     std::filesystem::path retained_quarantine;
     if (!destination_ownership::restore_owned(
             staged, destination, restore_error, &retained_quarantine)) {
         const std::filesystem::path retained =
             retained_quarantine.empty() ? staged.path : retained_quarantine;
+        retained_path = retained;
         detail = "The previous destination could not be restored safely from “" +
                  retained.string() + "”: " + restore_error.message();
         return false;
@@ -182,7 +185,12 @@ OperationResult RecoveryOperationEngine::replace_copy(
     const std::filesystem::path &destination_parent) const
 {
     OperationEngine ordinary;
-    OperationResult initial = ordinary.copy_item(source, destination_parent);
+    const auto copy_item = [this, &ordinary](const std::filesystem::path &item,
+                                              const std::filesystem::path &parent) {
+        return hooks_.copy_item != nullptr ? hooks_.copy_item(item, parent)
+                                           : ordinary.copy_item(item, parent);
+    };
+    OperationResult initial = copy_item(source, destination_parent);
     if (initial.status != OperationStatus::DestinationConflict) {
         return initial;
     }
@@ -217,20 +225,25 @@ OperationResult RecoveryOperationEngine::replace_copy(
                           : std::vector<std::filesystem::path>{staging_quarantine});
     }
 
-    OperationResult replacement = ordinary.copy_item(source, destination_parent);
+    OperationResult replacement = copy_item(source, destination_parent);
     if (replacement.ok()) {
         return cleanup_replaced_destination(
             destination, staged, "Replaced " + quoted_name(destination) + ".");
     }
 
     std::string rollback_detail;
-    if (!rollback_destination(destination, staged, rollback_detail)) {
+    std::filesystem::path rollback_retained;
+    if (hooks_.before_rollback != nullptr) {
+        hooks_.before_rollback(destination);
+    }
+    if (!rollback_destination(destination, staged, rollback_detail, rollback_retained)) {
         return result(OperationStatus::VerificationFailure,
                       OperationPhase::Verify,
                       destination,
                       "The replacement failed and Files could not restore the previous destination. " +
                           rollback_detail,
-                      true);
+                      true,
+                      {rollback_retained});
     }
 
     replacement.destination = destination;
@@ -248,7 +261,12 @@ OperationResult RecoveryOperationEngine::replace_move(
     const std::filesystem::path &destination_parent) const
 {
     OperationEngine ordinary;
-    OperationResult initial = ordinary.move_item(source, destination_parent);
+    const auto move_item = [this, &ordinary](const std::filesystem::path &item,
+                                              const std::filesystem::path &parent) {
+        return hooks_.move_item != nullptr ? hooks_.move_item(item, parent)
+                                           : ordinary.move_item(item, parent);
+    };
+    OperationResult initial = move_item(source, destination_parent);
     if (initial.status != OperationStatus::DestinationConflict) {
         return initial;
     }
@@ -283,7 +301,7 @@ OperationResult RecoveryOperationEngine::replace_move(
                           : std::vector<std::filesystem::path>{staging_quarantine});
     }
 
-    OperationResult replacement = ordinary.move_item(source, destination_parent);
+    OperationResult replacement = move_item(source, destination_parent);
     if (replacement.ok()) {
         return cleanup_replaced_destination(
             destination, staged, "Replaced " + quoted_name(destination) + " by moving the selected item.");
@@ -293,7 +311,14 @@ OperationResult RecoveryOperationEngine::replace_move(
     const bool source_still_exists = path_present(source, source_error);
     if (!source_error && source_still_exists) {
         std::string rollback_detail;
-        if (rollback_destination(destination, staged, rollback_detail)) {
+        std::filesystem::path rollback_retained;
+        if (hooks_.before_rollback != nullptr) {
+            hooks_.before_rollback(destination);
+        }
+        if (rollback_destination(destination,
+                                 staged,
+                                 rollback_detail,
+                                 rollback_retained)) {
             replacement.destination = destination;
             replacement.changed = false;
             if (!replacement.message.empty()) {
@@ -308,7 +333,8 @@ OperationResult RecoveryOperationEngine::replace_move(
                       destination,
                       "The replacement move failed and Files could not restore the previous destination. " +
                           rollback_detail,
-                      true);
+                      true,
+                      {rollback_retained});
     }
 
     return result(OperationStatus::VerificationFailure,
@@ -316,7 +342,8 @@ OperationResult RecoveryOperationEngine::replace_move(
                   destination,
                   "The replacement move did not verify cleanly. Files retained the staged previous destination at “" +
                       backup.string() + "” rather than risking data loss.",
-                  true);
+                  true,
+                  {backup});
 }
 
 OperationResult RecoveryOperationEngine::trash_item(const std::filesystem::path &source) const
@@ -481,14 +508,19 @@ OperationResult RecoveryOperationEngine::restore_item(
             const bool trash_still_exists = g_file_query_exists(trash_file, nullptr) != FALSE;
             if (!error && !destination_now_exists && trash_still_exists) {
                 std::string rollback_detail;
-                if (!rollback_destination(original_path, staged, rollback_detail)) {
+                std::filesystem::path rollback_retained;
+                if (!rollback_destination(original_path,
+                                          staged,
+                                          rollback_detail,
+                                          rollback_retained)) {
                     g_object_unref(trash_file);
                     return result(OperationStatus::VerificationFailure,
                                   OperationPhase::Verify,
                                   original_path,
                                   "Restore failed and the previous destination could not be restored. " +
                                       rollback_detail,
-                                  true);
+                                  true,
+                                  {rollback_retained});
                 }
             } else {
                 g_object_unref(trash_file);
@@ -497,7 +529,8 @@ OperationResult RecoveryOperationEngine::restore_item(
                               original_path,
                               "Restore failed in an uncertain state. Files retained the staged previous destination at “" +
                                   backup.string() + "” rather than risking data loss.",
-                              true);
+                              true,
+                              {backup});
             }
         }
 
