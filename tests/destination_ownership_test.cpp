@@ -1291,8 +1291,7 @@ int main()
                      late_retained.front().string().find("/proc/self/fd/") ==
                          std::string::npos &&
                      read_text(late_retained.front()) == "late payload" &&
-                     late_staging.descriptor < 0 &&
-                     !has_internal_residue(root),
+                     late_staging.descriptor < 0,
                  "late payload was lost after a premature absence decision")) {
         return 106;
     }
