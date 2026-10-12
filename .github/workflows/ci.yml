@@ -25,6 +25,8 @@ jobs:
 
       - name: Read VERSION and detect release intent
         id: release_intent
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
         shell: bash
         run: |
           set -euo pipefail
@@ -35,8 +37,20 @@ jobs:
           release_intent=false
           if [[ "$GITHUB_EVENT_NAME" == 'push' && "$GITHUB_REF" == 'refs/heads/main' ]]; then
             previous_version=''
-            if git cat-file -e 'HEAD^:VERSION' 2>/dev/null; then
-              previous_version=$(git show 'HEAD^:VERSION' | tr -d '[:space:]')
+            zero_sha='0000000000000000000000000000000000000000'
+
+            if [[ -n "${BEFORE_SHA:-}" && "$BEFORE_SHA" != "$zero_sha" ]]; then
+              if ! git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+                git fetch --no-tags --depth=1 origin "$BEFORE_SHA"
+              fi
+              if ! git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+                printf 'Cannot resolve pre-push commit %s; refusing to guess release intent.\n' "$BEFORE_SHA" >&2
+                exit 1
+              fi
+              if git cat-file -e "${BEFORE_SHA}:VERSION" 2>/dev/null; then
+                previous_version=$(git show "${BEFORE_SHA}:VERSION" | tr -d '[:space:]')
+                [[ "$previous_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+              fi
             fi
 
             if [[ "$version" != "$previous_version" ]]; then

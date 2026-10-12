@@ -52,3 +52,45 @@ jobs:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           SWARM_TRUSTED_REVIEWERS: The-First-Infiltrator
         run: python3 swarm/coordinator_entry.py
+
+      - name: Prune merged local PR branches
+        if: always()
+        working-directory: control
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          repo="$GITHUB_REPOSITORY"
+          owner="${repo%%/*}"
+          default_branch=$(gh api "repos/$repo" --jq '.default_branch')
+
+          mapfile -t branches < <(
+            gh api --paginate "repos/$repo/branches?per_page=100" --jq '.[].name'
+          )
+
+          for branch in "${branches[@]}"; do
+            [[ "$branch" == "$default_branch" ]] && continue
+
+            open_count=$(
+              gh api -X GET "repos/$repo/pulls" \
+                -f state=open \
+                -f head="${owner}:${branch}" \
+                -F per_page=1 \
+                --jq 'length'
+            )
+            [[ "$open_count" -gt 0 ]] && continue
+
+            merged_count=$(
+              gh api -X GET "repos/$repo/pulls" \
+                -f state=closed \
+                -f head="${owner}:${branch}" \
+                -F per_page=100 \
+                --jq '[.[] | select(.merged_at != null)] | length'
+            )
+            [[ "$merged_count" -eq 0 ]] && continue
+
+            git push origin --delete "$branch"
+            printf 'Pruned merged branch %s.\n' "$branch"
+          done
