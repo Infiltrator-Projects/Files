@@ -1,0 +1,337 @@
+name: One-time single-branch consolidation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/one-time-single-branch.yml'
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  consolidate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out exact main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Consolidate swarm state and retire stale branches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          start_main=$(git rev-parse HEAD)
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
+          test "$(git rev-parse origin/main)" = "$start_main"
+
+          check_exact() {
+            branch="$1"
+            expected="$2"
+            actual=$(git rev-parse "refs/remotes/origin/${branch}")
+            if [[ "$actual" != "$expected" ]]; then
+              printf 'Refusing cleanup: %s moved from %s to %s.\n' "$branch" "$expected" "$actual" >&2
+              exit 1
+            fi
+          }
+
+          check_exact builder/retained-evidence-integrity 65e349a1259b5440464dc14b361e62bba2d5295b
+          check_exact feature/view-modes 4f511915c86c6ba2249a157c244b8e22e55e67db
+          check_exact fix/detail-sorting-temporal-policy 0481cc1bb520875db3a7b4be2116892c1802123a
+          check_exact fix/temporal-policy-20261010 1b2db5e8e230279a83e77d9750408bf03419c724
+          check_exact swarm/builder-detail-list-metadata 8a1448d13cda840f5608cfb3cc527af1475b8d99
+          check_exact swarm/builder-mounted-places ced9e615d26216e5aa2e21b7e49b3891f8b8569f
+          check_exact swarm/destination-ownership 4052517c8f58158a0b3e3131bdff8bed90abad42
+          check_exact swarm/transfer-failure-residue cfa325b4e0d69a35f9c0b31ac6ee3518514ba53d
+
+          for branch in \
+            builder/retained-evidence-integrity \
+            feature/view-modes \
+            fix/detail-sorting-temporal-policy \
+            fix/temporal-policy-20261010 \
+            swarm/builder-detail-list-metadata \
+            swarm/builder-mounted-places \
+            swarm/destination-ownership; do
+            git merge-base --is-ancestor "origin/${branch}" HEAD
+          done
+
+          control_head=$(git rev-parse refs/remotes/origin/swarm/control)
+          git merge-base --is-ancestor 8933ff91f4d1c1bea2410a123db92a39ef80b206 "$control_head"
+          unexpected=$(git diff --name-only 8933ff91f4d1c1bea2410a123db92a39ef80b206.."$control_head" | grep -v '^swarm/state.json$' || true)
+          if [[ -n "$unexpected" ]]; then
+            printf 'Refusing cleanup: swarm/control gained non-state changes:\n%s\n' "$unexpected" >&2
+            exit 1
+          fi
+
+          git show "${control_head}:swarm/state.json" > /tmp/files-swarm-state.json
+          python3 -m json.tool /tmp/files-swarm-state.json >/dev/null
+          python3 - <<'PY' > /tmp/files-swarm-state-comment.md
+          from pathlib import Path
+          state = Path('/tmp/files-swarm-state.json').read_text(encoding='utf-8').rstrip()
+          print('FILES SWARM STATE v1')
+          print()
+          print('Machine-owned coordination cache. Live GitHub remains authoritative. Human directions remain in issue #2 outside this block.')
+          print()
+          print('```json')
+          print(state)
+          print('```')
+          PY
+
+          mapfile -t state_ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/2/comments?per_page=100" \
+            --jq '.[] | select((.body // "") | startswith("FILES SWARM STATE v1")) | .id')
+          if (( ${#state_ids[@]} > 1 )); then
+            printf 'Refusing cleanup: found multiple FILES SWARM STATE v1 comments.\n' >&2
+            exit 1
+          elif (( ${#state_ids[@]} == 1 )); then
+            state_comment_id=${state_ids[0]}
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${state_comment_id}" \
+              -f body="$(cat /tmp/files-swarm-state-comment.md)" >/dev/null
+          else
+            state_comment_id=$(gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/2/comments" \
+              -f body="$(cat /tmp/files-swarm-state-comment.md)" --jq '.id')
+          fi
+          test -n "$state_comment_id"
+
+          STATE_COMMENT_ID="$state_comment_id" python3 - <<'PY'
+          from pathlib import Path
+          import json
+          import os
+          import re
+
+          coordinator = Path('swarm/coordinator.py')
+          text = coordinator.read_text(encoding='utf-8')
+          old_constants = 'CONTROL_REF = "swarm/control"\nSTATE_PATH = "swarm/state.json"\nCOORDINATOR_ISSUE = 2\n'
+          new_constants = 'COORDINATOR_ISSUE = 2\nSTATE_COMMENT_MARKER = "FILES SWARM STATE v1"\n'
+          if old_constants not in text:
+              raise SystemExit('coordinator constants did not match expected source')
+          text = text.replace(old_constants, new_constants, 1)
+
+          old_methods = '''    def read_state(self) -> Tuple[Dict[str, Any], str]:
+              encoded_ref = urllib.parse.quote(CONTROL_REF, safe="")
+              content = self.get(
+                  f"/repos/{self.repository}/contents/{STATE_PATH}?ref={encoded_ref}"
+              )
+              raw = base64.b64decode(content["content"]).decode("utf-8")
+              return json.loads(raw), content["sha"]
+
+              def write_state(self, state: Dict[str, Any], blob_sha: str) -> None:
+                  content = json.dumps(state, indent=2, ensure_ascii=False) + "\\n"
+                  self.put(
+                      f"/repos/{self.repository}/contents/{STATE_PATH}",
+                      {
+                          "message": f"Swarm coordinator reconcile revision {state['revision']}",
+                          "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
+                          "sha": blob_sha,
+                          "branch": CONTROL_REF,
+                      },
+                  )
+          '''
+          # Keep indentation/source matching independent of this heredoc's indentation.
+          old_methods = old_methods.replace('              ', '    ', 1)
+          # The block above is easier and safer to replace by source boundaries.
+          start = text.index('    def read_state(self) -> Tuple[Dict[str, Any], str]:')
+          end = text.index('    def review_threads(', start)
+          new_methods = '''    def _state_comment(self) -> Dict[str, Any]:
+              matches: List[Dict[str, Any]] = []
+              page = 1
+              while True:
+                  comments = self.get(
+                      f"/repos/{self.repository}/issues/{COORDINATOR_ISSUE}/comments?per_page=100&page={page}"
+                  )
+                  matches.extend(
+                      comment
+                      for comment in comments
+                      if (comment.get("body") or "").startswith(STATE_COMMENT_MARKER)
+                  )
+                  if len(comments) < 100:
+                      break
+                  page += 1
+              if len(matches) != 1:
+                  raise RuntimeError(
+                      f"Expected exactly one {STATE_COMMENT_MARKER} comment, found {len(matches)}"
+                  )
+              return matches[0]
+
+              @staticmethod
+              def _decode_state_comment(comment: Dict[str, Any]) -> Dict[str, Any]:
+                  prefix = STATE_COMMENT_MARKER + "\\n\\nMachine-owned coordination cache. Live GitHub remains authoritative. Human directions remain in issue #2 outside this block.\\n\\n```json\\n"
+                  suffix = "\\n```"
+                  body = (comment.get("body") or "").rstrip()
+                  if not body.startswith(prefix) or not body.endswith(suffix):
+                      raise RuntimeError("Machine-state comment has an invalid envelope")
+                  return json.loads(body[len(prefix):-len(suffix)])
+
+              def read_state(self) -> Tuple[Dict[str, Any], str]:
+                  comment = self._state_comment()
+                  return self._decode_state_comment(comment), str(comment.get("updated_at") or "")
+
+              def write_state(self, state: Dict[str, Any], state_token: str) -> None:
+                  current = self._state_comment()
+                  current_token = str(current.get("updated_at") or "")
+                  if current_token != state_token:
+                      raise RuntimeError(
+                          f"STATE_RACE: machine-state comment changed from {state_token} to {current_token}"
+                      )
+                  body = (
+                      STATE_COMMENT_MARKER
+                      + "\\n\\nMachine-owned coordination cache. Live GitHub remains authoritative. Human directions remain in issue #2 outside this block.\\n\\n```json\\n"
+                      + json.dumps(state, indent=2, ensure_ascii=False)
+                      + "\\n```\\n"
+                  )
+                  updated = self.request(
+                      "PATCH",
+                      f"{API}/repos/{self.repository}/issues/comments/{current['id']}",
+                      {"body": body},
+                  )
+                  confirmed = self._decode_state_comment(updated)
+                  if confirmed.get("revision") != state.get("revision"):
+                      raise RuntimeError(
+                          "Machine-state comment read-back revision mismatch"
+                      )
+
+          '''
+          # Normalize the literal block from 14-space heredoc indentation to source indentation.
+          lines = new_methods.splitlines()
+          normalized = []
+          for line in lines:
+              if line.startswith('              '):
+                  normalized.append(line[10:])
+              else:
+                  normalized.append(line)
+          new_methods = '\n'.join(normalized) + '\n'
+          text = text[:start] + new_methods + text[end:]
+          text = text.replace(
+              'if ("HTTP 409" in text or "HTTP 422" in text) and attempt < 2:',
+              'if ("STATE_RACE" in text or "HTTP 409" in text or "HTTP 422" in text) and attempt < 2:',
+              1,
+          )
+          coordinator.write_text(text, encoding='utf-8')
+
+          protocol = Path('swarm/PROTOCOL.md')
+          p = protocol.read_text(encoding='utf-8')
+          p = p.replace(
+              'This contract lives on the operational branch `swarm/control`. It and `swarm/state.json` are coordination data, never application source and never a product PR. Product branches start from current `main`, not this branch.',
+              'This contract lives on `main`. Mutable coordination state lives outside Git refs in the unique `FILES SWARM STATE v1` machine-state comment on issue #2; it is a cache, never application source and never a product PR. Product branches start from current `main`.',
+          )
+          one_record = re.compile(r'## One current work record\n.*?\n## Phases and role ownership', re.S)
+          replacement = '''## One current work record
+
+Fetch `swarm/PROTOCOL.md` from `main`, then fetch issue #2 comments and locate exactly one comment whose first line is `FILES SWARM STATE v1`. Parse the fenced JSON in that comment as the current machine-state cache. Never use a checked-in `swarm/state.json` as live state. Issue #2 remains the human audit/direction ledger; comments outside the machine-state marker are history or human authority, not a second current machine state. Read the current issue body and newest explicit Shannon directions since the previous check.
+
+For a machine-state write, refetch the marker comment immediately before writing and require its JSON `revision` to equal the revision you reconciled. Increment revision, set `updated_at` in UTC, preserve fields owned by other roles, update that same comment, then read it back and verify your exact revision and material fields. If the revision changed, refetch/reconcile and retry at most twice; never overwrite a newer revision. The event coordinator also checks the REST comment update token and retries on a detected race. State-comment writes must never advance `main`.
+
+Before substantive production writes or phase transitions, atomically claim lease = {role, token, expires_at} with a unique token and expiry 45 minutes ahead. Claim only if lease is null or expired. Re-read to confirm ownership. Renew before expiry during long work. Before any push/merge/release, refetch and require the same token and unchanged candidate. Release the lease at a consistent checkpoint; do not hold it merely waiting for CI or publication.
+
+Hourly times are wake-ups, not completion deadlines. Readiness and lease determine action; unfinished strokes continue across hours. Checkpoint incomplete implementation truthfully. A blocked or late predecessor is never a reason to disable the swarm.
+
+## Phases and role ownership'''
+          p, count = one_record.subn(replacement, p, count=1)
+          if count != 1:
+              raise SystemExit('PROTOCOL One current work record section did not match')
+          p = p.replace('`swarm/state.json`', 'the `FILES SWARM STATE v1` machine-state comment on issue #2')
+          p = p.replace('swarm/state.json', 'FILES SWARM STATE v1 machine-state comment on issue #2')
+          p = p.replace('`swarm/control`', '`main`')
+          p = p.replace('swarm/control', 'main')
+          protocol.write_text(p, encoding='utf-8')
+
+          coord_doc = Path('swarm/COORDINATOR.md')
+          c = coord_doc.read_text(encoding='utf-8')
+          c = c.replace('Its implementation and tests live on `swarm/control`', 'Its implementation and tests live on `main`')
+          c = c.replace('into deterministic routing facts in `swarm/state.json`', 'into deterministic routing facts in the unique `FILES SWARM STATE v1` machine-state comment on issue #2')
+          c = c.replace(
+              'State updates use the GitHub Contents API with the current blob SHA. A stale write is refetched and reconciled up to three times; the coordinator never force-writes an old snapshot over a newer worker update. Every successful write is read back before it is reported as complete.',
+              'State updates use the dedicated `FILES SWARM STATE v1` issue comment rather than a Git ref. The coordinator refetches the comment token before writing, retries detected races up to three times, and reads back the resulting revision before reporting success. Mutable coordination therefore never advances `main`.',
+          )
+          c = c.replace('Updating `swarm/control` does not itself retrigger the coordinator, preventing feedback loops.', 'Updating the machine-state issue comment does not trigger source CI or release workflows, preventing feedback loops.')
+          c = c.replace('`swarm/control`', '`main`')
+          coord_doc.write_text(c, encoding='utf-8')
+
+          workers = Path('swarm/workers.json')
+          data = json.loads(workers.read_text(encoding='utf-8'))
+          old = 'First fetch swarm/PROTOCOL.md and swarm/state.json with ref swarm/control in that repository, plus the newest explicit Shannon directions in issue #2. Execute protocol revision 2; use the state file\'s actual phase, PR/head and lease, not the clock or old conversation. Obtain the current blob SHA for expected-SHA state writes, preserve others\' fields and read back the result.'
+          new = 'First fetch swarm/PROTOCOL.md from main and the unique FILES SWARM STATE v1 machine-state comment in issue #2, plus the newest explicit Shannon directions in issue #2. Execute protocol revision 3; use the comment JSON\'s actual phase, PR/head and lease, not the clock or old conversation. Before a state write, refetch the marker comment and require its revision unchanged; increment revision/update_at, preserve others\' fields, update that same comment and read back the result.'
+          for worker in data:
+              prompt = worker.get('prompt', '')
+              if old not in prompt:
+                  raise SystemExit(f"workers.json prompt preamble mismatch for {worker.get('role')}")
+              worker['prompt'] = prompt.replace(old, new, 1)
+          workers.write_text(json.dumps(data, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+
+          Path('swarm/branch-retirement-20261012.json').write_text(
+              json.dumps(
+                  {
+                      'reason': 'Consolidate Infiltrator File Manager to one Git branch while preserving swarm state outside Git refs.',
+                      'machine_state_issue': 2,
+                      'machine_state_marker': 'FILES SWARM STATE v1',
+                      'retired': {
+                          'builder/retained-evidence-integrity': '65e349a1259b5440464dc14b361e62bba2d5295b',
+                          'feature/view-modes': '4f511915c86c6ba2249a157c244b8e22e55e67db',
+                          'fix/detail-sorting-temporal-policy': '0481cc1bb520875db3a7b4be2116892c1802123a',
+                          'fix/temporal-policy-20261010': '1b2db5e8e230279a83e77d9750408bf03419c724',
+                          'swarm/builder-detail-list-metadata': '8a1448d13cda840f5608cfb3cc527af1475b8d99',
+                          'swarm/builder-mounted-places': 'ced9e615d26216e5aa2e21b7e49b3891f8b8569f',
+                          'swarm/control': os.environ.get('CONTROL_HEAD'),
+                          'swarm/destination-ownership': '4052517c8f58158a0b3e3131bdff8bed90abad42',
+                          'swarm/transfer-failure-residue': 'cfa325b4e0d69a35f9c0b31ac6ee3518514ba53d',
+                      },
+                      'note': 'Seven branches were strict ancestors of main. transfer-failure-residue was an older superseded implementation lineage; its exact head is retained here for audit. swarm/control was migrated to main and its latest mutable state moved to issue #2.',
+                  },
+                  indent=2,
+              ) + '\n',
+              encoding='utf-8',
+          )
+          PY
+
+          # The retirement record needs the live control head injected after generation.
+          CONTROL_HEAD="$control_head" python3 - <<'PY'
+          from pathlib import Path
+          import json, os
+          p = Path('swarm/branch-retirement-20261012.json')
+          data = json.loads(p.read_text())
+          data['retired']['swarm/control'] = os.environ['CONTROL_HEAD']
+          p.write_text(json.dumps(data, indent=2) + '\n')
+          PY
+
+          git rm swarm/state.json
+          git rm .github/workflows/one-time-single-branch.yml
+
+          python3 -m py_compile swarm/coordinator.py swarm/coordinator_entry.py
+          python3 -m unittest discover -v -s swarm -p 'test_coordinator*.py'
+          python3 -m json.tool swarm/workers.json >/dev/null
+          grep -q 'STATE_COMMENT_MARKER = "FILES SWARM STATE v1"' swarm/coordinator.py
+          ! grep -q 'CONTROL_REF = "swarm/control"' swarm/coordinator.py
+
+          git config user.name 'Shannon Smith'
+          git config user.email 'infiltratr@yandex.com'
+          git add swarm
+          git commit -m 'Consolidate swarm state outside Git branches'
+
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$start_main"
+          git push origin HEAD:main
+
+          branches=(
+            builder/retained-evidence-integrity
+            feature/view-modes
+            fix/detail-sorting-temporal-policy
+            fix/temporal-policy-20261010
+            swarm/builder-detail-list-metadata
+            swarm/builder-mounted-places
+            swarm/control
+            swarm/destination-ownership
+            swarm/transfer-failure-residue
+          )
+          for branch in "${branches[@]}"; do
+            if git ls-remote --exit-code --heads origin "refs/heads/${branch}" >/dev/null 2>&1; then
+              git push origin --delete "$branch"
+            fi
+          done
+
+          remaining=$(git ls-remote --heads origin | awk '{sub("refs/heads/", "", $2); print $2}')
+          if [[ "$remaining" != "main" ]]; then
+            printf 'Unexpected remaining branch set:\n%s\n' "$remaining" >&2
+            exit 1
+          fi
