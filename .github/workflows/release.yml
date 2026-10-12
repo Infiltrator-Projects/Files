@@ -31,13 +31,6 @@ jobs:
           fetch-depth: 0
           submodules: false
 
-      - name: Install publication-check dependencies
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends curl jq
-
       - name: Determine whether this commit was released
         id: released
         env:
@@ -55,20 +48,33 @@ jobs:
 
           if ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
             echo 'check=false' >> "$GITHUB_OUTPUT"
-            echo "No ${tag} exists; this was an ordinary verified main commit."
+            echo "No ${tag} exists for this verified commit; no APT publication check is needed."
             exit 0
           fi
 
           tag_commit=$(git rev-list -n 1 "$tag")
           if [[ "$tag_commit" != "$EXPECTED_SHA" ]]; then
             echo 'check=false' >> "$GITHUB_OUTPUT"
-            echo "${tag} belongs to ${tag_commit}, not this later main commit ${EXPECTED_SHA}."
+            echo "${tag} belongs to ${tag_commit}, not this ordinary main commit ${EXPECTED_SHA}."
             exit 0
           fi
 
-          gh release view "$tag" >/dev/null
+          is_draft=$(gh release view "$tag" --json isDraft --jq '.isDraft')
+          if [[ "$is_draft" != 'false' ]]; then
+            printf 'Release %s still exists only as a draft; APT publication cannot be verified yet.\n' "$tag" >&2
+            exit 1
+          fi
+
           echo 'check=true' >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install publication-check dependencies
+        if: steps.released.outputs.check == 'true'
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends curl jq
 
       - name: Verify public central APT publication
         if: steps.released.outputs.check == 'true'
