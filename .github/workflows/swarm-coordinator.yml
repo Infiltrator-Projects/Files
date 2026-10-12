@@ -1,0 +1,54 @@
+name: Swarm Coordinator
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, closed, ready_for_review]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+  workflow_run:
+    workflows: ["Verify"]
+    types: [completed]
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: files-swarm-coordinator
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: >-
+      github.event_name == 'workflow_run' ||
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out swarm control plane
+        uses: actions/checkout@v4
+        with:
+          ref: swarm/control
+          path: control
+          fetch-depth: 1
+
+      - name: Test coordinator routing and trust boundary
+        working-directory: control
+        run: python3 -m unittest discover -v -s swarm -p 'test_coordinator*.py'
+
+      - name: Reconcile live GitHub into swarm state
+        working-directory: control
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          SWARM_TRUSTED_REVIEWERS: The-First-Infiltrator
+        run: python3 swarm/coordinator_entry.py
