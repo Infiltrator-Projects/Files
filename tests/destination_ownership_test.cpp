@@ -173,6 +173,29 @@ infiltrator::files::destination_ownership::Identity failing_identity_for_at(
     return {};
 }
 
+bool late_absence_payload_created = false;
+
+infiltrator::files::destination_ownership::Identity report_absent_then_create_payload(
+    const int directory_descriptor,
+    const char *,
+    std::error_code &error) noexcept
+{
+    const int replacement = ::openat(directory_descriptor,
+                                     "payload",
+                                     O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC,
+                                     0600);
+    const std::string text{"late payload"};
+    late_absence_payload_created =
+        replacement >= 0 &&
+        ::write(replacement, text.data(), text.size()) ==
+            static_cast<ssize_t>(text.size());
+    if (replacement >= 0) {
+        ::close(replacement);
+    }
+    error = std::make_error_code(std::errc::no_such_file_or_directory);
+    return {};
+}
+
 std::uintmax_t denied_remove_all(const std::filesystem::path &,
                                  std::error_code &error)
 {
@@ -635,10 +658,11 @@ int main()
             return 91;
         }
     }
-    if (!require(!fs::exists(rebound_owned_container) &&
+    if (!require(fs::is_directory(rebound_owned_container) &&
+                     fs::is_empty(rebound_owned_container) &&
                      read_text(rebound_original_container / "payload") ==
                          "competing payload",
-                 "rebound container evidence did not survive descriptor close")) {
+                 "release mutated a relocated staging directory by pathname")) {
         return 92;
     }
     fs::remove_all(rebound_owned_container, error);
@@ -941,8 +965,6 @@ int main()
         return 67;
     }
 
-
-
     // A replacement of the visible staging-container pathname must not redirect
     // writes or publication away from the directory descriptor Files owns.
     const auto protected_public = root / "protected-published-tree";
@@ -1232,6 +1254,51 @@ int main()
                      read_text(restore_absent_source) == "competing source",
                  "proven-absent restore payload produced false evidence")) {
         return 104;
+    }
+
+    // ENOENT is not final while the live staging descriptor can still receive a
+    // replacement. The late payload must be atomically retained rather than
+    // hidden when the descriptor is released.
+    const auto late_public = root / "late-absence-public";
+    ownership::ProtectedStaging late_staging;
+    ownership::OwnedOutputs late_outputs;
+    fs::path late_private;
+    error.clear();
+    const int late_descriptor = ownership::create_private_file(
+        late_public, late_staging, late_outputs, late_private, error);
+    if (late_descriptor >= 0) {
+        ::close(late_descriptor);
+    }
+    if (!require(late_descriptor >= 0 && !error &&
+                     ::unlinkat(late_staging.descriptor, "payload", 0) == 0,
+                 "could not prepare late-absence fixture")) {
+        return 105;
+    }
+    late_absence_payload_created = false;
+    std::vector<fs::path> late_retained;
+    std::error_code late_cleanup_error;
+    const bool late_cleaned = ownership::cleanup_unpublished(
+        late_staging,
+        late_public,
+        late_outputs,
+        late_cleanup_error,
+        &late_retained,
+        nullptr,
+        report_absent_then_create_payload);
+    if (!require(!late_cleaned && late_absence_payload_created &&
+                     late_cleanup_error == std::errc::state_not_recoverable &&
+                     late_retained.size() == 1U &&
+                     late_retained.front().string().find("/proc/self/fd/") ==
+                         std::string::npos &&
+                     read_text(late_retained.front()) == "late payload" &&
+                     late_staging.descriptor < 0 &&
+                     !has_internal_residue(root),
+                 "late payload was lost after a premature absence decision")) {
+        return 106;
+    }
+    fs::remove(late_retained.front(), error);
+    if (!require(!error, "could not remove late-absence retained payload")) {
+        return 107;
     }
 
     const auto previous_directory = fs::current_path(error);

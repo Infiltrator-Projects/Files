@@ -108,6 +108,15 @@ void force_quarantine_remove_error_without_deleting(
     error = std::make_error_code(std::errc::io_error);
 }
 
+std::filesystem::path claimed_source_path;
+
+void force_quarantine_remove_error_and_claim_source(
+    const std::filesystem::path &, std::error_code &error) noexcept
+{
+    (void)write_text(claimed_source_path, "competing source\n");
+    error = std::make_error_code(std::errc::io_error);
+}
+
 bool force_quarantine_presence_failure(
     const std::filesystem::path &, std::error_code &error) noexcept
 {
@@ -494,6 +503,41 @@ int main()
         return 30;
     }
     fs::remove(uncertain_move.retained_paths.front(), cleanup_error);
+
+    // If source restoration itself already retained the quarantined object,
+    // the transfer result must surface that exact path instead of silently
+    // dropping it merely because the later fallback is no longer needed.
+    const fs::path already_retained_source = root / "already-retained-source.txt";
+    const fs::path already_retained_parent = root / "already-retained-destination";
+    fs::create_directories(already_retained_parent);
+    if (!write_text(already_retained_source, "already retained source payload\n")) {
+        fs::remove_all(root, cleanup_error);
+        return 37;
+    }
+    claimed_source_path = already_retained_source;
+    TransferOperationHooks already_retained_hooks;
+    already_retained_hooks.move_owned = force_cross_device;
+    already_retained_hooks.remove_source_quarantine =
+        force_quarantine_remove_error_and_claim_source;
+    TransferOperationEngine already_retained_engine{already_retained_hooks};
+    const auto already_retained_move = already_retained_engine.move_item(
+        already_retained_source, already_retained_parent, ConflictPolicy::Fail);
+    if (already_retained_move.status != OperationStatus::ExecutionFailure ||
+        !already_retained_move.changed ||
+        already_retained_move.retained_paths.size() != 1U ||
+        !fs::is_regular_file(already_retained_move.retained_paths.front()) ||
+        read_text(already_retained_move.retained_paths.front()) !=
+            "already retained source payload\n" ||
+        read_text(already_retained_source) != "competing source\n" ||
+        read_text(already_retained_parent / already_retained_source.filename()) !=
+            "already retained source payload\n" ||
+        already_retained_move.message.find(
+            already_retained_move.retained_paths.front().string()) ==
+            std::string::npos) {
+        fs::remove_all(root, cleanup_error);
+        return 38;
+    }
+    fs::remove(already_retained_move.retained_paths.front(), cleanup_error);
 
     const fs::path cancelled_tree = root / "cancelled-tree";
     fs::create_directories(cancelled_tree / "nested");

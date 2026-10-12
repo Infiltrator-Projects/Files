@@ -1152,25 +1152,28 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
         }
         std::vector<std::filesystem::path> retained_paths;
         if (restore_error) {
-            std::error_code retain_error;
-            if (retained_source_quarantine.empty() &&
-                hooks_.retain_source_quarantine(
-                    source_staging,
-                    source,
-                    retained_source_quarantine,
-                    retain_error)) {
+            if (!retained_source_quarantine.empty()) {
                 retained_paths.push_back(retained_source_quarantine);
-            } else if (retained_source_quarantine.empty()) {
-                bool source_absent = false;
-                std::error_code publication_error;
-                if (destination_ownership::publish_staged_payload_evidence(
+            } else {
+                std::error_code retain_error;
+                if (hooks_.retain_source_quarantine(
                         source_staging,
                         source,
                         retained_source_quarantine,
-                        source_absent,
-                        publication_error) &&
-                    !source_absent) {
+                        retain_error)) {
                     retained_paths.push_back(retained_source_quarantine);
+                } else {
+                    bool source_absent = false;
+                    std::error_code publication_error;
+                    if (destination_ownership::publish_staged_payload_evidence(
+                            source_staging,
+                            source,
+                            retained_source_quarantine,
+                            source_absent,
+                            publication_error) &&
+                        !source_absent) {
+                        retained_paths.push_back(retained_source_quarantine);
+                    }
                 }
             }
         }
