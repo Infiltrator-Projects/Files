@@ -260,10 +260,12 @@ OperationResult cancelled_result(
     const bool changed = false,
     std::vector<std::filesystem::path> retained_paths = {})
 {
+    const std::string message =
+        "Operation cancelled." + retained_paths_message(retained_paths);
     return failure(OperationStatus::Cancelled,
                    OperationPhase::Execute,
                    destination,
-                   "Operation cancelled." + retained_paths_message(retained_paths),
+                   message,
                    changed,
                    std::move(retained_paths));
 }
@@ -383,13 +385,15 @@ OperationResult metadata_failure(const std::filesystem::path &destination,
                                    staging, destination, owned, cleanup_error, &retained_paths)
                              : destination_ownership::cleanup_owned(
                                    owned, cleanup_error, &retained_paths);
+    const std::string failure_message =
+        "The transfer could not preserve permissions or modification time: " +
+        error.message() +
+        (cleaned ? " The owned partial destination was removed."
+                 : retained_paths_message(retained_paths));
     return failure(OperationStatus::VerificationFailure,
                    OperationPhase::Verify,
                    destination,
-                   "The transfer could not preserve permissions or modification time: " +
-                       error.message() +
-                       (cleaned ? " The owned partial destination was removed."
-                                : retained_paths_message(retained_paths)),
+                   failure_message,
                    !cleaned,
                    std::move(retained_paths));
 }
@@ -476,11 +480,13 @@ OperationResult copy_exact(const std::filesystem::path &source,
             std::vector<std::filesystem::path> retained_paths;
             const bool cleaned = destination_ownership::cleanup_unpublished(
                 private_staging, destination, owned, cleanup_error, &retained_paths);
+            const std::string failure_message =
+                "A private directory copy could not be created: " + error.message() +
+                (cleaned ? std::string{} : retained_paths_message(retained_paths));
             return failure(OperationEngine::status_for_error(error),
                            OperationPhase::Execute,
                            destination,
-                           "A private directory copy could not be created: " + error.message() +
-                               (cleaned ? std::string{} : retained_paths_message(retained_paths)),
+                           failure_message,
                            !cleaned,
                            std::move(retained_paths));
         }
@@ -568,15 +574,17 @@ OperationResult copy_exact(const std::filesystem::path &source,
                                        &retained_paths)
                                  : destination_ownership::cleanup_owned(
                                        owned, cleanup_error, &retained_paths);
+        const std::string failure_message =
+            status == OperationStatus::UnsupportedCapability
+                ? unsupported_capability_message(cleaned) +
+                      retained_paths_message(retained_paths)
+                : "The transfer failed: " + error.message() +
+                      (cleaned ? std::string{}
+                               : retained_paths_message(retained_paths));
         return failure(status,
                        OperationPhase::Execute,
                        destination,
-                       status == OperationStatus::UnsupportedCapability
-                           ? unsupported_capability_message(cleaned) +
-                                 retained_paths_message(retained_paths)
-                           : "The transfer failed: " + error.message() +
-                                 (cleaned ? std::string{}
-                                          : retained_paths_message(retained_paths)),
+                       failure_message,
                        !cleaned,
                        std::move(retained_paths));
     }
@@ -618,22 +626,24 @@ OperationResult copy_exact(const std::filesystem::path &source,
                                     : OperationEngine::status_for_error(error);
             const bool cleaned = destination_ownership::cleanup_unpublished(
                 private_staging, destination, owned, cleanup_error, &retained_paths);
+            const std::string failure_message =
+                status == OperationStatus::UnsupportedCapability
+                    ? unsupported_capability_message(cleaned) +
+                          retained_paths_message(retained_paths)
+                    : status == OperationStatus::DestinationConflict
+                          ? "The destination was claimed by another writer before publication." +
+                                std::string{cleaned
+                                                ? " The private copy was removed."
+                                                : retained_paths_message(retained_paths)}
+                          : "The private copy could not be published: " +
+                                error.message() +
+                                (cleaned
+                                     ? " The private copy was removed."
+                                     : retained_paths_message(retained_paths));
             return failure(status,
                            OperationPhase::Execute,
                            destination,
-                           status == OperationStatus::UnsupportedCapability
-                               ? unsupported_capability_message(cleaned) +
-                                     retained_paths_message(retained_paths)
-                               : status == OperationStatus::DestinationConflict
-                                     ? "The destination was claimed by another writer before publication." +
-                                           std::string{cleaned
-                                                           ? " The private copy was removed."
-                                                           : retained_paths_message(retained_paths)}
-                                     : "The private copy could not be published: " +
-                                           error.message() +
-                                           (cleaned
-                                                ? " The private copy was removed."
-                                                : retained_paths_message(retained_paths)),
+                           failure_message,
                            !cleaned,
                            std::move(retained_paths));
         }
@@ -645,12 +655,14 @@ OperationResult copy_exact(const std::filesystem::path &source,
         std::vector<std::filesystem::path> retained_paths;
         const bool cleaned =
             destination_ownership::cleanup_owned(owned, cleanup_error, &retained_paths);
+        const std::string failure_message =
+            std::string{"The transfer completed but the destination identity could not be verified."} +
+            (cleaned ? " The owned partial destination was removed."
+                     : retained_paths_message(retained_paths));
         return failure(OperationStatus::VerificationFailure,
                        OperationPhase::Verify,
                        destination,
-                       std::string{"The transfer completed but the destination identity could not be verified."} +
-                           (cleaned ? " The owned partial destination was removed."
-                                    : retained_paths_message(retained_paths)),
+                       failure_message,
                        !cleaned,
                        std::move(retained_paths));
     }
@@ -660,12 +672,14 @@ OperationResult copy_exact(const std::filesystem::path &source,
         std::vector<std::filesystem::path> retained_paths;
         const bool cleaned =
             destination_ownership::cleanup_owned(owned, cleanup_error, &retained_paths);
+        const std::string failure_message =
+            "The source changed while it was being copied; the copied snapshot was not accepted." +
+            std::string{cleaned ? " The owned partial destination was removed."
+                                : retained_paths_message(retained_paths)};
         return failure(OperationStatus::VerificationFailure,
                        OperationPhase::Verify,
                        destination,
-                       "The source changed while it was being copied; the copied snapshot was not accepted." +
-                           std::string{cleaned ? " The owned partial destination was removed."
-                                               : retained_paths_message(retained_paths)},
+                       failure_message,
                        !cleaned,
                        std::move(retained_paths));
     }
@@ -980,15 +994,18 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
         if (!retained_source_quarantine.empty()) {
             retained_paths.push_back(retained_source_quarantine);
         }
+        const std::string failure_message =
+            status == OperationStatus::UnsupportedCapability
+                ? unsupported_capability_message() +
+                      retained_paths_message(retained_paths)
+                : "The item could not be moved: " + error.message() +
+                      retained_paths_message(retained_paths);
+        const bool changed = !retained_paths.empty();
         return failure(status,
                        OperationPhase::Execute,
                        decision.destination,
-                       status == OperationStatus::UnsupportedCapability
-                           ? unsupported_capability_message() +
-                                 retained_paths_message(retained_paths)
-                           : "The item could not be moved: " + error.message() +
-                                 retained_paths_message(retained_paths),
-                       !retained_paths.empty(),
+                       failure_message,
+                       changed,
                        std::move(retained_paths));
     }
 
@@ -1006,12 +1023,14 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
         std::vector<std::filesystem::path> retained_paths;
         const bool cleaned = destination_ownership::cleanup_owned(
             copied_outputs, cleanup_error, &retained_paths);
+        const std::string failure_message =
+            "The copied destination changed before the move could commit." +
+            std::string{cleaned ? " The owned copy was removed."
+                                : retained_paths_message(retained_paths)};
         return failure(OperationStatus::VerificationFailure,
                        OperationPhase::Verify,
                        decision.destination,
-                       "The copied destination changed before the move could commit." +
-                           std::string{cleaned ? " The owned copy was removed."
-                                               : retained_paths_message(retained_paths)},
+                       failure_message,
                        !cleaned,
                        std::move(retained_paths));
     }
@@ -1057,59 +1076,74 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
 
     if (!destination_ownership::verify_all(copied_outputs, error)) {
         std::error_code restore_error;
+        bool source_absent = false;
         const bool restored = destination_ownership::restore_quarantine(
-            source_staging, source, restore_error, &retained_source_quarantine);
+            source_staging,
+            source,
+            restore_error,
+            &retained_source_quarantine,
+            &source_absent);
         std::error_code cleanup_error;
         std::vector<std::filesystem::path> retained_paths;
         const bool cleaned = destination_ownership::cleanup_owned(
             copied_outputs, cleanup_error, &retained_paths);
-        if (!restored) {
+        if (!restored && !source_absent) {
             retained_paths.push_back(retained_source_quarantine.empty()
                                          ? source_quarantine
                                          : retained_source_quarantine);
         }
+        const std::string failure_message =
+            "The copied destination changed while the source was being committed." +
+            std::string{cleaned ? " The copied destination was removed."
+                                : retained_paths_message(retained_paths)} +
+            (restored ? " The source was restored to its original name."
+                      : retained_paths_message(retained_paths));
         return failure(OperationStatus::VerificationFailure,
                        OperationPhase::Verify,
                        decision.destination,
-                       "The copied destination changed while the source was being committed." +
-                           std::string{cleaned ? " The copied destination was removed."
-                                               : retained_paths_message(retained_paths)} +
-                           (restored ? " The source was restored to its original name."
-                                     : retained_paths_message(retained_paths)),
+                       failure_message,
                        !cleaned || !restored,
                        std::move(retained_paths));
     }
 
     if (!equivalent_copy_shape(source_quarantine, decision.destination, error)) {
         std::error_code restore_error;
+        bool source_absent = false;
         const bool restored = destination_ownership::restore_quarantine(
-            source_staging, source, restore_error, &retained_source_quarantine);
+            source_staging,
+            source,
+            restore_error,
+            &retained_source_quarantine,
+            &source_absent);
         std::error_code cleanup_error;
         std::vector<std::filesystem::path> retained_paths;
         const bool cleaned = destination_ownership::cleanup_owned(
             copied_outputs, cleanup_error, &retained_paths);
-        if (!restored) {
+        if (!restored && !source_absent) {
             retained_paths.push_back(retained_source_quarantine.empty()
                                          ? source_quarantine
                                          : retained_source_quarantine);
         }
+        const std::string failure_message =
+            "The source changed while it was being copied; the move was not committed." +
+            std::string{cleaned ? " The owned copy was removed."
+                                : retained_paths_message(retained_paths)} +
+            (restored ? " The source was restored to its original name."
+                      : retained_paths_message(retained_paths));
         return failure(OperationStatus::VerificationFailure,
                        OperationPhase::Verify,
                        decision.destination,
-                       "The source changed while it was being copied; the move was not committed." +
-                           std::string{cleaned ? " The owned copy was removed."
-                                               : retained_paths_message(retained_paths)} +
-                           (restored ? " The source was restored to its original name."
-                                     : retained_paths_message(retained_paths)),
+                       failure_message,
                        !cleaned || !restored,
                        std::move(retained_paths));
     }
 
-    std::filesystem::remove_all(source_quarantine, error);
+    hooks_.remove_source_quarantine(source_quarantine, error);
     if (error) {
         const std::error_code remove_error = error;
         std::error_code restore_error;
-        const bool remains = path_present(source_quarantine, restore_error);
+        const bool remains =
+            hooks_.source_quarantine_present(source_quarantine, restore_error);
         bool restored = false;
         retained_source_quarantine.clear();
         if (!restore_error && remains) {
@@ -1118,21 +1152,44 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
         }
         std::vector<std::filesystem::path> retained_paths;
         if (restore_error) {
-            retained_paths.push_back(retained_source_quarantine.empty()
-                                         ? source_quarantine
-                                         : retained_source_quarantine);
+            if (!retained_source_quarantine.empty()) {
+                retained_paths.push_back(retained_source_quarantine);
+            } else {
+                std::error_code retain_error;
+                if (hooks_.retain_source_quarantine(
+                        source_staging,
+                        source,
+                        retained_source_quarantine,
+                        retain_error)) {
+                    retained_paths.push_back(retained_source_quarantine);
+                } else {
+                    bool source_absent = false;
+                    std::error_code publication_error;
+                    if (destination_ownership::publish_staged_payload_evidence(
+                            source_staging,
+                            source,
+                            retained_source_quarantine,
+                            source_absent,
+                            publication_error) &&
+                        !source_absent) {
+                        retained_paths.push_back(retained_source_quarantine);
+                    }
+                }
+            }
         }
+        const std::string source_recovery_message =
+            restore_error
+                ? retained_paths_message(retained_paths) + " " +
+                      restore_error.message()
+                : (restored
+                       ? " Remaining source data was restored to its original name."
+                       : " No remaining source object required restoration.");
         return failure(OperationEngine::status_for_error(remove_error),
                        OperationPhase::Execute,
                        decision.destination,
                        "The item was copied, but the original could not be removed: " +
                            remove_error.message() +
-                           (restore_error
-                                ? retained_paths_message(retained_paths) +
-                                      " " + restore_error.message()
-                                : (restored
-                                       ? " Remaining source data was restored to its original name."
-                                       : " No remaining source object required restoration.")),
+                           source_recovery_message,
                        true,
                        std::move(retained_paths));
     }

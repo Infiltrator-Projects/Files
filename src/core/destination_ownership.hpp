@@ -40,9 +40,14 @@ using IdentityForFdOperation = Identity (*)(int, std::error_code &) noexcept;
 using IdentityForAtOperation = Identity (*)(int, const char *, std::error_code &) noexcept;
 using RemoveAllOperation = std::uintmax_t (*)(const std::filesystem::path &,
                                                std::error_code &);
+using AfterUnpublishedIdentityObservation = void (*)(int) noexcept;
 
 struct ProtectedStaging;
 inline void release_staging(ProtectedStaging &staging) noexcept;
+using RetainStagedPayloadOperation = bool (*)(ProtectedStaging &,
+                                              const std::filesystem::path &,
+                                              std::filesystem::path &,
+                                              std::error_code &) noexcept;
 
 struct ProtectedStaging {
     std::filesystem::path container_path;
@@ -174,7 +179,50 @@ inline void release_staging(ProtectedStaging &staging) noexcept
         std::error_code remove_error;
         (void)std::filesystem::remove(container_path, remove_error);
     }
+    // Do not chase a descriptor-resolved pathname after the staging directory
+    // has moved. POSIX has no remove-by-directory-fd primitive, so a pathname
+    // that was verified as the owned directory can be rebound before remove.
+    // Leaving an uncertain empty directory intact is safer than mutating a
+    // competing writer's replacement.
     (void)::close(descriptor);
+}
+
+// Proven payload absence is only final once the still-bound staging directory
+// itself has been removed while its descriptor remains live. If a late writer
+// makes the directory non-empty, leave the descriptor open so the caller can
+// publish that payload by descriptor-relative no-replace rename instead of
+// closing over silent residue.
+inline bool release_empty_staging_if_still_bound(ProtectedStaging &staging,
+                                                 std::error_code &error) noexcept
+{
+    if (staging.descriptor < 0 || staging.container_path.empty() ||
+        !staging.identity.valid) {
+        error = std::make_error_code(std::errc::state_not_recoverable);
+        return false;
+    }
+
+    std::error_code inspect_error;
+    if (!same_object(staging.container_path, staging.identity, inspect_error)) {
+        error = inspect_error ? inspect_error
+                              : std::make_error_code(std::errc::state_not_recoverable);
+        return false;
+    }
+
+    std::error_code remove_error;
+    const bool removed = std::filesystem::remove(staging.container_path, remove_error);
+    if (!removed || remove_error) {
+        error = remove_error ? remove_error
+                             : std::make_error_code(std::errc::state_not_recoverable);
+        return false;
+    }
+
+    const int descriptor = staging.descriptor;
+    staging.descriptor = -1;
+    staging.container_path.clear();
+    staging.identity = {};
+    (void)::close(descriptor);
+    error.clear();
+    return true;
 }
 
 inline bool create_protected_staging(const std::filesystem::path &parent_path,
@@ -306,6 +354,98 @@ inline bool retain_staged_payload(ProtectedStaging &staging,
         }
     }
     error = std::make_error_code(std::errc::file_exists);
+    return false;
+}
+
+inline bool finalize_staged_payload_absence(ProtectedStaging &staging,
+                                            const std::filesystem::path &near_path,
+                                            const std::error_code &absence_error,
+                                            std::filesystem::path &retained,
+                                            bool &payload_absent,
+                                            std::error_code &error) noexcept
+{
+    retained.clear();
+    payload_absent = false;
+
+    // A late writer can race an ENOENT observation. Alternate an attempted
+    // empty-container release with descriptor-relative publication. Either the
+    // owned empty directory is removed (absence becomes final), or any late
+    // payload is moved to a stable no-replace recovery pathname before the
+    // descriptor is closed. A relocated/otherwise uncertain container fails
+    // closed rather than being removed through a mutable pathname.
+    for (std::uint32_t attempt = 0; attempt < 16U; ++attempt) {
+        std::error_code release_error;
+        if (release_empty_staging_if_still_bound(staging, release_error)) {
+            payload_absent = true;
+            error = absence_error;
+            return true;
+        }
+
+        std::error_code publication_error;
+        if (retain_staged_payload(staging, near_path, retained, publication_error)) {
+            error = absence_error;
+            return true;
+        }
+        if (publication_error != std::errc::no_such_file_or_directory &&
+            publication_error != std::errc::not_a_directory) {
+            error = publication_error;
+            return false;
+        }
+        if (release_error && release_error != std::errc::directory_not_empty) {
+            error = release_error;
+            return false;
+        }
+    }
+
+    error = std::make_error_code(std::errc::state_not_recoverable);
+    return false;
+}
+
+// A failed publication attempt does not prove whether the descriptor-relative
+// payload still exists. Resolve absence through the open staging directory,
+// then atomically publish any current entry from that descriptor to a fresh,
+// no-replace ordinary pathname. No separately verified mutable pathname is
+// handed to callers, and ENOENT is only finalized after the empty staging
+// directory itself is safely removed.
+inline bool publish_staged_payload_evidence(
+    ProtectedStaging &staging,
+    const std::filesystem::path &near_path,
+    std::filesystem::path &retained,
+    bool &payload_absent,
+    std::error_code &error,
+    IdentityForAtOperation identity_operation = identity_for_at) noexcept
+{
+    retained.clear();
+    payload_absent = false;
+
+    std::error_code presence_error;
+    (void)identity_operation(staging.descriptor, "payload", presence_error);
+    if (presence_error == std::errc::no_such_file_or_directory ||
+        presence_error == std::errc::not_a_directory) {
+        return finalize_staged_payload_absence(staging,
+                                               near_path,
+                                               presence_error,
+                                               retained,
+                                               payload_absent,
+                                               error);
+    }
+
+    std::error_code publication_error;
+    if (retain_staged_payload(staging, near_path, retained, publication_error)) {
+        error = presence_error;
+        return true;
+    }
+    if (publication_error == std::errc::no_such_file_or_directory ||
+        publication_error == std::errc::not_a_directory) {
+        return finalize_staged_payload_absence(staging,
+                                               near_path,
+                                               publication_error,
+                                               retained,
+                                               payload_absent,
+                                               error);
+    }
+
+    error = presence_error ? presence_error : publication_error;
     return false;
 }
 
@@ -488,12 +628,14 @@ inline bool verify_all(const OwnedOutputs &outputs, std::error_code &error) noex
     return !outputs.empty();
 }
 
-inline bool quarantine_owned(
+inline bool quarantine_owned_with_operations(
     const OwnedOutput &output,
     ProtectedStaging &staging,
     std::filesystem::path &quarantine,
     std::error_code &error,
-    std::filesystem::path *retained_quarantine = nullptr) noexcept
+    std::filesystem::path *retained_quarantine,
+    IdentityForAtOperation identity_operation,
+    RetainStagedPayloadOperation retain_operation) noexcept
 {
     quarantine.clear();
     if (retained_quarantine != nullptr) {
@@ -512,7 +654,7 @@ inline bool quarantine_owned(
 
     quarantine = staging.access_root() / "payload";
     std::error_code inspect_error;
-    const Identity current = identity_for_at(staging.descriptor, "payload", inspect_error);
+    const Identity current = identity_operation(staging.descriptor, "payload", inspect_error);
     if (!inspect_error && current.valid && output.identity.valid &&
         current.device == output.identity.device && current.inode == output.identity.inode) {
         error.clear();
@@ -529,12 +671,21 @@ inline bool quarantine_owned(
     } else {
         std::filesystem::path retained;
         std::error_code retain_error;
-        if (retain_staged_payload(staging, output.path, retained, retain_error)) {
+        if (retain_operation(staging, output.path, retained, retain_error)) {
             if (retained_quarantine != nullptr) {
                 *retained_quarantine = retained;
             }
-        } else if (retained_quarantine != nullptr) {
-            *retained_quarantine = staging.container_path / "payload";
+        } else {
+            bool payload_absent = false;
+            std::error_code evidence_error;
+            if (publish_staged_payload_evidence(staging,
+                                                output.path,
+                                                retained,
+                                                payload_absent,
+                                                evidence_error) &&
+                !payload_absent && retained_quarantine != nullptr) {
+                *retained_quarantine = retained;
+            }
         }
     }
 
@@ -543,13 +694,37 @@ inline bool quarantine_owned(
     return false;
 }
 
+inline bool quarantine_owned(
+    const OwnedOutput &output,
+    ProtectedStaging &staging,
+    std::filesystem::path &quarantine,
+    std::error_code &error,
+    std::filesystem::path *retained_quarantine = nullptr) noexcept
+{
+    return quarantine_owned_with_operations(output,
+                                            staging,
+                                            quarantine,
+                                            error,
+                                            retained_quarantine,
+                                            identity_for_at,
+                                            retain_staged_payload);
+}
+
 inline bool restore_quarantine(ProtectedStaging &staging,
                                const std::filesystem::path &original,
                                std::error_code &error,
-                               std::filesystem::path *retained_quarantine = nullptr) noexcept
+                               std::filesystem::path *retained_quarantine = nullptr,
+                               bool *payload_absent = nullptr,
+                               RetainStagedPayloadOperation retain_operation =
+                                   retain_staged_payload,
+                               IdentityForAtOperation identity_operation =
+                                   identity_for_at) noexcept
 {
     if (retained_quarantine != nullptr) {
         retained_quarantine->clear();
+    }
+    if (payload_absent != nullptr) {
+        *payload_absent = false;
     }
     if (rename_no_replace_at(staging.descriptor,
                              "payload",
@@ -563,15 +738,26 @@ inline bool restore_quarantine(ProtectedStaging &staging,
     const std::error_code restore_error = error;
     std::filesystem::path retained;
     std::error_code retain_error;
-    if (retain_staged_payload(staging, original, retained, retain_error)) {
+    if (retain_operation(staging, original, retained, retain_error)) {
         if (retained_quarantine != nullptr) {
             *retained_quarantine = retained;
         }
         error = restore_error;
         return false;
     }
-    if (retained_quarantine != nullptr) {
-        *retained_quarantine = staging.container_path / "payload";
+    bool absent = false;
+    std::error_code evidence_error;
+    if (publish_staged_payload_evidence(staging,
+                                        original,
+                                        retained,
+                                        absent,
+                                        evidence_error,
+                                        identity_operation) &&
+        !absent && retained_quarantine != nullptr) {
+        *retained_quarantine = retained;
+    }
+    if (payload_absent != nullptr) {
+        *payload_absent = absent;
     }
     error = retain_error ? retain_error : restore_error;
     return false;
@@ -834,93 +1020,92 @@ inline bool cleanup_unpublished(
     const std::filesystem::path &near_path,
     OwnedOutputs &outputs,
     std::error_code &first_error,
-    std::vector<std::filesystem::path> *retained_paths = nullptr) noexcept
+    std::vector<std::filesystem::path> *retained_paths = nullptr,
+    AfterUnpublishedIdentityObservation after_identity_observation = nullptr,
+    IdentityForAtOperation payload_identity_operation = identity_for_at) noexcept
 {
-    bool complete = true;
     first_error.clear();
     if (retained_paths != nullptr) {
         retained_paths->clear();
     }
-    const std::filesystem::path access_root = staging.access_root();
-    for (auto iterator = outputs.rbegin(); iterator != outputs.rend(); ++iterator) {
-        const std::filesystem::path relative = iterator->path.lexically_relative(access_root);
-        if (relative.empty() || relative == "." || staging.descriptor < 0) {
-            complete = false;
-            continue;
-        }
-        std::error_code inspect_error;
-        const Identity current = identity_for_at(
-            staging.descriptor, relative.c_str(), inspect_error);
-        if (inspect_error || !current.valid || !iterator->identity.valid ||
-            current.device != iterator->identity.device ||
-            current.inode != iterator->identity.inode) {
-            if (inspect_error == std::errc::no_such_file_or_directory) {
-                continue;
-            }
-            if (inspect_error && !first_error) {
-                first_error = inspect_error;
-            }
-            complete = false;
-            continue;
-        }
-
-        struct stat status {};
-        if (::fstatat(staging.descriptor,
-                      relative.c_str(),
-                      &status,
-                      AT_SYMLINK_NOFOLLOW) != 0 ||
-            ::unlinkat(staging.descriptor,
-                       relative.c_str(),
-                       S_ISDIR(status.st_mode) ? AT_REMOVEDIR : 0) != 0) {
-            const std::error_code remove_error(errno, std::generic_category());
-            if (!first_error) {
-                first_error = remove_error;
-            }
-            complete = false;
-        }
-    }
-
-    struct stat payload_status {};
     if (staging.descriptor < 0) {
-        if (!first_error) {
-            first_error = std::make_error_code(std::errc::bad_file_descriptor);
-        }
-        complete = false;
-    } else if (::fstatat(staging.descriptor,
-                         "payload",
-                         &payload_status,
-                         AT_SYMLINK_NOFOLLOW) != 0) {
-        if (errno == ENOENT) {
-            release_staging(staging);
-            return complete;
-        }
-        if (!first_error) {
-            first_error = std::error_code(errno, std::generic_category());
-        }
-        complete = false;
+        first_error = std::make_error_code(std::errc::bad_file_descriptor);
+        return false;
     }
 
-    if (complete && staging.descriptor >= 0) {
-        if (::unlinkat(staging.descriptor,
-                       "payload",
-                       S_ISDIR(payload_status.st_mode) ? AT_REMOVEDIR : 0) == 0) {
-            release_staging(staging);
-            return true;
-        }
-        if (!first_error) {
-            first_error = std::error_code(errno, std::generic_category());
+    // Preserve an identity observation for diagnostics and deterministic race
+    // coverage, but never treat that observation as continuing authority.
+    const std::filesystem::path access_root = staging.access_root();
+    for (const auto &output : outputs) {
+        if (output.path.lexically_relative(access_root) == "payload") {
+            std::error_code ignored;
+            (void)identity_for_at(staging.descriptor, "payload", ignored);
+            break;
         }
     }
 
+    // There is no POSIX primitive that conditionally unlinks a directory entry
+    // by inode identity.  Re-checking immediately before unlinkat still leaves a
+    // same-UID check/mutate race.  The fallback therefore publishes whichever
+    // entry is current through the live directory descriptor with one atomic,
+    // no-replace rename.  This hook exercises the former critical interval.
+    if (after_identity_observation != nullptr) {
+        after_identity_observation(staging.descriptor);
+    }
+
+    std::error_code payload_error;
+    const Identity payload_identity =
+        payload_identity_operation(staging.descriptor, "payload", payload_error);
+    if (payload_error || !payload_identity.valid) {
+        if (payload_error == std::errc::no_such_file_or_directory) {
+            std::filesystem::path retained;
+            bool payload_absent = false;
+            std::error_code absence_error;
+            if (finalize_staged_payload_absence(staging,
+                                                near_path,
+                                                payload_error,
+                                                retained,
+                                                payload_absent,
+                                                absence_error) &&
+                !payload_absent && retained_paths != nullptr) {
+                retained_paths->push_back(retained);
+                first_error = std::make_error_code(std::errc::state_not_recoverable);
+                return false;
+            }
+            if (payload_absent) {
+                return true;
+            }
+            first_error = absence_error ? absence_error : payload_error;
+            return false;
+        }
+        first_error = payload_error ? payload_error
+                                    : std::make_error_code(
+                                          std::errc::state_not_recoverable);
+        std::filesystem::path retained;
+        bool payload_absent = false;
+        std::error_code publication_error;
+        if (publish_staged_payload_evidence(staging,
+                                            near_path,
+                                            retained,
+                                            payload_absent,
+                                            publication_error,
+                                            payload_identity_operation) &&
+            !payload_absent && retained_paths != nullptr) {
+            retained_paths->push_back(retained);
+        }
+        return false;
+    }
+
+    first_error = std::make_error_code(std::errc::state_not_recoverable);
     std::filesystem::path retained;
-    std::error_code retain_error;
-    if (!retain_staged_payload(staging, near_path, retained, retain_error)) {
-        retained = staging.container_path / "payload";
-        if (!first_error) {
-            first_error = retain_error;
-        }
-    }
-    if (retained_paths != nullptr && !retained.empty()) {
+    bool payload_absent = false;
+    std::error_code publication_error;
+    if (publish_staged_payload_evidence(staging,
+                                        near_path,
+                                        retained,
+                                        payload_absent,
+                                        publication_error) &&
+        !payload_absent && retained_paths != nullptr) {
         retained_paths->push_back(retained);
     }
     return false;

@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include <fcntl.h>
 #include <unistd.h>
 
 namespace {
@@ -31,6 +32,112 @@ bool write_text(const std::filesystem::path &path, const std::string &text)
     std::ofstream output(path);
     output << text;
     return output.good();
+}
+
+std::filesystem::path critical_interval_displaced;
+bool critical_interval_replaced = false;
+
+void replace_unpublished_payload(const int directory_descriptor) noexcept
+{
+    critical_interval_replaced =
+        ::renameat(directory_descriptor,
+                   "payload",
+                   AT_FDCWD,
+                   critical_interval_displaced.c_str()) == 0;
+    const int replacement = ::openat(directory_descriptor,
+                                     "payload",
+                                     O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC,
+                                     0600);
+    const std::string text{"critical-interval replacement"};
+    if (replacement < 0 ||
+        ::write(replacement, text.data(), text.size()) !=
+            static_cast<ssize_t>(text.size())) {
+        critical_interval_replaced = false;
+    }
+    if (replacement >= 0) {
+        ::close(replacement);
+    }
+}
+
+std::filesystem::path rebound_container_original;
+std::filesystem::path rebound_container_owned;
+bool rebound_container_replaced = false;
+
+std::filesystem::path quarantine_fault_source;
+std::filesystem::path quarantine_fault_owned_container;
+std::filesystem::path quarantine_fault_visible_container;
+
+infiltrator::files::destination_ownership::Identity rebind_quarantine_and_fail_identity(
+    const int directory_descriptor,
+    const char *,
+    std::error_code &error) noexcept
+{
+    namespace fs = std::filesystem;
+    std::error_code fixture_error;
+    const auto current = fs::read_symlink(
+        fs::path{"/proc/self/fd"} / std::to_string(directory_descriptor), fixture_error);
+    quarantine_fault_visible_container = current;
+    if (!fixture_error) {
+        fs::rename(current, quarantine_fault_owned_container, fixture_error);
+    }
+    if (!fixture_error) {
+        fs::create_directory(current, fixture_error);
+    }
+    if (!fixture_error) {
+        (void)write_text(current / "payload", "competing staging payload");
+        (void)write_text(quarantine_fault_source, "competing source");
+    }
+    error = std::make_error_code(std::errc::io_error);
+    return {};
+}
+
+infiltrator::files::destination_ownership::Identity remove_quarantine_and_fail_identity(
+    const int directory_descriptor,
+    const char *,
+    std::error_code &error) noexcept
+{
+    (void)::unlinkat(directory_descriptor, "payload", 0);
+    (void)write_text(quarantine_fault_source, "competing source");
+    error = std::make_error_code(std::errc::io_error);
+    return {};
+}
+
+bool fail_retain_staged_payload(
+    infiltrator::files::destination_ownership::ProtectedStaging &,
+    const std::filesystem::path &,
+    std::filesystem::path &retained,
+    std::error_code &error) noexcept
+{
+    retained.clear();
+    error = std::make_error_code(std::errc::io_error);
+    return false;
+}
+
+bool report_absent_retain_staged_payload(
+    infiltrator::files::destination_ownership::ProtectedStaging &,
+    const std::filesystem::path &,
+    std::filesystem::path &retained,
+    std::error_code &error) noexcept
+{
+    retained.clear();
+    error = std::make_error_code(std::errc::no_such_file_or_directory);
+    return false;
+}
+
+void replace_unpublished_container(const int) noexcept
+{
+    std::error_code error;
+    std::filesystem::rename(
+        rebound_container_original, rebound_container_owned, error);
+    if (error) {
+        return;
+    }
+    std::filesystem::create_directory(rebound_container_original, error);
+    if (error) {
+        return;
+    }
+    rebound_container_replaced =
+        write_text(rebound_container_original / "payload", "competing payload");
 }
 
 bool unsupported_eopnotsupp(const std::filesystem::path &,
@@ -63,6 +170,29 @@ infiltrator::files::destination_ownership::Identity failing_identity_for_at(
     std::error_code &error) noexcept
 {
     error = std::make_error_code(std::errc::io_error);
+    return {};
+}
+
+bool late_absence_payload_created = false;
+
+infiltrator::files::destination_ownership::Identity report_absent_then_create_payload(
+    const int directory_descriptor,
+    const char *,
+    std::error_code &error) noexcept
+{
+    const int replacement = ::openat(directory_descriptor,
+                                     "payload",
+                                     O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC,
+                                     0600);
+    const std::string text{"late payload"};
+    late_absence_payload_created =
+        replacement >= 0 &&
+        ::write(replacement, text.data(), text.size()) ==
+            static_cast<ssize_t>(text.size());
+    if (replacement >= 0) {
+        ::close(replacement);
+    }
+    error = std::make_error_code(std::errc::no_such_file_or_directory);
     return {};
 }
 
@@ -435,7 +565,155 @@ int main()
         return 48;
     }
 
+    const auto raced_file_public = root / "raced-file-public";
+    const auto raced_file_displaced = root / "raced-file-displaced";
+    fs::path raced_file_stage;
+    {
+        ownership::ProtectedStaging staging;
+        ownership::OwnedOutputs outputs;
+        fs::path private_path;
+        error.clear();
+        const int descriptor = ownership::create_private_file(
+            raced_file_public, staging, outputs, private_path, error);
+        const std::string owned_text{"owned unpublished payload"};
+        const bool owned_written = descriptor >= 0 &&
+                                   ::write(descriptor,
+                                           owned_text.data(),
+                                           owned_text.size()) ==
+                                       static_cast<ssize_t>(owned_text.size());
+        if (descriptor >= 0) {
+            ::close(descriptor);
+        }
+        raced_file_stage = staging.container_path;
+        critical_interval_displaced = raced_file_displaced;
+        critical_interval_replaced = false;
+        std::error_code cleanup_error;
+        std::vector<fs::path> retained;
+        const bool cleaned = ownership::cleanup_unpublished(
+            staging,
+            raced_file_public,
+            outputs,
+            cleanup_error,
+            &retained,
+            replace_unpublished_payload);
+        if (!require(owned_written && !error && outputs.size() == 1U &&
+                         critical_interval_replaced && !cleaned &&
+                         retained.size() == 1U &&
+                         retained.front() != raced_file_stage / "payload" &&
+                         read_text(retained.front()) ==
+                             "critical-interval replacement" &&
+                         read_text(raced_file_displaced) == owned_text &&
+                         !fs::exists(raced_file_public),
+                     "critical-interval replacement was mutated as owned")) {
+            return 80;
+        }
+    }
+    if (!require(!fs::exists(raced_file_stage) &&
+                     read_text(raced_file_displaced) == "owned unpublished payload",
+                 "critical-interval evidence did not survive descriptor close")) {
+        return 90;
+    }
+    fs::remove_all(raced_file_stage, error);
+    fs::remove(raced_file_displaced, error);
+
+    const auto rebound_public = root / "rebound-public";
+    const auto rebound_owned_container = root / "rebound-owned-container";
+    fs::path rebound_original_container;
+    {
+        ownership::ProtectedStaging staging;
+        ownership::OwnedOutputs outputs;
+        fs::path private_path;
+        error.clear();
+        const int descriptor = ownership::create_private_file(
+            rebound_public, staging, outputs, private_path, error);
+        const std::string owned_text{"descriptor-anchored payload"};
+        const bool written = descriptor >= 0 &&
+                             ::write(descriptor,
+                                     owned_text.data(),
+                                     owned_text.size()) ==
+                                 static_cast<ssize_t>(owned_text.size());
+        if (descriptor >= 0) {
+            ::close(descriptor);
+        }
+        rebound_original_container = staging.container_path;
+        rebound_container_original = rebound_original_container;
+        rebound_container_owned = rebound_owned_container;
+        rebound_container_replaced = false;
+        std::error_code cleanup_error;
+        std::vector<fs::path> retained;
+        const bool cleaned = ownership::cleanup_unpublished(
+            staging,
+            rebound_public,
+            outputs,
+            cleanup_error,
+            &retained,
+            replace_unpublished_container);
+        if (!require(written && !error && rebound_container_replaced && !cleaned &&
+                         retained.size() == 1U &&
+                         retained.front() != rebound_owned_container / "payload" &&
+                         read_text(retained.front()) == owned_text &&
+                         read_text(rebound_original_container / "payload") ==
+                             "competing payload",
+                     "container rebinding produced false retained evidence")) {
+            return 91;
+        }
+    }
+    if (!require(fs::is_directory(rebound_owned_container) &&
+                     fs::is_empty(rebound_owned_container) &&
+                     read_text(rebound_original_container / "payload") ==
+                         "competing payload",
+                 "release mutated a relocated staging directory by pathname")) {
+        return 92;
+    }
+    fs::remove_all(rebound_owned_container, error);
+    fs::remove_all(rebound_original_container, error);
+
+    const auto uncertain_public = root / "uncertain-inspection-public";
+    fs::path uncertain_container;
+    {
+        ownership::ProtectedStaging staging;
+        ownership::OwnedOutputs outputs;
+        fs::path private_path;
+        error.clear();
+        const int descriptor = ownership::create_private_file(
+            uncertain_public, staging, outputs, private_path, error);
+        const std::string uncertain_text{"inspection-uncertain payload"};
+        const bool written = descriptor >= 0 &&
+                             ::write(descriptor,
+                                     uncertain_text.data(),
+                                     uncertain_text.size()) ==
+                                 static_cast<ssize_t>(uncertain_text.size());
+        if (descriptor >= 0) {
+            ::close(descriptor);
+        }
+        uncertain_container = staging.container_path;
+        std::error_code cleanup_error;
+        std::vector<fs::path> retained;
+        const bool cleaned = ownership::cleanup_unpublished(
+            staging,
+            uncertain_public,
+            outputs,
+            cleanup_error,
+            &retained,
+            nullptr,
+            failing_identity_for_at);
+        if (!require(written && !error && !cleaned &&
+                         cleanup_error == std::errc::io_error &&
+                         retained.size() == 1U &&
+                         retained.front() != uncertain_container &&
+                         read_text(retained.front()) == uncertain_text,
+                     "payload inspection error left silent staging residue")) {
+            return 93;
+        }
+    }
+    if (!require(!fs::exists(uncertain_container),
+                 "uncertain staging container did not survive descriptor close")) {
+        return 94;
+    }
+    fs::remove_all(uncertain_container, error);
+
     const auto private_file_public = root / "private-file-public";
+    const auto displaced_private_file = root / "displaced-private-file";
     fs::path private_file_stage;
     {
         ownership::ProtectedStaging private_file_staging;
@@ -451,6 +729,26 @@ int main()
             failing_identity_for_fd);
         private_file_stage = private_file_staging.container_path;
         const std::error_code record_error = error;
+        const bool displaced =
+            ::renameat(private_file_staging.descriptor,
+                       "payload",
+                       AT_FDCWD,
+                       displaced_private_file.c_str()) == 0;
+        const int replacement_descriptor =
+            ::openat(private_file_staging.descriptor,
+                     "payload",
+                     O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC,
+                     0600);
+        const std::string replacement_text{"same-UID replacement"};
+        const bool replacement_written =
+            replacement_descriptor >= 0 &&
+            ::write(replacement_descriptor,
+                    replacement_text.data(),
+                    replacement_text.size()) ==
+                static_cast<ssize_t>(replacement_text.size());
+        if (replacement_descriptor >= 0) {
+            ::close(replacement_descriptor);
+        }
         std::error_code unpublished_cleanup_error;
         std::vector<fs::path> unpublished_retained;
         const bool unpublished_cleaned = ownership::cleanup_unpublished(
@@ -462,16 +760,22 @@ int main()
         if (!require(private_file_descriptor < 0 &&
                          record_error == std::errc::io_error &&
                          private_file_outputs.empty() &&
-                         unpublished_cleaned && unpublished_retained.empty() &&
+                         displaced && replacement_written &&
+                         !unpublished_cleaned &&
+                         unpublished_retained.size() == 1U &&
+                         unpublished_retained.front() != private_file_stage / "payload" &&
+                         read_text(unpublished_retained.front()) == replacement_text &&
                          !fs::exists(private_file_public),
-                     "record failure left a public or owned regular-file residue")) {
+                     "cleanup touched or hid an unverified same-UID replacement")) {
             return 81;
         }
     }
     if (!require(!fs::exists(private_file_stage),
-                 "record failure retained private regular-file staging residue")) {
+                 "unverified replacement did not survive descriptor close")) {
         return 82;
     }
+    fs::remove_all(private_file_stage, error);
+    fs::remove(displaced_private_file, error);
 
     const auto private_directory_public = root / "private-directory-public";
     fs::path private_directory_stage;
@@ -488,16 +792,20 @@ int main()
         const bool cleaned = ownership::cleanup_unpublished(
             staging, private_directory_public, outputs, cleanup_error, &retained);
         if (!require(private_path.empty() && record_error == std::errc::io_error &&
-                         outputs.empty() && cleaned && retained.empty() &&
+                         outputs.empty() && !cleaned &&
+                         retained.size() == 1U &&
+                         retained.front() != private_directory_stage / "payload" &&
+                         fs::is_directory(retained.front()) &&
                          !fs::exists(private_directory_public),
-                     "directory record failure left unreported staging residue")) {
+                     "directory record failure was not durably reported")) {
             return 83;
         }
     }
     if (!require(!fs::exists(private_directory_stage),
-                 "directory record failure retained its staging container")) {
+                 "reported private directory residue did not survive descriptor close")) {
         return 84;
     }
+    fs::remove_all(private_directory_stage, error);
 
     const auto private_symlink_public = root / "private-symlink-public";
     fs::path private_symlink_stage;
@@ -519,16 +827,20 @@ int main()
         const bool cleaned = ownership::cleanup_unpublished(
             staging, private_symlink_public, outputs, cleanup_error, &retained);
         if (!require(private_path.empty() && record_error == std::errc::io_error &&
-                         outputs.empty() && cleaned && retained.empty() &&
+                         outputs.empty() && !cleaned &&
+                         retained.size() == 1U &&
+                         retained.front() != private_symlink_stage / "payload" &&
+                         fs::is_symlink(retained.front()) &&
                          !fs::exists(private_symlink_public),
-                     "symlink record failure left unreported staging residue")) {
+                     "symlink record failure was not durably reported")) {
             return 85;
         }
     }
     if (!require(!fs::exists(private_symlink_stage),
-                 "symlink record failure retained its staging container")) {
+                 "reported private symlink residue did not survive descriptor close")) {
         return 86;
     }
+    fs::remove_all(private_symlink_stage, error);
 
     const auto durable_public = root / "durable-unpublished";
     ownership::ProtectedStaging durable_staging;
@@ -551,8 +863,7 @@ int main()
                      durable_retained.size() == 1U &&
                      durable_retained.front().string().find("/proc/self/fd/") ==
                          std::string::npos &&
-                     durable_retained.front().filename().string().starts_with(
-                         ".infiltrator-retained-") &&
+                     durable_retained.front() != durable_staging.container_path / "payload" &&
                      read_text(durable_retained.front() / "unrecorded") ==
                          "retained payload",
                  "unpublished residue was not surfaced at one durable exact path")) {
@@ -653,8 +964,6 @@ int main()
                  "ENOTSUP capability failure mutated the source, destination, or hidden state")) {
         return 67;
     }
-
-
 
     // A replacement of the visible staging-container pathname must not redirect
     // writes or publication away from the directory descriptor Files owns.
@@ -772,6 +1081,223 @@ int main()
                      read_text(retained_path) == "owned retained",
                  "blocked source restoration did not surface retained data")) {
         return 80;
+    }
+
+    // quarantine_owned must follow the descriptor's renamed container after
+    // both restoration and retention publication fail, never the replaced
+    // historical staging pathname.
+    const auto quarantine_rebind_source = root / "quarantine-rebind-source";
+    quarantine_fault_source = quarantine_rebind_source;
+    quarantine_fault_owned_container = root / "quarantine-rebind-owned";
+    if (!require(write_text(quarantine_rebind_source, "owned quarantine"),
+                 "could not create quarantine rebinding fixture")) {
+        return 90;
+    }
+    ownership::OwnedOutputs quarantine_rebind_outputs;
+    if (!require(ownership::record(quarantine_rebind_source,
+                                   quarantine_rebind_outputs,
+                                   error),
+                 "could not record quarantine rebinding fixture")) {
+        return 91;
+    }
+    ownership::ProtectedStaging quarantine_rebind_staging;
+    fs::path quarantine_rebind_payload;
+    fs::path quarantine_rebind_retained;
+    error.clear();
+    const bool quarantine_rebind_result =
+        ownership::quarantine_owned_with_operations(
+                         quarantine_rebind_outputs.front(),
+                         quarantine_rebind_staging,
+                         quarantine_rebind_payload,
+                         error,
+                         &quarantine_rebind_retained,
+                         rebind_quarantine_and_fail_identity,
+                         fail_retain_staged_payload);
+    if (!require(!quarantine_rebind_result &&
+                     error == std::errc::io_error &&
+                     quarantine_rebind_retained !=
+                         quarantine_fault_owned_container / "payload" &&
+                     read_text(quarantine_rebind_retained) == "owned quarantine" &&
+                     read_text(quarantine_rebind_source) == "competing source" &&
+                     read_text(quarantine_fault_visible_container / "payload") ==
+                         "competing staging payload" &&
+                     quarantine_rebind_retained.string().find("/proc/self/fd/") ==
+                         std::string::npos,
+                 "quarantine failure reported the historical staging binding")) {
+        return 92;
+    }
+    ownership::release_staging(quarantine_rebind_staging);
+
+    // The same quarantine failure must not invent evidence when the payload
+    // was removed before restoration/retention could inspect it.
+    const auto quarantine_absent_source = root / "quarantine-absent-source";
+    quarantine_fault_source = quarantine_absent_source;
+    if (!require(write_text(quarantine_absent_source, "remove before evidence"),
+                 "could not create quarantine absence fixture")) {
+        return 93;
+    }
+    ownership::OwnedOutputs quarantine_absent_outputs;
+    if (!require(ownership::record(quarantine_absent_source,
+                                   quarantine_absent_outputs,
+                                   error),
+                 "could not record quarantine absence fixture")) {
+        return 94;
+    }
+    ownership::ProtectedStaging quarantine_absent_staging;
+    fs::path quarantine_absent_payload;
+    fs::path quarantine_absent_retained;
+    error.clear();
+    if (!require(!ownership::quarantine_owned_with_operations(
+                         quarantine_absent_outputs.front(),
+                         quarantine_absent_staging,
+                         quarantine_absent_payload,
+                         error,
+                         &quarantine_absent_retained,
+                         remove_quarantine_and_fail_identity,
+                         report_absent_retain_staged_payload) &&
+                     error == std::errc::io_error &&
+                     quarantine_absent_retained.empty() &&
+                     quarantine_absent_staging.descriptor < 0 &&
+                     read_text(quarantine_absent_source) == "competing source",
+                 "proven-absent quarantine payload produced false evidence")) {
+        return 95;
+    }
+
+    // Descriptor-backed restore_quarantine applies the identical rule after
+    // its direct restore and publication fallback both fail.
+    const auto restore_rebind_source = root / "restore-rebind-source";
+    if (!require(write_text(restore_rebind_source, "owned restore"),
+                 "could not create restore rebinding fixture")) {
+        return 96;
+    }
+    ownership::OwnedOutputs restore_rebind_outputs;
+    if (!require(ownership::record(restore_rebind_source,
+                                   restore_rebind_outputs,
+                                   error),
+                 "could not record restore rebinding fixture")) {
+        return 97;
+    }
+    ownership::ProtectedStaging restore_rebind_staging;
+    fs::path restore_rebind_payload;
+    error.clear();
+    if (!require(ownership::quarantine_owned(restore_rebind_outputs.front(),
+                                             restore_rebind_staging,
+                                             restore_rebind_payload,
+                                             error),
+                 "could not prepare restore rebinding fixture")) {
+        return 98;
+    }
+    const auto restore_visible_container = restore_rebind_staging.container_path;
+    const auto restore_owned_container = root / "restore-rebind-owned";
+    fs::rename(restore_visible_container, restore_owned_container, error);
+    if (!require(!error && fs::create_directory(restore_visible_container, error) &&
+                     write_text(restore_visible_container / "payload",
+                                "competing staging payload") &&
+                     write_text(restore_rebind_source, "competing source"),
+                 "could not replace restore staging binding")) {
+        return 99;
+    }
+    fs::path restore_rebind_retained;
+    error.clear();
+    if (!require(!ownership::restore_quarantine(restore_rebind_staging,
+                                                restore_rebind_source,
+                                                error,
+                                                &restore_rebind_retained,
+                                                nullptr,
+                                                fail_retain_staged_payload) &&
+                     error == std::errc::io_error &&
+                     restore_rebind_retained != restore_owned_container / "payload" &&
+                     read_text(restore_rebind_retained) == "owned restore" &&
+                     read_text(restore_visible_container / "payload") ==
+                         "competing staging payload" &&
+                     restore_rebind_retained.string().find("/proc/self/fd/") ==
+                         std::string::npos,
+                 "restore failure reported the historical staging binding")) {
+        return 100;
+    }
+    ownership::release_staging(restore_rebind_staging);
+
+    const auto restore_absent_source = root / "restore-absent-source";
+    if (!require(write_text(restore_absent_source, "remove before restore evidence"),
+                 "could not create restore absence fixture")) {
+        return 101;
+    }
+    ownership::OwnedOutputs restore_absent_outputs;
+    if (!require(ownership::record(restore_absent_source,
+                                   restore_absent_outputs,
+                                   error),
+                 "could not record restore absence fixture")) {
+        return 102;
+    }
+    ownership::ProtectedStaging restore_absent_staging;
+    fs::path restore_absent_payload;
+    error.clear();
+    if (!require(ownership::quarantine_owned(restore_absent_outputs.front(),
+                                             restore_absent_staging,
+                                             restore_absent_payload,
+                                             error) &&
+                     ::unlinkat(restore_absent_staging.descriptor, "payload", 0) == 0 &&
+                     write_text(restore_absent_source, "competing source"),
+                 "could not prepare restore absence fixture")) {
+        return 103;
+    }
+    fs::path restore_absent_retained;
+    error.clear();
+    if (!require(!ownership::restore_quarantine(restore_absent_staging,
+                                                restore_absent_source,
+                                                error,
+                                                &restore_absent_retained,
+                                                nullptr,
+                                                report_absent_retain_staged_payload) &&
+                     restore_absent_retained.empty() &&
+                     restore_absent_staging.descriptor < 0 &&
+                     read_text(restore_absent_source) == "competing source",
+                 "proven-absent restore payload produced false evidence")) {
+        return 104;
+    }
+
+    // ENOENT is not final while the live staging descriptor can still receive a
+    // replacement. The late payload must be atomically retained rather than
+    // hidden when the descriptor is released.
+    const auto late_public = root / "late-absence-public";
+    ownership::ProtectedStaging late_staging;
+    ownership::OwnedOutputs late_outputs;
+    fs::path late_private;
+    error.clear();
+    const int late_descriptor = ownership::create_private_file(
+        late_public, late_staging, late_outputs, late_private, error);
+    if (late_descriptor >= 0) {
+        ::close(late_descriptor);
+    }
+    if (!require(late_descriptor >= 0 && !error &&
+                     ::unlinkat(late_staging.descriptor, "payload", 0) == 0,
+                 "could not prepare late-absence fixture")) {
+        return 105;
+    }
+    late_absence_payload_created = false;
+    std::vector<fs::path> late_retained;
+    std::error_code late_cleanup_error;
+    const bool late_cleaned = ownership::cleanup_unpublished(
+        late_staging,
+        late_public,
+        late_outputs,
+        late_cleanup_error,
+        &late_retained,
+        nullptr,
+        report_absent_then_create_payload);
+    if (!require(!late_cleaned && late_absence_payload_created &&
+                     late_cleanup_error == std::errc::state_not_recoverable &&
+                     late_retained.size() == 1U &&
+                     late_retained.front().string().find("/proc/self/fd/") ==
+                         std::string::npos &&
+                     read_text(late_retained.front()) == "late payload" &&
+                     late_staging.descriptor < 0,
+                 "late payload was lost after a premature absence decision")) {
+        return 106;
+    }
+    fs::remove(late_retained.front(), error);
+    if (!require(!error, "could not remove late-absence retained payload")) {
+        return 107;
     }
 
     const auto previous_directory = fs::current_path(error);

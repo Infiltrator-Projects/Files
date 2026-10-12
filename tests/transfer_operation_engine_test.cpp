@@ -4,6 +4,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <unistd.h>
@@ -21,6 +22,14 @@ bool write_text(const std::filesystem::path &path, const std::string &text)
     std::ofstream stream(path, std::ios::binary | std::ios::trunc);
     stream << text;
     return stream.good();
+}
+
+std::string read_text(const std::filesystem::path &path)
+{
+    std::ifstream stream(path, std::ios::binary);
+    std::ostringstream buffer;
+    buffer << stream.rdbuf();
+    return buffer.str();
 }
 
 bool force_cross_device(
@@ -48,6 +57,83 @@ bool force_unsupported_quarantine(
     if (retained != nullptr) {
         retained->clear();
     }
+    error = std::make_error_code(std::errc::operation_not_supported);
+    return false;
+}
+
+std::filesystem::path verification_failure_destination;
+
+bool quarantine_then_remove_source_payload(
+    const infiltrator::files::destination_ownership::OwnedOutput &output,
+    infiltrator::files::destination_ownership::ProtectedStaging &staging,
+    std::filesystem::path &quarantine,
+    std::error_code &error,
+    std::filesystem::path *retained) noexcept
+{
+    if (!infiltrator::files::destination_ownership::quarantine_owned(
+            output, staging, quarantine, error, retained)) {
+        return false;
+    }
+    (void)::unlinkat(staging.descriptor, "payload", 0);
+    return true;
+}
+
+bool quarantine_then_remove_source_and_destination(
+    const infiltrator::files::destination_ownership::OwnedOutput &output,
+    infiltrator::files::destination_ownership::ProtectedStaging &staging,
+    std::filesystem::path &quarantine,
+    std::error_code &error,
+    std::filesystem::path *retained) noexcept
+{
+    if (!quarantine_then_remove_source_payload(
+            output, staging, quarantine, error, retained)) {
+        return false;
+    }
+    std::error_code ignored;
+    std::filesystem::remove(verification_failure_destination, ignored);
+    return true;
+}
+
+void force_quarantine_remove_failure(
+    const std::filesystem::path &path, std::error_code &error) noexcept
+{
+    std::error_code ignored;
+    std::filesystem::remove_all(path, ignored);
+    error = std::make_error_code(std::errc::io_error);
+}
+
+void force_quarantine_remove_error_without_deleting(
+    const std::filesystem::path &, std::error_code &error) noexcept
+{
+    error = std::make_error_code(std::errc::io_error);
+}
+
+std::filesystem::path claimed_source_path;
+
+void force_quarantine_remove_error_and_claim_source(
+    const std::filesystem::path &, std::error_code &error) noexcept
+{
+    (void)write_text(claimed_source_path, "competing source\n");
+    error = std::make_error_code(std::errc::io_error);
+}
+
+bool force_quarantine_presence_failure(
+    const std::filesystem::path &, std::error_code &error) noexcept
+{
+    error = std::make_error_code(std::errc::permission_denied);
+    return false;
+}
+
+std::filesystem::path failed_retention_container;
+
+bool force_quarantine_retention_failure(
+    infiltrator::files::destination_ownership::ProtectedStaging &staging,
+    const std::filesystem::path &,
+    std::filesystem::path &retained,
+    std::error_code &error) noexcept
+{
+    failed_retention_container = staging.container_path;
+    retained.clear();
     error = std::make_error_code(std::errc::operation_not_supported);
     return false;
 }
@@ -299,6 +385,160 @@ int main()
         return 22;
     }
 
+    // If descriptor-relative inspection proves that the quarantined source is
+    // gone, neither verification-failure branch may report the expired
+    // /proc/self/fd access path as recovery evidence.
+    const fs::path absent_verify_source = root / "absent-verify-source.txt";
+    const fs::path absent_verify_parent = root / "absent-verify-destination";
+    fs::create_directories(absent_verify_parent);
+    if (!write_text(absent_verify_source, "absent verify payload\n")) {
+        fs::remove_all(root, cleanup_error);
+        return 31;
+    }
+    verification_failure_destination =
+        absent_verify_parent / absent_verify_source.filename();
+    TransferOperationHooks absent_verify_hooks;
+    absent_verify_hooks.move_owned = force_cross_device;
+    absent_verify_hooks.quarantine_owned =
+        quarantine_then_remove_source_and_destination;
+    TransferOperationEngine absent_verify_engine{absent_verify_hooks};
+    const auto absent_verify_move = absent_verify_engine.move_item(
+        absent_verify_source, absent_verify_parent, ConflictPolicy::Fail);
+    if (absent_verify_move.status != OperationStatus::VerificationFailure ||
+        !absent_verify_move.changed || !absent_verify_move.retained_paths.empty() ||
+        fs::exists(absent_verify_source) ||
+        fs::exists(verification_failure_destination) ||
+        absent_verify_move.message.find("/proc/self/fd/") != std::string::npos ||
+        absent_verify_move.message.find("Remaining data is available at") !=
+            std::string::npos ||
+        has_internal_residue(root)) {
+        fs::remove_all(root, cleanup_error);
+        return 32;
+    }
+
+    const fs::path absent_shape_source = root / "absent-shape-source.txt";
+    const fs::path absent_shape_parent = root / "absent-shape-destination";
+    fs::create_directories(absent_shape_parent);
+    if (!write_text(absent_shape_source, "absent shape payload\n")) {
+        fs::remove_all(root, cleanup_error);
+        return 33;
+    }
+    const fs::path absent_shape_destination =
+        absent_shape_parent / absent_shape_source.filename();
+    TransferOperationHooks absent_shape_hooks;
+    absent_shape_hooks.move_owned = force_cross_device;
+    absent_shape_hooks.quarantine_owned = quarantine_then_remove_source_payload;
+    TransferOperationEngine absent_shape_engine{absent_shape_hooks};
+    const auto absent_shape_move = absent_shape_engine.move_item(
+        absent_shape_source, absent_shape_parent, ConflictPolicy::Fail);
+    if (absent_shape_move.status != OperationStatus::VerificationFailure ||
+        !absent_shape_move.changed || !absent_shape_move.retained_paths.empty() ||
+        fs::exists(absent_shape_source) || fs::exists(absent_shape_destination) ||
+        absent_shape_move.message.find("/proc/self/fd/") != std::string::npos ||
+        absent_shape_move.message.find("Remaining data is available at") !=
+            std::string::npos ||
+        has_internal_residue(root)) {
+        fs::remove_all(root, cleanup_error);
+        return 34;
+    }
+
+    const fs::path durable_source = root / "durable-source.txt";
+    const fs::path durable_destination_parent = root / "durable-destination";
+    fs::create_directories(durable_destination_parent);
+    if (!write_text(durable_source, "durable source payload\n")) {
+        fs::remove_all(root, cleanup_error);
+        return 27;
+    }
+    TransferOperationHooks durable_hooks;
+    durable_hooks.move_owned = force_cross_device;
+    durable_hooks.remove_source_quarantine = force_quarantine_remove_failure;
+    durable_hooks.source_quarantine_present = force_quarantine_presence_failure;
+    TransferOperationEngine durable_engine{durable_hooks};
+    const auto durable_move = durable_engine.move_item(
+        durable_source, durable_destination_parent, ConflictPolicy::Fail);
+    if (durable_move.status != OperationStatus::ExecutionFailure ||
+        !durable_move.changed || !durable_move.retained_paths.empty() ||
+        fs::exists(durable_source) ||
+        read_text(durable_destination_parent / durable_source.filename()) !=
+            "durable source payload\n" ||
+        durable_move.message.find("Remaining data is available at") !=
+            std::string::npos ||
+        has_internal_residue(root)) {
+        fs::remove_all(root, cleanup_error);
+        return 28;
+    }
+
+    const fs::path uncertain_source = root / "uncertain-source.txt";
+    const fs::path uncertain_destination_parent = root / "uncertain-destination";
+    fs::create_directories(uncertain_destination_parent);
+    if (!write_text(uncertain_source, "uncertain source payload\n")) {
+        fs::remove_all(root, cleanup_error);
+        return 29;
+    }
+    TransferOperationHooks uncertain_hooks;
+    uncertain_hooks.move_owned = force_cross_device;
+    uncertain_hooks.remove_source_quarantine =
+        force_quarantine_remove_error_without_deleting;
+    uncertain_hooks.source_quarantine_present = force_quarantine_presence_failure;
+    uncertain_hooks.retain_source_quarantine = force_quarantine_retention_failure;
+    failed_retention_container.clear();
+    TransferOperationEngine uncertain_engine{uncertain_hooks};
+    const auto uncertain_move = uncertain_engine.move_item(
+        uncertain_source, uncertain_destination_parent, ConflictPolicy::Fail);
+    if (uncertain_move.status != OperationStatus::ExecutionFailure ||
+        !uncertain_move.changed || uncertain_move.retained_paths.size() != 1U ||
+        uncertain_move.retained_paths.front() ==
+            failed_retention_container / "payload" ||
+        !fs::is_regular_file(uncertain_move.retained_paths.front()) ||
+        read_text(uncertain_move.retained_paths.front()) !=
+            "uncertain source payload\n" ||
+        fs::exists(failed_retention_container) ||
+        fs::exists(uncertain_source) ||
+        read_text(uncertain_destination_parent / uncertain_source.filename()) !=
+            "uncertain source payload\n" ||
+        uncertain_move.message.find(
+            uncertain_move.retained_paths.front().string()) ==
+            std::string::npos) {
+        fs::remove_all(root, cleanup_error);
+        return 30;
+    }
+    fs::remove(uncertain_move.retained_paths.front(), cleanup_error);
+
+    // If source restoration itself already retained the quarantined object,
+    // the transfer result must surface that exact path instead of silently
+    // dropping it merely because the later fallback is no longer needed.
+    const fs::path already_retained_source = root / "already-retained-source.txt";
+    const fs::path already_retained_parent = root / "already-retained-destination";
+    fs::create_directories(already_retained_parent);
+    if (!write_text(already_retained_source, "already retained source payload\n")) {
+        fs::remove_all(root, cleanup_error);
+        return 37;
+    }
+    claimed_source_path = already_retained_source;
+    TransferOperationHooks already_retained_hooks;
+    already_retained_hooks.move_owned = force_cross_device;
+    already_retained_hooks.remove_source_quarantine =
+        force_quarantine_remove_error_and_claim_source;
+    TransferOperationEngine already_retained_engine{already_retained_hooks};
+    const auto already_retained_move = already_retained_engine.move_item(
+        already_retained_source, already_retained_parent, ConflictPolicy::Fail);
+    if (already_retained_move.status != OperationStatus::ExecutionFailure ||
+        !already_retained_move.changed ||
+        already_retained_move.retained_paths.size() != 1U ||
+        !fs::is_regular_file(already_retained_move.retained_paths.front()) ||
+        read_text(already_retained_move.retained_paths.front()) !=
+            "already retained source payload\n" ||
+        read_text(already_retained_source) != "competing source\n" ||
+        read_text(already_retained_parent / already_retained_source.filename()) !=
+            "already retained source payload\n" ||
+        already_retained_move.message.find(
+            already_retained_move.retained_paths.front().string()) ==
+            std::string::npos) {
+        fs::remove_all(root, cleanup_error);
+        return 38;
+    }
+    fs::remove(already_retained_move.retained_paths.front(), cleanup_error);
+
     const fs::path cancelled_tree = root / "cancelled-tree";
     fs::create_directories(cancelled_tree / "nested");
     if (!write_text(cancelled_tree / "nested" / "data.bin", "cancelled tree payload\n")) {
@@ -317,12 +557,20 @@ int main()
         ConflictPolicy::Fail,
         &traversal_cancel);
     if (cancelled_traversal.status != OperationStatus::Cancelled ||
-        cancelled_traversal.changed || !cancelled_traversal.retained_paths.empty() ||
+        !cancelled_traversal.changed ||
+        cancelled_traversal.retained_paths.size() != 1U ||
+        !fs::is_directory(cancelled_traversal.retained_paths.front()) ||
+        cancelled_traversal.message.find(
+            cancelled_traversal.retained_paths.front().string()) == std::string::npos ||
         unsupported_publication_calls != 0U ||
-        fs::exists(unsupported_private_parent / cancelled_tree.filename()) ||
-        has_internal_residue(unsupported_private_parent)) {
+        fs::exists(unsupported_private_parent / cancelled_tree.filename())) {
         fs::remove_all(root, cleanup_error);
         return 24;
+    }
+    fs::remove_all(cancelled_traversal.retained_paths.front(), cleanup_error);
+    if (cleanup_error || has_internal_residue(root)) {
+        fs::remove_all(root, cleanup_error);
+        return 35;
     }
 
     const fs::path denied_source = root / "permission-publication.txt";
@@ -337,14 +585,21 @@ int main()
     TransferOperationEngine denied_engine{denied_hooks};
     const auto denied = denied_engine.copy_item(
         denied_source, denied_parent, ConflictPolicy::Fail);
-    if (denied.status != OperationStatus::PermissionFailure || denied.changed ||
-        !denied.retained_paths.empty() ||
+    if (denied.status != OperationStatus::PermissionFailure || !denied.changed ||
+        denied.retained_paths.size() != 1U ||
+        read_text(denied.retained_paths.front()) != "publication error payload\n" ||
+        denied.message.find(denied.retained_paths.front().string()) ==
+            std::string::npos ||
         denied.message.find("Permission denied") == std::string::npos ||
         denied.message.find("another writer") != std::string::npos ||
-        fs::exists(denied_parent / denied_source.filename()) ||
-        has_internal_residue(denied_parent)) {
+        fs::exists(denied_parent / denied_source.filename())) {
         fs::remove_all(root, cleanup_error);
         return 26;
+    }
+    fs::remove(denied.retained_paths.front(), cleanup_error);
+    if (cleanup_error || has_internal_residue(root)) {
+        fs::remove_all(root, cleanup_error);
+        return 36;
     }
 
     fs::remove_all(root, cleanup_error);

@@ -4,6 +4,7 @@
 
 #include <gio/gio.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <string>
@@ -178,6 +179,47 @@ std::string staging_failure_message(const std::error_code &error,
                                    retained.string() + "”.");
 }
 
+void append_unique_retained(
+    std::vector<std::filesystem::path> &paths,
+    const std::filesystem::path &path)
+{
+    if (!path.empty() &&
+        std::find(paths.begin(), paths.end(), path) == paths.end()) {
+        paths.push_back(path);
+    }
+}
+
+void normalize_retained(std::vector<std::filesystem::path> &paths)
+{
+    std::vector<std::filesystem::path> normalized;
+    normalized.reserve(paths.size());
+    for (const auto &path : paths) {
+        append_unique_retained(normalized, path);
+    }
+    paths = std::move(normalized);
+}
+
+std::string retained_paths_message(
+    const std::vector<std::filesystem::path> &paths)
+{
+    std::string message;
+    for (const auto &path : paths) {
+        message += " Remaining data is available at “" + path.string() + "”.";
+    }
+    return message;
+}
+
+void append_missing_retained_guidance(
+    std::string &message,
+    const std::vector<std::filesystem::path> &paths)
+{
+    for (const auto &path : paths) {
+        if (message.find(path.string()) == std::string::npos) {
+            message += " Remaining data is available at “" + path.string() + "”.";
+        }
+    }
+}
+
 } // namespace
 
 OperationResult RecoveryOperationEngine::replace_copy(
@@ -237,22 +279,29 @@ OperationResult RecoveryOperationEngine::replace_copy(
         hooks_.before_rollback(destination);
     }
     if (!rollback_destination(destination, staged, rollback_detail, rollback_retained)) {
+        auto retained_paths = replacement.retained_paths;
+        append_unique_retained(retained_paths, rollback_retained);
+        normalize_retained(retained_paths);
+        const std::string failure_message =
+            "The replacement failed and Files could not restore the previous destination. " +
+            rollback_detail + retained_paths_message(retained_paths);
         return result(OperationStatus::VerificationFailure,
                       OperationPhase::Verify,
                       destination,
-                      "The replacement failed and Files could not restore the previous destination. " +
-                          rollback_detail,
+                      failure_message,
                       true,
-                      {rollback_retained});
+                      std::move(retained_paths));
     }
 
     replacement.destination = destination;
-    replacement.changed = false;
+    normalize_retained(replacement.retained_paths);
+    replacement.changed = !replacement.retained_paths.empty();
     if (!replacement.message.empty()) {
         replacement.message += " The previous destination was restored.";
     } else {
         replacement.message = "The replacement failed. The previous destination was restored.";
     }
+    append_missing_retained_guidance(replacement.message, replacement.retained_paths);
     return replacement;
 }
 
@@ -320,30 +369,43 @@ OperationResult RecoveryOperationEngine::replace_move(
                                  rollback_detail,
                                  rollback_retained)) {
             replacement.destination = destination;
-            replacement.changed = false;
+            normalize_retained(replacement.retained_paths);
+            replacement.changed = !replacement.retained_paths.empty();
             if (!replacement.message.empty()) {
                 replacement.message += " The previous destination was restored.";
             } else {
                 replacement.message = "The replacement move failed. The previous destination was restored.";
             }
+            append_missing_retained_guidance(
+                replacement.message, replacement.retained_paths);
             return replacement;
         }
+        auto retained_paths = replacement.retained_paths;
+        append_unique_retained(retained_paths, rollback_retained);
+        normalize_retained(retained_paths);
+        const std::string failure_message =
+            "The replacement move failed and Files could not restore the previous destination. " +
+            rollback_detail + retained_paths_message(retained_paths);
         return result(OperationStatus::VerificationFailure,
                       OperationPhase::Verify,
                       destination,
-                      "The replacement move failed and Files could not restore the previous destination. " +
-                          rollback_detail,
+                      failure_message,
                       true,
-                      {rollback_retained});
+                      std::move(retained_paths));
     }
 
+    auto retained_paths = replacement.retained_paths;
+    append_unique_retained(retained_paths, backup);
+    normalize_retained(retained_paths);
+    const std::string failure_message =
+        "The replacement move did not verify cleanly. Files retained all remaining data rather than risking data loss." +
+        retained_paths_message(retained_paths);
     return result(OperationStatus::VerificationFailure,
                   OperationPhase::Verify,
                   destination,
-                  "The replacement move did not verify cleanly. Files retained the staged previous destination at “" +
-                      backup.string() + "” rather than risking data loss.",
+                  failure_message,
                   true,
-                  {backup});
+                  std::move(retained_paths));
 }
 
 OperationResult RecoveryOperationEngine::trash_item(const std::filesystem::path &source) const
