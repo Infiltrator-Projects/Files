@@ -1,0 +1,588 @@
+{
+  "schema_version": 2,
+  "revision": 122,
+  "mode": "WORK",
+  "updated_at": "2026-10-12T03:05:51.189Z",
+  "baseline": {
+    "main_sha": "e07841f6096df88f4738069011137a02bfc5e429",
+    "version": "0.1.18",
+    "release_verified": true,
+    "evidence": "https://github.com/Infiltrator-Projects/Infiltrator-File-Manager/releases/tag/v0.1.18"
+  },
+  "stroke": {
+    "id": "files-20261011-retained-evidence-integrity",
+    "phase": "INTEGRATING",
+    "predecessor": {
+      "id": "files-20261011-transfer-failure-residue",
+      "version": "0.1.18",
+      "release_sha": "e07841f6096df88f4738069011137a02bfc5e429",
+      "evidence": "https://github.com/Infiltrator-Projects/Infiltrator-File-Manager/issues/2#issuecomment-6106915229"
+    },
+    "package": {
+      "title": "Make retained transfer evidence durable and ownership-safe",
+      "golden_journeys": [
+        "GJ-05",
+        "GJ-06",
+        "GJ-07",
+        "GJ-08"
+      ],
+      "user_need": "When a transfer and its recovery both encounter exceptional failures, Files must never delete or move an object it cannot prove it owns, must return every surviving data location, and every reported path must remain usable after the operation returns.",
+      "scope": [
+        "Make unpublished cleanup distinguish identity-recorded outputs from an unverified payload. Never unlink, rename or otherwise mutate an unverified namespace entry as if Files still owns it; retain/report the safe staging location when ownership cannot be proved.",
+        "Convert every source-quarantine failure fallback to a durable exact path before ProtectedStaging closes, including the remove-failure plus presence-check-error branch.",
+        "Aggregate replacement-operation residue with rollback-retained residue in deterministic order across replace-copy and replace-move verification failures; preserve every path in structured OperationResult evidence and calm user-visible guidance.",
+        "Audit adjacent cleanup_unpublished, restore_quarantine, replace-copy, replace-move and result-construction branches for the same identity, lifetime and multi-residue loss class; correct only directly related hard gaps.",
+        "Add deterministic Release-effective injection seams and fixtures for replacement races, expiring descriptor paths and simultaneous replacement-plus-rollback residue.",
+        "Replace all direct `staging.container_path / payload` fallback evidence with one bounded durable-staging locator: verify the recorded container binding, otherwise resolve the descriptor's current non-/proc pathname and verify it identifies the same staging directory; return an exact payload path only when payload presence is known, otherwise return the verified container as explicitly uncertain recovery evidence.",
+        "Use the same durable-staging locator after unpublished payload inspection errors and source-quarantine retention-publication failures. Do not duplicate branch-specific path guesses, recursively delete uncertain containers, or introduce a generic recovery registry.",
+        "Close the descriptor-to-path publication race: no recovery pathname may be returned from a separate identity check followed by an unprotected namespace handoff; publish to a stable no-replace retained location while descriptor authority remains live.",
+        "Propagate proven staged-payload absence explicitly so cross-volume failure callers never synthesize an expired /proc/self/fd quarantine path.",
+        "Ensure recovery consumption cannot leave an unreported .infiltrator-stage-* wrapper: expose the preserved container or relocate payload evidence to a standalone retained path and clean the wrapper."
+      ],
+      "acceptance": [
+        "An injected identity-recording failure followed by a same-UID replacement proves cleanup never unlinks or mutates the unverified replacement as an owned object; the surviving safe location is durable, exact and reported with changed=true when residue remains.",
+        "A deterministic cross-volume fixture forces source-quarantine removal failure and presence-check failure; the returned retained path contains no /proc/self/fd component, exists after the operation returns and preserves the exact retained data.",
+        "Deterministic replace-copy and replace-move fixtures produce at least one replacement retained path plus a rollback-retained previous destination; every unique path is present in OperationResult.retained_paths, exists with the expected contents and appears in recovery guidance.",
+        "Retained paths are ordered deterministically and de-duplicated without concealing distinct objects; typed status, phase and changed truth remain correct.",
+        "No failed/cancelled unpublished operation leaves silent .infiltrator-stage-* residue; any intentionally retained container or payload is returned explicitly.",
+        "Existing destination-ownership, operation, transfer, recovery, batch, journal and GTK window-state tests pass in the hosted Release configuration on the exact candidate head.",
+        "README and FEATURES remain truthful about fail-closed provider behavior and retained recovery evidence; no claim of universal recovery or ownership certainty is introduced.",
+        "A deterministic same-UID container-rebinding fixture renames the original staging directory and installs a competing replacement at its old pathname; the result preserves the competitor, returns the descriptor-resolved current container/payload location with no `/proc/self/fd` component, and the reported object contains the owned data after teardown.",
+        "Deterministic non-ENOENT payload-inspection and retention-publication failures return a verified existing staging container as uncertain recovery evidence when exact payload presence/publication cannot be established; no nonempty `.infiltrator-stage-*` directory survives without appearing in `OperationResult.retained_paths` and guidance.",
+        "A deterministic post-verification rebinding fixture replaces the final verified pathname before return; the result still names the owned retained object, preserves the competitor and contains no descriptor-lifetime path.",
+        "Both cross-volume verification-failure branches cover proven payload absence and return no /proc/self/fd or nonexistent retained path.",
+        "After a test consumes the reported unpublished recovery evidence, no hidden .infiltrator-stage-* wrapper remains unreported."
+      ],
+      "invariants": [
+        "Filesystem object identity is authoritative. A pathname, same UID or prior successful create is not continuing proof of ownership after the owned descriptor closes.",
+        "No check-then-mutate or racy pathname verification fallback may unlink, rename or overwrite a competing writer's object.",
+        "Every recovery location exposed outside an operation must outlive all local descriptors and staging owners.",
+        "OperationResult is the structured boundary for typed status, mutation truth and all retained paths; UI code must not reconstruct missing evidence from prose.",
+        "Files owns transfer/recovery policy; Common ownership and the existing architecture remain unchanged.",
+        "One bounded staging/retention mechanism serves unpublished output and source quarantine without duplicating policy.",
+        "No new UI surface, synchronous filesystem work, accessibility regression or performance-sensitive directory scan is introduced.",
+        "A stored container pathname is evidence only while it resolves to the recorded staging-directory identity. The open directory descriptor is the continuity anchor; any externally returned path must be re-derived/verified against that identity and contain no descriptor-lifetime component.",
+        "When exact payload status is unknowable, report the verified containing directory as uncertain recovery evidence rather than inventing a payload path or suppressing the surviving container.",
+        "Identity verification followed by returning a mutable pathname is not an atomic publication boundary; externally visible recovery evidence must be stably published while object authority is held.",
+        "Proven absence is a first-class outcome and must not be collapsed into generic restore failure or guessed recovery evidence.",
+        "Every preserved staging wrapper is either itself reported or cleaned after its payload is published elsewhere."
+      ],
+      "evidence_required": [
+        "Release-effective deterministic same-UID replacement-race fixture covering unverified unpublished payload cleanup.",
+        "Release-effective forced remove-error plus presence-check-error fixture proving durable source-quarantine reporting after descriptor teardown.",
+        "Release-effective replace-copy and replace-move compound-failure fixtures proving complete multi-residue aggregation, contents, ordering, message and changed state.",
+        "Surrounding-call-site inspection showing no adjacent ephemeral path or discarded retained_paths branch remains.",
+        "Exact-head hosted Verify with the full Release suite.",
+        "Fresh independent formal review of the complete candidate and zero unresolved candidate-local hard threads.",
+        "Release-effective container-rebinding fixture proving descriptor-to-current-path recovery, staging identity verification, competing replacement preservation, no `/proc/self/fd` leakage and exact retained contents after descriptor teardown.",
+        "Release-effective non-ENOENT payload-inspection and retention-publication failure fixtures proving verified container-level evidence, post-return existence, guidance, changed truth and absence of silent staging residue.",
+        "Release-effective post-final-check rebinding fixture proving stable no-replace recovery publication.",
+        "Release-effective cross-volume proven-absence fixtures for both verification-failure callers.",
+        "Release-effective recovery-consumption fixture proving no silent empty staging wrapper remains."
+      ],
+      "out_of_scope": [
+        "Journal durability/live-session ownership, which remains the next separate roadmap package after this correction.",
+        "Clipboard, tabs, bookmarks, remote-provider, semantic/AI or new InfiltratorFS features.",
+        "A generic path-based ownership fallback, same-UID trust rule or speculative recovery framework.",
+        "Reopening, rewriting or republishing immutable 0.1.18 or reusing merged PR #11 as an active candidate.",
+        "Broad UI redesign beyond ensuring all exact retained paths remain readable in existing recovery presentation."
+      ],
+      "source_evidence": [
+        "Released 0.1.18 source destination_ownership.hpp cleanup_unpublished can reach unlinkat(payload) with no recorded output identity: PRRT_kwDOU9Z1nc6rLKl6.",
+        "Released 0.1.18 transfer_operation_engine.cpp can return source_quarantine as /proc/self/fd/<staging-fd>/payload after removal and presence-check errors: PRRT_kwDOU9Z1nc6rLKl-.",
+        "Released 0.1.18 recovery_operation_engine.cpp drops replacement.retained_paths when rollback also fails in copy and analogous move paths: PRRT_kwDOU9Z1nc6rLKl_.",
+        "Exact release baseline e07841f has successful Verify 38119879370, Publish 38119927500 and both public catalogue checks; these defects are follow-up source findings, not a reason to rewrite the immutable release."
+      ],
+      "architecture_decision": "Treat proof of ownership, recovery-path lifetime and retained-path completeness as one failure-evidence integrity contract. Correct the three released defects through the existing staging and OperationResult boundaries, with no new framework or surface.",
+      "source_review": "https://github.com/Infiltrator-Projects/Infiltrator-File-Manager/issues/2#issuecomment-6106654292"
+    },
+    "base_main_sha": "e07841f6096df88f4738069011137a02bfc5e429",
+    "candidate": {
+      "pr": 12,
+      "url": "https://github.com/Infiltrator-Projects/Infiltrator-File-Manager/pull/12",
+      "branch": "builder/retained-evidence-integrity",
+      "base_sha": "e07841f6096df88f4738069011137a02bfc5e429",
+      "head_sha": "65e349a1259b5440464dc14b361e62bba2d5295b",
+      "draft": false,
+      "changed_files": 7,
+      "ci": {
+        "run_id": 38198120556,
+        "workflow": "Verify",
+        "run_number": 202,
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "65e349a1259b5440464dc14b361e62bba2d5295b"
+      },
+      "commits": 14
+    },
+    "review": {
+      "review_id": "PRR_kwDOU9Z1nc8AAAABRwC6mA",
+      "node_id": null,
+      "reviewed_sha": "65e349a1259b5440464dc14b361e62bba2d5295b",
+      "verdict": "APPROVED",
+      "action": "INTEGRATE",
+      "submitted_at": "2026-10-11T10:56:33Z",
+      "request_changes_rejection": "GitHub API error 422: Review Can not request changes on your own pull request",
+      "exact_head_ci": {
+        "run_id": 38198120556,
+        "workflow": "Verify",
+        "run_number": 202,
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "65e349a1259b5440464dc14b361e62bba2d5295b"
+      },
+      "unresolved_threads": [],
+      "prior_review_verdict": "CHANGES_REQUIRED",
+      "prior_reviewed_sha": "2d155aa5214e59acb6d7dcbcc2fa81398c44690b",
+      "resolved_at": "2026-10-12T00:54:00.000Z",
+      "resolution_evidence": {
+        "head_sha": "0d9832fb8226c1e87b3ba50fe0e27cd7aff9c764",
+        "verify_run_id": 38189652278,
+        "verify_conclusion": "success",
+        "threads_resolved": 3,
+        "fixer_checkpoint": null
+      },
+      "exact_head_review": {
+        "review_id": "PRR_kwDOU9Z1nc8AAAABRwC6mA",
+        "database_id": 5486197400,
+        "reviewed_sha": "65e349a1259b5440464dc14b361e62bba2d5295b",
+        "state": "COMMENTED",
+        "submitted_at": "2026-10-12T03:02:50Z",
+        "protocol_verdict": "APPROVED"
+      },
+      "prior_exact_head_review": {
+        "review_id": "PRR_kwDOU9Z1nc8AAAABRs9CoA",
+        "database_id": 5482955424,
+        "reviewed_sha": "fb2ea51becaed45acdd055ab12fb53b96c19ca94",
+        "state": "COMMENTED",
+        "protocol_verdict_present": true,
+        "submitted_at": "2026-10-11T10:30:08Z"
+      },
+      "unresolved_thread_details": []
+    },
+    "hard_findings": [
+      {
+        "id": "unpublished-cleanup-check-mutate-race",
+        "severity": "P1",
+        "paths": [
+          "src/core/destination_ownership.hpp",
+          "tests/destination_ownership_test.cpp"
+        ],
+        "finding": "cleanup_unpublished checks recorded identity and then separately unlinks or retain-renames the same namespace entry, so a same-UID replacement in the check-to-mutate interval can still be deleted or moved as owned.",
+        "required": "Eliminate the check-then-mutate window for unpublished cleanup and add a deterministic fixture that replaces the entry in the critical interval, not only before cleanup starts.",
+        "threads": [
+          "PRRT_kwDOU9Z1nc6rL10x"
+        ],
+        "status": "addressed",
+        "observed_sha": "b2b05fcdf587707c0d4a4a9fa34125c46c29d89c",
+        "addressed_sha": "b2b05fcdf587707c0d4a4a9fa34125c46c29d89c",
+        "evidence": "Hosted Verify 38126078236 passed; linked review thread replied and resolved."
+      },
+      {
+        "id": "nonexistent-source-retained-path",
+        "severity": "P2",
+        "paths": [
+          "src/core/transfer_operation_engine.cpp",
+          "tests/transfer_operation_engine_test.cpp"
+        ],
+        "finding": "If source-quarantine removal deletes payload while returning an error and the presence probe also errors, retain_staged_payload returns ENOENT but the fallback reports container/payload; the destructor removes the empty container and the reported path does not exist.",
+        "required": "Surface a retained source path only when payload is proven to remain; add a remove-despite-error plus presence-error fixture and assert exact post-return existence/truth.",
+        "threads": [
+          "PRRT_kwDOU9Z1nc6rLxZv",
+          "PRRT_kwDOU9Z1nc6rL100"
+        ],
+        "status": "addressed",
+        "observed_sha": "b2b05fcdf587707c0d4a4a9fa34125c46c29d89c",
+        "addressed_sha": "b2b05fcdf587707c0d4a4a9fa34125c46c29d89c",
+        "evidence": "Hosted Verify 38126078236 passed; linked review thread replied and resolved."
+      },
+      {
+        "id": "uncertain-move-replacement-residue-loss",
+        "severity": "P1",
+        "paths": [
+          "src/core/recovery_operation_engine.cpp",
+          "tests/recovery_operation_engine_test.cpp"
+        ],
+        "finding": "replace_move drops replacement.retained_paths when source inspection errors or the replacement consumed the source, returning only the staged previous destination backup.",
+        "required": "Merge every replacement residue into the deterministic unique retained set for uncertain/missing-source verification failures and prove contents, ordering, guidance and changed truth.",
+        "threads": [
+          "PRRT_kwDOU9Z1nc6rL103"
+        ],
+        "status": "addressed",
+        "observed_sha": "b2b05fcdf587707c0d4a4a9fa34125c46c29d89c",
+        "addressed_sha": "b2b05fcdf587707c0d4a4a9fa34125c46c29d89c",
+        "evidence": "Hosted Verify 38126078236 passed; linked review thread replied and resolved."
+      },
+      {
+        "id": "rollback-success-mutation-truth",
+        "severity": "P2",
+        "paths": [
+          "src/core/recovery_operation_engine.cpp",
+          "tests/recovery_operation_engine_test.cpp"
+        ],
+        "finding": "replace_copy and replace_move set changed=false after successful rollback even when replacement.retained_paths is non-empty, contradicting the surviving external residue.",
+        "required": "Preserve changed=true whenever replacement residue remains and add copy/move retained-replacement plus successful-rollback Release fixtures.",
+        "threads": [
+          "PRRT_kwDOU9Z1nc6rL106"
+        ],
+        "status": "addressed",
+        "observed_sha": "b2b05fcdf587707c0d4a4a9fa34125c46c29d89c",
+        "addressed_sha": "b2b05fcdf587707c0d4a4a9fa34125c46c29d89c",
+        "evidence": "Hosted Verify 38126078236 passed; linked review thread replied and resolved."
+      },
+      {
+        "id": "retained-guidance-argument-order",
+        "severity": "P2",
+        "paths": [
+          "src/core/transfer_operation_engine.cpp",
+          "tests/transfer_operation_engine_test.cpp"
+        ],
+        "finding": "Adjacent transfer failures compose guidance from retained_paths while moving the same vector in another argument of the call; unspecified argument evaluation order can empty the vector before message construction and omit exact recovery paths.",
+        "required": "Precompute retained-path guidance before every directly related move into OperationResult and add deterministic message assertions for the affected failure branches.",
+        "threads": [
+          "PRRT_kwDOU9Z1nc6rL109"
+        ],
+        "status": "addressed",
+        "observed_sha": "b2b05fcdf587707c0d4a4a9fa34125c46c29d89c",
+        "addressed_sha": "b2b05fcdf587707c0d4a4a9fa34125c46c29d89c",
+        "evidence": "Hosted Verify 38126078236 passed; linked review thread replied and resolved."
+      },
+      {
+        "id": "staging-container-path-rebinding",
+        "severity": "P1",
+        "paths": [
+          "src/core/destination_ownership.hpp",
+          "tests/destination_ownership_test.cpp"
+        ],
+        "finding": "cleanup_unpublished can report container_path/payload after a same-UID writer renames the verified staging container and installs a replacement at that pathname; the returned path then resolves to competing data while the owned payload is stranded elsewhere.",
+        "required": "Introduce one durable-staging locator that treats the descriptor as the continuity anchor: verify the recorded container binding or resolve the descriptor's current non-/proc pathname and verify the same directory identity before returning payload/container evidence; prove a renamed container plus competitor replacement deterministically.",
+        "threads": [
+          "PRRT_kwDOU9Z1nc6rL_2H"
+        ],
+        "status": "addressed",
+        "observed_sha": "fb2ea51becaed45acdd055ab12fb53b96c19ca94",
+        "addressed_sha": "fb2ea51becaed45acdd055ab12fb53b96c19ca94",
+        "evidence": "Hosted Verify 38129861815 passed; linked exact-head review thread replied and resolved."
+      },
+      {
+        "id": "payload-inspection-error-silent-residue",
+        "severity": "P2",
+        "paths": [
+          "src/core/destination_ownership.hpp",
+          "tests/destination_ownership_test.cpp"
+        ],
+        "finding": "A descriptor-relative payload inspection error other than ENOENT returns without recovery evidence, while non-recursive staging cleanup can leave a nonempty hidden container behind.",
+        "required": "On non-ENOENT payload inspection failure, return the verified durable staging container as uncertain recovery evidence; never guess payload presence and never allow nonempty hidden staging to survive without structured evidence.",
+        "threads": [
+          "PRRT_kwDOU9Z1nc6rL_2J"
+        ],
+        "status": "addressed",
+        "observed_sha": "fb2ea51becaed45acdd055ab12fb53b96c19ca94",
+        "addressed_sha": "fb2ea51becaed45acdd055ab12fb53b96c19ca94",
+        "evidence": "Hosted Verify 38129861815 passed; linked exact-head review thread replied and resolved."
+      },
+      {
+        "id": "quarantine-retention-rename-failure-silent-residue",
+        "severity": "P2",
+        "paths": [
+          "src/core/transfer_operation_engine.cpp",
+          "tests/transfer_operation_engine_test.cpp"
+        ],
+        "finding": "When quarantine presence inspection errors and retain_staged_payload fails while payload still exists, the result can omit all retained paths although hidden staged source data survives.",
+        "required": "When presence inspection and retention publication both fail, reuse the durable-staging locator and return the verified containing directory as uncertain evidence if it may still hold source data; distinguish this from proven absence and test both outcomes.",
+        "threads": [
+          "PRRT_kwDOU9Z1nc6rL_2N"
+        ],
+        "status": "addressed",
+        "observed_sha": "fb2ea51becaed45acdd055ab12fb53b96c19ca94",
+        "addressed_sha": "fb2ea51becaed45acdd055ab12fb53b96c19ca94",
+        "evidence": "Hosted Verify 38129861815 passed build and 10/10 tests; linked exact-head review thread replied and resolved."
+      },
+      {
+        "id": "quarantine-restore-historical-container-fallback",
+        "severity": "P1",
+        "paths": [
+          "src/core/destination_ownership.hpp",
+          "tests/destination_ownership_test.cpp",
+          "tests/transfer_operation_engine_test.cpp"
+        ],
+        "finding": "Both quarantine_owned and descriptor-backed restore_quarantine fall back to staging.container_path / payload when retain_staged_payload fails. The historical container name may be rebound to a competing directory, and ENOENT may mean the payload is absent, so the returned recovery path can identify the wrong or nonexistent object while owned data remains descriptor-reachable elsewhere.",
+        "required": "Route both fallbacks through the unified descriptor-anchored durable-staging locator. Return an exact payload only when presence is known; otherwise preserve and return the identity-verified current container as uncertain evidence. Add deterministic Release-effective fixtures for container rebinding plus restore/retention failure and for proven payload absence across both call paths.",
+        "threads": [],
+        "status": "addressed",
+        "observed_sha": "fb2ea51becaed45acdd055ab12fb53b96c19ca94",
+        "evidence": "Hosted Verify 38133365469 passed the production build and 10/10 Release tests. Both fallback sites use staged_payload_recovery_evidence; deterministic rebinding and proven-absence fixtures pass across quarantine_owned and descriptor-backed restore_quarantine.",
+        "addressed_sha": "1130490f6c9738e301484bc929c372d7d54f03c6"
+      },
+      {
+        "id": "durable-container-path-check-return-race",
+        "severity": "P1",
+        "paths": [
+          "src/core/destination_ownership.hpp",
+          "tests/destination_ownership_test.cpp"
+        ],
+        "finding": "durable_staging_container verifies a pathname and then returns it separately. A same-UID writer can rename that verified binding and install a replacement before the caller publishes the path, so recovery evidence can identify competing data while the owned staging object survives under another name.",
+        "required": "Publish the payload or container to a stable no-replace recovery location while descriptor authority is still held, or provide an equivalently object-bound handoff that closes the verify-then-return namespace race. Add a deterministic fixture that rebinds after the final identity check and proves the returned object remains the owned data.",
+        "threads": [
+          "PRRT_kwDOU9Z1nc6rM4Er"
+        ],
+        "status": "addressed",
+        "observed_sha": "1130490f6c9738e301484bc929c372d7d54f03c6",
+        "evidence": "Hosted Verify 38137080228 (#195) passed production build and 10/10 Release tests; linked review thread replied with exact evidence and resolved.",
+        "addressed_sha": "4ba298e7ecb7a13ba0db7634c3c549b8d8f654c8"
+      },
+      {
+        "id": "proven-absence-invalid-proc-fallback",
+        "severity": "P2",
+        "paths": [
+          "src/core/destination_ownership.hpp",
+          "src/core/transfer_operation_engine.cpp",
+          "tests/destination_ownership_test.cpp",
+          "tests/transfer_operation_engine_test.cpp"
+        ],
+        "finding": "staged_payload_recovery_evidence can prove the payload absent, close staging and return false with no retained path, but two cross-volume verification failure callers interpret false plus empty evidence by appending source_quarantine, a /proc/self/fd/.../payload path that is invalid after descriptor closure.",
+        "required": "Propagate an explicit proven-absence outcome through restoration callers, or otherwise prevent callers from synthesizing source_quarantine when no object remains. Test both cross-volume branches and assert no /proc path or nonexistent recovery evidence is returned.",
+        "threads": [
+          "PRRT_kwDOU9Z1nc6rM4Eu"
+        ],
+        "status": "addressed",
+        "observed_sha": "1130490f6c9738e301484bc929c372d7d54f03c6",
+        "evidence": "Hosted Verify 38137080228 (#195) passed production build and 10/10 Release tests; linked review thread replied with exact evidence and resolved.",
+        "addressed_sha": "4ba298e7ecb7a13ba0db7634c3c549b8d8f654c8"
+      },
+      {
+        "id": "retained-payload-hidden-wrapper-residue",
+        "severity": "P2",
+        "paths": [
+          "src/core/destination_ownership.hpp",
+          "tests/destination_ownership_test.cpp"
+        ],
+        "finding": "cleanup_unpublished preserves the staging container but reports only container/payload. When the user removes or moves the visible payload, the hidden .infiltrator-stage-* wrapper remains permanently with no live owner and is absent from retained_paths.",
+        "required": "Return the preserved container itself as recovery evidence, or relocate the payload to a standalone no-replace retained path and clean the wrapper. Add a Release-effective recovery-consumption fixture proving no silent staging wrapper remains after the reported evidence is handled.",
+        "threads": [
+          "PRRT_kwDOU9Z1nc6rM4Ex"
+        ],
+        "status": "addressed",
+        "observed_sha": "1130490f6c9738e301484bc929c372d7d54f03c6",
+        "evidence": "Hosted Verify 38137080228 (#195) passed production build and 10/10 Release tests; linked review thread replied with exact evidence and resolved.",
+        "addressed_sha": "4ba298e7ecb7a13ba0db7634c3c549b8d8f654c8"
+      },
+      {
+        "id": "relocated-staging-pathname-removal-race",
+        "severity": "P2",
+        "paths": [
+          "src/core/destination_ownership.hpp",
+          "tests/destination_ownership_test.cpp"
+        ],
+        "finding": "release_staging followed a descriptor-resolved relocated pathname through a separate identity check and remove, allowing a replacement directory to be removed in the check/remove interval.",
+        "required": "Do not chase relocated staging directories by mutable pathname; leave uncertain relocated directories intact unless the original binding remains proven.",
+        "threads": [
+          "PRRT_kwDOU9Z1nc6rNR_u"
+        ],
+        "status": "addressed",
+        "observed_sha": "4ba298e7ecb7a13ba0db7634c3c549b8d8f654c8",
+        "addressed_sha": "0d9832fb8226c1e87b3ba50fe0e27cd7aff9c764",
+        "evidence": "Exact-head Verify 38189652278 (#201) passed build/test; thread replied and resolved."
+      },
+      {
+        "id": "payload-absence-finalized-before-staging-release",
+        "severity": "P2",
+        "paths": [
+          "src/core/destination_ownership.hpp",
+          "tests/destination_ownership_test.cpp"
+        ],
+        "finding": "A late payload could appear after ENOENT observation and before staging release, leaving hidden data while callers were told the payload was absent.",
+        "required": "Finalize absence while descriptor authority is live, or publish any late payload atomically to durable recovery evidence before closing staging.",
+        "threads": [
+          "PRRT_kwDOU9Z1nc6rNR_0"
+        ],
+        "status": "addressed",
+        "observed_sha": "4ba298e7ecb7a13ba0db7634c3c549b8d8f654c8",
+        "addressed_sha": "0d9832fb8226c1e87b3ba50fe0e27cd7aff9c764",
+        "evidence": "Exact-head Verify 38189652278 (#201) passed build/test; deterministic late-payload fixture passes; thread replied and resolved."
+      },
+      {
+        "id": "already-retained-source-path-dropped",
+        "severity": "P2",
+        "paths": [
+          "src/core/transfer_operation_engine.cpp",
+          "tests/transfer_operation_engine_test.cpp"
+        ],
+        "finding": "When restore_quarantine already published source data to retained_source_quarantine, the cross-volume failure path skipped adding that existing path to OperationResult.retained_paths.",
+        "required": "Append an already-populated retained source path before attempting fallback publication and prove exact path/content/guidance.",
+        "threads": [
+          "PRRT_kwDOU9Z1nc6rNR_5"
+        ],
+        "status": "addressed",
+        "observed_sha": "4ba298e7ecb7a13ba0db7634c3c549b8d8f654c8",
+        "addressed_sha": "0d9832fb8226c1e87b3ba50fe0e27cd7aff9c764",
+        "evidence": "Exact-head Verify 38189652278 (#201) passed build/test; deterministic claimed-source fixture passes; thread replied and resolved."
+      }
+    ],
+    "integration": null,
+    "release": null,
+    "blocker": {
+      "kind": "merged_candidate_needs_integrator_reconciliation",
+      "action": "integrate",
+      "reason": "The active candidate is already merged on GitHub; Integrator must reconcile merge/release/publication truth before any new stroke.",
+      "since": "2026-10-12T03:05:51.189Z",
+      "next_action": "Integrator reconciles exact merge SHA, VERSION, tag/release and publication before RELEASED."
+    },
+    "last_transition": {
+      "role": "Fixer",
+      "from": "FIX_REQUIRED",
+      "to": "REVIEW_READY",
+      "at": "2026-10-12T00:55:00.000Z",
+      "reason": "All three live P2 hard threads are addressed and resolved on 0d9832fb; exact-head Verify 38189652278 (#201) passed. Candidate content changed, so fresh independent review is required."
+    },
+    "reconciliation": {
+      "last_reconciled_at": "2026-10-12T03:05:51.189Z",
+      "source": "github-actions",
+      "event": "workflow_run",
+      "main_sha": "10d1ff196b8dc41cbc9c89b7195ea548aea042ed",
+      "candidate_head": "65e349a1259b5440464dc14b361e62bba2d5295b",
+      "candidate_pr_state": "closed",
+      "candidate_merged": true,
+      "exact_head_ci_run": {
+        "run_id": 38198120556,
+        "workflow": "Verify",
+        "run_number": 202,
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "65e349a1259b5440464dc14b361e62bba2d5295b"
+      },
+      "exact_head_review": {
+        "review_id": "PRR_kwDOU9Z1nc8AAAABRwC6mA",
+        "database_id": 5486197400,
+        "reviewed_sha": "65e349a1259b5440464dc14b361e62bba2d5295b",
+        "state": "COMMENTED",
+        "submitted_at": "2026-10-12T03:02:50Z",
+        "protocol_verdict": "APPROVED"
+      },
+      "unresolved_hard_threads": []
+    }
+  },
+  "lease": null,
+  "heartbeats": {
+    "Architect": {
+      "at": "2026-10-11T11:02:30.262Z",
+      "status": "Validated three new unresolved exact-head hard threads on PR #12 head 1130490 and reconciled the retained-evidence stroke back to FIX_REQUIRED. The package now explicitly covers stable descriptor-authoritative publication, proven-absence propagation and complete staging-wrapper accounting; no competing work was nominated.",
+      "observed_revision": 97,
+      "observed_head": "1130490f6c9738e301484bc929c372d7d54f03c6",
+      "next_action": "Fixer must correct the complete three-finding set in PR #12, resolve all threads and obtain fresh exact-head Verify. Reviewer must then perform a fresh formal commit-bound review before integration."
+    },
+    "Builder": {
+      "at": "2026-10-11T11:16:21.545Z",
+      "status": "Observed Architect's fresh FIX_REQUIRED reconciliation for PR #12 exact head 1130490: three validated hard threads remain unresolved, exact-head Verify 38133365469 is green but predates their qualification, and no Fixer delta exists yet. The handoff is fresh, so Builder preserved Fixer ownership and made no competing product write.",
+      "observed_revision": 98,
+      "observed_head": "1130490f6c9738e301484bc929c372d7d54f03c6",
+      "next_action": "Fixer must close the descriptor-to-path publication race, proven-absence /proc fallback and hidden staging-wrapper residue together in PR #12, resolve all three threads and obtain fresh exact-head Verify. Builder may recover only if that work is demonstrably abandoned after the lease/recovery conditions are met."
+    },
+    "Reviewer": {
+      "at": "2026-10-11T11:25:56.201Z",
+      "status": "Observed PR #12 exact head 1130490 remains FIX_REQUIRED with three validated unresolved hard threads from automated exact-head review PRR_kwDOU9Z1nc8AAAABRtBwPw. No Fixer delta or REVIEW_READY handoff exists, so Reviewer submitted no duplicate or premature formal verdict.",
+      "observed_revision": 99,
+      "observed_head": "1130490f6c9738e301484bc929c372d7d54f03c6",
+      "next_action": "Fixer must close the descriptor-to-path publication race, proven-absence /proc fallback and hidden staging-wrapper residue, resolve all three threads and obtain fresh exact-head Verify; Reviewer will then perform a new broad independent commit-bound review."
+    },
+    "Integrator": {
+      "at": "2026-10-11T11:53:54.918Z",
+      "status": "Reconciled PR #12 exact head 4ba298e7ecb7a13ba0db7634c3c549b8d8f654c8: hosted Verify 38137080228 succeeded with the production build and 10/10 Release tests, all review threads are resolved, and main remains released baseline e07841f. State correctly remains REVIEW_READY because no fresh protocol-compliant formal Reviewer verdict is bound to 4ba298e; prior CHANGES_REQUIRED review PRR_kwDOU9Z1nc8AAAABRs9CoA is bound to superseded fb2ea51.",
+      "observed_revision": 103,
+      "observed_head": "4ba298e7ecb7a13ba0db7634c3c549b8d8f654c8",
+      "next_action": "Reviewer must independently review exact head 4ba298e and submit a commit-bound formal verdict. Integrator must not claim a lease, merge, version or release until state reaches INTEGRATE_READY with that evidence."
+    },
+    "Fixer": {
+      "at": "2026-10-12T00:55:00.000Z",
+      "status": "Closed all three live candidate-local P2 hard threads on PR #12 exact head 0d9832fb. Verify 38189652278 (#201) passed build/test, all review threads are resolved, the same PR is refreshed onto current main, and candidate content changes require fresh independent review.",
+      "observed_revision": 114,
+      "observed_head": "0d9832fb8226c1e87b3ba50fe0e27cd7aff9c764",
+      "next_action": "Reviewer must independently inspect exact head 0d9832fb and submit a fresh commit-bound formal verdict; Integrator remains blocked until protocol review advances the stroke."
+    }
+  },
+  "last_transition": {
+    "role": "Fixer",
+    "from": "FIX_REQUIRED",
+    "to": "REVIEW_READY",
+    "reason": "All three live P2 hard threads are addressed and resolved at exact head 0d9832fb; Verify 38189652278 (#201) passed. Fresh independent exact-head review is mandatory before integration."
+  },
+  "health": {
+    "nonce": "files-swarm-20261010-1136",
+    "check_order": [
+      "Architect",
+      "Builder",
+      "Reviewer",
+      "Fixer",
+      "Integrator"
+    ],
+    "receipts": [
+      {
+        "role": "Architect",
+        "nonce": "files-swarm-20261010-1136",
+        "at": "2026-10-10T11:44:45.317Z",
+        "previous_role": null,
+        "previous_comment_id": null,
+        "comment_id": 6097146411,
+        "observed_revision": 0,
+        "observed_main_sha": "8c2daf6cdf3e214186b9fdb880799ad8ae5c554f"
+      },
+      {
+        "role": "Builder",
+        "nonce": "files-swarm-20261010-1136",
+        "at": "2026-10-10T11:46:29.036Z",
+        "previous_role": "Architect",
+        "previous_comment_id": 6097146411,
+        "comment_id": 6097160209,
+        "observed_revision": 1,
+        "observed_main_sha": "8c2daf6cdf3e214186b9fdb880799ad8ae5c554f"
+      },
+      {
+        "role": "Reviewer",
+        "nonce": "files-swarm-20261010-1136",
+        "at": "2026-10-10T11:54:35.620Z",
+        "previous_role": "Builder",
+        "previous_comment_id": 6097160209,
+        "comment_id": 6097221437,
+        "observed_revision": 2,
+        "observed_main_sha": "8c2daf6cdf3e214186b9fdb880799ad8ae5c554f"
+      },
+      {
+        "role": "Fixer",
+        "nonce": "files-swarm-20261010-1136",
+        "at": "2026-10-10T12:07:05.496Z",
+        "previous_role": "Reviewer",
+        "previous_comment_id": 6097221437,
+        "comment_id": 6097314262,
+        "observed_revision": 4,
+        "observed_main_sha": "8c2daf6cdf3e214186b9fdb880799ad8ae5c554f"
+      },
+      {
+        "role": "Integrator",
+        "nonce": "files-swarm-20261010-1136",
+        "at": "2026-10-10T12:09:38.728Z",
+        "previous_role": "Fixer",
+        "previous_comment_id": 6097314262,
+        "comment_id": 6097333902,
+        "observed_revision": 5,
+        "observed_main_sha": "8c2daf6cdf3e214186b9fdb880799ad8ae5c554f"
+      }
+    ],
+    "verified_at": "2026-10-10T12:10:12.396Z",
+    "verified_by": "HAL",
+    "verification": "All five real automation executions read the prior role's actual receipt and confirmed comment plus expected-blob state writes. A transient Fixer connector error was recovered by a controlled retry; Integrator correctly preserved the missing dependency before retry."
+  },
+  "completed_strokes": [
+    {
+      "id": "files-20261010-destination-ownership",
+      "title": "Protect destination ownership during transfers and replacement rollback",
+      "phase": "RELEASED",
+      "version": "0.1.17",
+      "candidate_pr": 10,
+      "candidate_sha": "4052517c8f58158a0b3e3131bdff8bed90abad42",
+      "merge_sha": "75997eb8e3eccf6d7fa9974ee5a59e35c78f2acd",
+      "release_sha": "d001b19d71a776415d162efea3af5e251d3872d3",
+      "release_evidence": "https://github.com/Infiltrator-Projects/Infiltrator-File-Manager/issues/2#issuecomment-6106017735",
+      "completed_at": "2026-10-11T06:06:12.114Z"
+    }
+  ]
+}
