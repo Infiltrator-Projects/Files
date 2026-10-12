@@ -6,7 +6,7 @@ The Files swarm uses GitHub as the durable control plane. The five ChatGPT worke
 
 The original timer-only design could lose causality: a Fixer could write `REVIEW_READY`, then an asynchronous review could open a new HARD thread minutes later. The stored phase stayed stale until a worker happened to notice it. That made a healthy timer look like a healthy swarm even while GitHub reality required different work.
 
-The event coordinator closes that gap. `.github/workflows/swarm-coordinator.yml` lives on `main` so GitHub can invoke it for repository events. Its implementation and tests live on `swarm/control` in `swarm/coordinator.py`, `swarm/coordinator_entry.py`, `swarm/test_coordinator.py` and `swarm/test_coordinator_security.py`.
+The event coordinator closes that gap. `.github/workflows/swarm-coordinator.yml` lives on `main` so GitHub can invoke it for repository events. Its implementation and tests live on `main` in `swarm/coordinator.py`, `swarm/coordinator_entry.py`, `swarm/test_coordinator.py` and `swarm/test_coordinator_security.py`.
 
 ## Events and fallback
 
@@ -32,7 +32,7 @@ This is a public repository, so arbitrary public comments and approvals are not 
 - an arbitrary public `P1`, `P2`, `HARD` comment or approval cannot move swarm state;
 - fork-PR events do not receive the writable coordinator job.
 
-It then converts trusted objective GitHub facts into deterministic routing facts in `swarm/state.json`:
+It then converts trusted objective GitHub facts into deterministic routing facts in the `FILES SWARM STATE v1` machine-state comment on issue #2:
 
 - live PR/head replaces stale candidate-head data;
 - an unresolved current trusted P1/P2/HARD thread forces `FIX_REQUIRED`;
@@ -45,11 +45,11 @@ Forward product decisions that are not mechanically proven remain owned by the f
 
 ## Concurrency and durability
 
-State updates use the GitHub Contents API with the current blob SHA. A stale write is refetched and reconciled up to three times; the coordinator never force-writes an old snapshot over a newer worker update. Every successful write is read back before it is reported as complete.
+State updates use the dedicated `FILES SWARM STATE v1` issue comment rather than a Git ref. The coordinator refetches the comment token before writing, retries detected races up to three times, and reads back the resulting revision before reporting success. Mutable coordination therefore never advances `main`.
 
 The state gains a `stroke.reconciliation` watermark containing the event, current main, candidate head/state, exact-head CI, exact-head review and complete unresolved trusted HARD thread set. Phase-changing reconciliations also leave a concise issue #2 audit comment.
 
-Coordinator runs are serialized with a GitHub Actions concurrency group. Updating `swarm/control` does not itself retrigger the coordinator, preventing feedback loops.
+Coordinator runs are serialized with a GitHub Actions concurrency group. Updating the machine-state issue comment does not trigger source CI or release workflows, preventing feedback loops.
 
 ## Worker relationship
 

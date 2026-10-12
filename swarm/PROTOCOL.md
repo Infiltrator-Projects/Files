@@ -1,6 +1,6 @@
 # Files swarm execution contract — revision 3
 
-This contract lives on the operational branch `swarm/control`. It and `swarm/state.json` are coordination data, never application source and never a product PR. Product branches start from current `main`, not this branch.
+This contract lives on `main`. Mutable coordination state lives outside Git refs in the unique `FILES SWARM STATE v1` machine-state comment on issue #2; it is a cache, never application source and never a product PR. Product branches start from current `main`.
 
 ## Purpose and authority
 
@@ -10,12 +10,12 @@ Newest explicit Shannon directions in issue #2 take precedence. Product authorit
 
 ## Live GitHub reconciliation is mandatory
 
-`swarm/state.json` is a coordination cache, never authority over live GitHub facts. At the start of EVERY WORK-mode wake, before interpreting the stored phase or deciding that there is no work, reconcile the active candidate against live GitHub:
+the `FILES SWARM STATE v1` machine-state comment on issue #2 is a coordination cache, never authority over live GitHub facts. At the start of EVERY WORK-mode wake, before interpreting the stored phase or deciding that there is no work, reconcile the active candidate against live GitHub:
 
 1. fetch current `main` and the active PR's open/merged state and exact head SHA;
 2. fetch current formal reviews and ALL review threads, including unresolved state and the commit/head each review applies to;
 3. fetch exact-head CI/check/workflow evidence;
-4. compare those facts with `swarm/state.json` and repair stale state FIRST, using an expected-SHA write and read-back, before role-specific work.
+4. compare those facts with the `FILES SWARM STATE v1` machine-state comment on issue #2 and repair stale state FIRST, using an expected-SHA write and read-back, before role-specific work.
 
 Live evidence wins over stale state. Required deterministic reconciliation rules:
 
@@ -30,9 +30,9 @@ State should record a reconciliation watermark whenever materially changed: `las
 
 ## One current work record
 
-Fetch `swarm/state.json` using ref `swarm/control`, and obtain its current blob SHA through the GitHub contents API. Never use default-branch content for this record. It names ONE stroke, ONE package and at most ONE production PR with its current head. Issue #2 is the human audit/discussion ledger; old comment wording is history, not a second current candidate. Read its current body and new/updated directions since your last check. Use bounded recent/since reads when available rather than reloading the entire historical thread on every unchanged wake-up; the current body compiles prior procedural authority.
+Fetch the `FILES SWARM STATE v1` machine-state comment on issue #2 using ref `main`, and obtain its current blob SHA through the GitHub contents API. Never use default-branch content for this record. It names ONE stroke, ONE package and at most ONE production PR with its current head. Issue #2 is the human audit/discussion ledger; old comment wording is history, not a second current candidate. Read its current body and new/updated directions since your last check. Use bounded recent/since reads when available rather than reloading the entire historical thread on every unchanged wake-up; the current body compiles prior procedural authority.
 
-Use `github.update_file` on branch `swarm/control` with the fetched blob SHA. Increment revision and set updated_at in UTC. Preserve fields owned by other roles. A 409/stale-SHA conflict means refetch, reconcile and retry at most twice; never force an old snapshot over newer state. Confirm the written contents by reading them back.
+Use `github.update_file` on branch `main` with the fetched blob SHA. Increment revision and set updated_at in UTC. Preserve fields owned by other roles. A 409/stale-SHA conflict means refetch, reconcile and retry at most twice; never force an old snapshot over newer state. Confirm the written contents by reading them back.
 
 Before substantive production writes or phase transitions, atomically claim lease = {role, token, expires_at} with a unique token and expiry 45 minutes ahead. Claim only if lease is null or expired. Re-read to confirm ownership. Renew before expiry during long work. Before any push/merge/release, refetch and require the same token and unchanged candidate. Release the lease at a consistent checkpoint; do not hold it merely waiting for CI or publication.
 

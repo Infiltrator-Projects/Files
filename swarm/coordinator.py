@@ -20,9 +20,8 @@ import urllib.parse
 import urllib.request
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-CONTROL_REF = "swarm/control"
-STATE_PATH = "swarm/state.json"
 COORDINATOR_ISSUE = 2
+STATE_COMMENT_MARKER = "FILES SWARM STATE v1"
 API = "https://api.github.com"
 GRAPHQL = "https://api.github.com/graphql"
 
@@ -364,25 +363,66 @@ class GitHub:
             raise RuntimeError(f"GitHub GraphQL failed: {json.dumps(result['errors'])}")
         return result["data"]
 
-    def read_state(self) -> Tuple[Dict[str, Any], str]:
-        encoded_ref = urllib.parse.quote(CONTROL_REF, safe="")
-        content = self.get(
-            f"/repos/{self.repository}/contents/{STATE_PATH}?ref={encoded_ref}"
-        )
-        raw = base64.b64decode(content["content"]).decode("utf-8")
-        return json.loads(raw), content["sha"]
+    def _state_comment(self) -> Dict[str, Any]:
+        matches: List[Dict[str, Any]] = []
+        page = 1
+        while True:
+            comments = self.get(
+                f"/repos/{self.repository}/issues/{COORDINATOR_ISSUE}/comments?per_page=100&page={page}"
+            )
+            matches.extend(
+                comment
+                for comment in comments
+                if (comment.get("body") or "").startswith(STATE_COMMENT_MARKER)
+            )
+            if len(comments) < 100:
+                break
+            page += 1
+        if len(matches) != 1:
+            raise RuntimeError(
+                f"Expected exactly one {STATE_COMMENT_MARKER} comment, found {len(matches)}"
+            )
+        return matches[0]
 
-    def write_state(self, state: Dict[str, Any], blob_sha: str) -> None:
-        content = json.dumps(state, indent=2, ensure_ascii=False) + "\n"
-        self.put(
-            f"/repos/{self.repository}/contents/{STATE_PATH}",
-            {
-                "message": f"Swarm coordinator reconcile revision {state['revision']}",
-                "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
-                "sha": blob_sha,
-                "branch": CONTROL_REF,
-            },
+    @staticmethod
+    def _decode_state_comment(comment: Dict[str, Any]) -> Dict[str, Any]:
+        prefix = (
+            STATE_COMMENT_MARKER
+            + "\n\nMachine-owned coordination cache. Live GitHub remains authoritative. "
+              "Human directions remain in issue #2 outside this block.\n\n```json\n"
         )
+        suffix = "\n```"
+        body = (comment.get("body") or "").rstrip()
+        if not body.startswith(prefix) or not body.endswith(suffix):
+            raise RuntimeError("Machine-state comment has an invalid envelope")
+        return json.loads(body[len(prefix):-len(suffix)])
+
+    def read_state(self) -> Tuple[Dict[str, Any], str]:
+        comment = self._state_comment()
+        return self._decode_state_comment(comment), str(comment.get("updated_at") or "")
+
+    def write_state(self, state: Dict[str, Any], state_token: str) -> None:
+        current = self._state_comment()
+        current_token = str(current.get("updated_at") or "")
+        if current_token != state_token:
+            raise RuntimeError(
+                f"STATE_RACE: machine-state comment changed from {state_token} to {current_token}"
+            )
+        body = (
+            STATE_COMMENT_MARKER
+            + "\n\nMachine-owned coordination cache. Live GitHub remains authoritative. "
+              "Human directions remain in issue #2 outside this block.\n\n```json\n"
+            + json.dumps(state, indent=2, ensure_ascii=False)
+            + "\n```\n"
+        )
+        updated = self.request(
+            "PATCH",
+            f"{API}/repos/{self.repository}/issues/comments/{current['id']}",
+            {"body": body},
+        )
+        confirmed = self._decode_state_comment(updated)
+        if confirmed.get("revision") != state.get("revision"):
+            raise RuntimeError("Machine-state comment read-back revision mismatch")
 
     def review_threads(self, pr_number: int) -> List[Dict[str, Any]]:
         query = """
@@ -532,7 +572,7 @@ def main() -> int:
             gh.write_state(updated, blob_sha)
         except RuntimeError as error:
             text = str(error)
-            if ("HTTP 409" in text or "HTTP 422" in text) and attempt < 2:
+            if ("STATE_RACE" in text or "HTTP 409" in text or "HTTP 422" in text) and attempt < 2:
                 print(f"State raced with another writer; refetching ({attempt + 1}/3).")
                 continue
             raise
