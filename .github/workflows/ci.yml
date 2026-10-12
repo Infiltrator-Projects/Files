@@ -27,6 +27,7 @@ jobs:
         id: release_intent
         env:
           BEFORE_SHA: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -55,6 +56,28 @@ jobs:
 
             if [[ "$version" != "$previous_version" ]]; then
               release_intent=true
+            else
+              tag="v${version}"
+              releases=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100")
+              release_count=$(jq --arg tag "$tag" '[.[] | select(.tag_name == $tag)] | length' <<<"$releases")
+              if (( release_count > 1 )); then
+                printf 'Multiple GitHub releases claim %s; refusing ambiguous recovery.\n' "$tag" >&2
+                exit 1
+              fi
+
+              if (( release_count == 1 )); then
+                is_draft=$(jq -r --arg tag "$tag" '.[] | select(.tag_name == $tag) | .draft' <<<"$releases")
+                if [[ "$is_draft" == 'true' ]]; then
+                  release_intent=true
+                  printf 'Resuming incomplete draft release %s.\n' "$tag"
+                fi
+              else
+                git fetch origin --tags --force
+                if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+                  release_intent=true
+                  printf 'Resuming orphan release tag %s.\n' "$tag"
+                fi
+              fi
             fi
           fi
 
@@ -167,14 +190,15 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
 
+          repo="$GITHUB_REPOSITORY"
           tag="v${VERSION}"
           deb="dist/infiltrator-file-manager_${VERSION}_amd64.deb"
           sums='dist/SHA256SUMS'
+          expected_assets=$(printf 'SHA256SUMS\ninfiltrator-file-manager_%s_amd64.deb\n' "$VERSION" | sort)
           test -f "$deb"
           test -f "$sums"
 
           git fetch origin --tags --force
-
           tag_commit=''
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
             tag_commit=$(git rev-list -n 1 "$tag")
@@ -185,66 +209,102 @@ jobs:
             fi
           fi
 
-          if gh release view "$tag" >/dev/null 2>&1; then
-            if [[ -z "$tag_commit" ]]; then
-              printf 'GitHub release %s exists but its git tag is missing.\n' "$tag" >&2
-              exit 1
-            fi
+          releases=$(gh api "repos/${repo}/releases?per_page=100")
+          release_count=$(jq --arg tag "$tag" '[.[] | select(.tag_name == $tag)] | length' <<<"$releases")
+          if (( release_count > 1 )); then
+            printf 'Multiple GitHub releases claim %s; refusing ambiguous publication.\n' "$tag" >&2
+            exit 1
+          fi
 
-            is_draft=$(gh release view "$tag" --json isDraft --jq '.isDraft')
-            if [[ "$is_draft" != 'true' ]]; then
-              published_assets=$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)
-              expected_assets=$(printf 'SHA256SUMS\ninfiltrator-file-manager_%s_amd64.deb\n' "$VERSION" | sort)
-              if [[ "$published_assets" != "$expected_assets" ]]; then
-                printf 'Published release %s has an unexpected immutable asset set.\n' "$tag" >&2
+          release_id=''
+          release_draft=''
+          release_target=''
+          if (( release_count == 1 )); then
+            release_id=$(jq -r --arg tag "$tag" '.[] | select(.tag_name == $tag) | .id' <<<"$releases")
+            release_draft=$(jq -r --arg tag "$tag" '.[] | select(.tag_name == $tag) | .draft' <<<"$releases")
+            release_target=$(jq -r --arg tag "$tag" '.[] | select(.tag_name == $tag) | .target_commitish' <<<"$releases")
+
+            if [[ "$release_draft" == 'false' ]]; then
+              if [[ -z "$tag_commit" ]]; then
+                printf 'Published release %s exists but its git tag is missing.\n' "$tag" >&2
                 exit 1
               fi
-
+              published_assets=$(gh api "repos/${repo}/releases/${release_id}/assets?per_page=100" --jq '.[].name' | sort)
+              if [[ "$published_assets" != "$expected_assets" ]]; then
+                printf 'Published release %s has an unexpected asset set.\n' "$tag" >&2
+                exit 1
+              fi
               printf 'Release %s is already complete at %s.\n' "$tag" "$EXPECTED_SHA"
               exit 0
             fi
-          else
+
+            if [[ "$release_target" != "$EXPECTED_SHA" ]]; then
+              if [[ -n "$tag_commit" ]]; then
+                printf 'Draft %s targets %s but its immutable tag already exists at %s.\n' \
+                  "$tag" "$release_target" "$tag_commit" >&2
+                exit 1
+              fi
+
+              mapfile -t stale_asset_ids < <(gh api "repos/${repo}/releases/${release_id}/assets?per_page=100" --jq '.[].id')
+              for asset_id in "${stale_asset_ids[@]}"; do
+                [[ -z "$asset_id" ]] && continue
+                gh api --method DELETE "repos/${repo}/releases/assets/${asset_id}"
+              done
+              gh api --method PATCH "repos/${repo}/releases/${release_id}" -f target_commitish="$EXPECTED_SHA" >/dev/null
+              printf 'Retargeted recoverable draft %s to tested commit %s.\n' "$tag" "$EXPECTED_SHA"
+            fi
+          fi
+
+          # The tag is safe to create first because every later state is explicitly
+          # resumable. A retry can repair tag-only, draft-only, or partial-draft state.
+          if [[ -z "$tag_commit" ]]; then
+            git tag "$tag" "$EXPECTED_SHA"
+            git push origin "refs/tags/${tag}"
+            git fetch origin --tags --force
+            tag_commit=$(git rev-list -n 1 "$tag")
+            test "$tag_commit" = "$EXPECTED_SHA"
+          fi
+
+          if [[ -z "$release_id" ]]; then
             gh release create "$tag" \
               --draft \
-              --target "$EXPECTED_SHA" \
+              --verify-tag \
               --title "Infiltrator File Manager ${VERSION}" \
               --notes "Infiltrator File Manager ${VERSION}. See the repository README for the current implementation surface and release status."
-          fi
-
-          # Draft releases are deliberately recoverable. A retry resumes the same
-          # exact tag, uploads only missing assets, then publishes once complete.
-          git fetch origin --tags --force
-          if ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
-            printf 'Draft release %s did not create its expected git tag.\n' "$tag" >&2
-            exit 1
-          fi
-
-          tag_commit=$(git rev-list -n 1 "$tag")
-          if [[ "$tag_commit" != "$EXPECTED_SHA" ]]; then
-            printf 'Release tag %s moved to %s while publishing expected commit %s.\n' \
-              "$tag" "$tag_commit" "$EXPECTED_SHA" >&2
-            exit 1
+            releases=$(gh api "repos/${repo}/releases?per_page=100")
+            release_id=$(jq -r --arg tag "$tag" '.[] | select(.tag_name == $tag and .draft == true) | .id' <<<"$releases")
+            [[ "$release_id" =~ ^[0-9]+$ ]]
           fi
 
           for asset in "$deb" "$sums"; do
             name=$(basename "$asset")
-            existing_assets=$(gh release view "$tag" --json assets --jq '.assets[].name')
+            existing_assets=$(gh api "repos/${repo}/releases/${release_id}/assets?per_page=100" --jq '.[].name')
             if ! grep -Fxq "$name" <<<"$existing_assets"; then
               gh release upload "$tag" "$asset"
             fi
           done
 
-          draft_assets=$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)
-          expected_assets=$(printf 'SHA256SUMS\ninfiltrator-file-manager_%s_amd64.deb\n' "$VERSION" | sort)
+          draft_assets=$(gh api "repos/${repo}/releases/${release_id}/assets?per_page=100" --jq '.[].name' | sort)
           if [[ "$draft_assets" != "$expected_assets" ]]; then
             printf 'Draft release %s does not contain exactly the expected assets.\n' "$tag" >&2
             exit 1
           fi
 
-          gh release edit "$tag" --draft=false --latest
+          gh api --method PATCH "repos/${repo}/releases/${release_id}" -F draft=false -f make_latest=true >/dev/null
 
-          test "$(gh release view "$tag" --json isDraft --jq '.isDraft')" = 'false'
-          published_assets=$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)
+          git fetch origin --tags --force
+          if ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            printf 'Published release %s is missing its expected tag.\n' "$tag" >&2
+            exit 1
+          fi
+          tag_commit=$(git rev-list -n 1 "$tag")
+          if [[ "$tag_commit" != "$EXPECTED_SHA" ]]; then
+            printf 'Published tag %s resolves to %s, expected %s.\n' "$tag" "$tag_commit" "$EXPECTED_SHA" >&2
+            exit 1
+          fi
+
+          test "$(gh api "repos/${repo}/releases/${release_id}" --jq '.draft')" = 'false'
+          published_assets=$(gh api "repos/${repo}/releases/${release_id}/assets?per_page=100" --jq '.[].name' | sort)
           if [[ "$published_assets" != "$expected_assets" ]]; then
             printf 'Published release %s does not contain exactly the expected assets.\n' "$tag" >&2
             exit 1
