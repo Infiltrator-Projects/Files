@@ -14,13 +14,38 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:
-      version: ${{ steps.package.outputs.version }}
+      version: ${{ steps.release_intent.outputs.version }}
+      release_intent: ${{ steps.release_intent.outputs.release_intent }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           submodules: recursive
+
+      - name: Read VERSION and detect release intent
+        id: release_intent
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version=$(tr -d '[:space:]' < VERSION)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+
+          release_intent=false
+          if [[ "$GITHUB_EVENT_NAME" == 'push' && "$GITHUB_REF" == 'refs/heads/main' ]]; then
+            previous_version=''
+            if git cat-file -e 'HEAD^:VERSION' 2>/dev/null; then
+              previous_version=$(git show 'HEAD^:VERSION' | tr -d '[:space:]')
+            fi
+
+            if [[ "$version" != "$previous_version" ]]; then
+              release_intent=true
+            fi
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "release_intent=$release_intent" >> "$GITHUB_OUTPUT"
 
       - name: Install build dependencies
         env:
@@ -40,13 +65,11 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
       - name: Build and validate Debian package
-        id: package
+        env:
+          VERSION: ${{ steps.release_intent.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
-          version=$(tr -d '[:space:]' < VERSION)
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          echo "version=$version" >> "$GITHUB_OUTPUT"
 
           mkdir -p dist
           cpack --config build/CPackConfig.cmake -G DEB -B dist
@@ -58,9 +81,9 @@ jobs:
           fi
 
           deb=${packages[0]}
-          canonical="dist/infiltrator-file-manager_${version}_amd64.deb"
-          test "$(dpkg-deb -f "$deb" Package)" = "infiltrator-file-manager"
-          test "$(dpkg-deb -f "$deb" Version)" = "$version"
+          canonical="dist/infiltrator-file-manager_${VERSION}_amd64.deb"
+          test "$(dpkg-deb -f "$deb" Package)" = 'infiltrator-file-manager'
+          test "$(dpkg-deb -f "$deb" Version)" = "$VERSION"
 
           dependencies=$(dpkg-deb -f "$deb" Depends)
           grep -Eq 'libgtk-4-1' <<<"$dependencies"
@@ -77,22 +100,25 @@ jobs:
 
           (
             cd dist
-            sha256sum "infiltrator-file-manager_${version}_amd64.deb" > SHA256SUMS
+            sha256sum "infiltrator-file-manager_${VERSION}_amd64.deb" > SHA256SUMS
           )
 
-      - name: Preserve exact tested package
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Preserve exact tested release package
+        if: >-
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main' &&
+          steps.release_intent.outputs.release_intent == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: release-package-${{ github.sha }}
           path: |
-            dist/infiltrator-file-manager_${{ steps.package.outputs.version }}_amd64.deb
+            dist/infiltrator-file-manager_${{ steps.release_intent.outputs.version }}_amd64.deb
             dist/SHA256SUMS
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 7
 
   publish:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: needs.build-test-package.outputs.release_intent == 'true'
     needs: build-test-package
     permissions:
       contents: write
@@ -115,7 +141,7 @@ jobs:
           name: release-package-${{ github.sha }}
           path: dist
 
-      - name: Publish VERSION when it is new
+      - name: Publish exact tested VERSION
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_SHA: ${{ github.sha }}
@@ -129,54 +155,83 @@ jobs:
 
           tag="v${VERSION}"
           deb="dist/infiltrator-file-manager_${VERSION}_amd64.deb"
-          sums="dist/SHA256SUMS"
+          sums='dist/SHA256SUMS'
           test -f "$deb"
           test -f "$sums"
 
-          git fetch origin main --tags --force
+          git fetch origin --tags --force
 
+          tag_commit=''
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
             tag_commit=$(git rev-list -n 1 "$tag")
+            if [[ "$tag_commit" != "$EXPECTED_SHA" ]]; then
+              printf 'Release tag %s already belongs to %s, not release commit %s.\n' \
+                "$tag" "$tag_commit" "$EXPECTED_SHA" >&2
+              exit 1
+            fi
+          fi
 
-            if ! gh release view "$tag" >/dev/null 2>&1; then
-              if [[ "$tag_commit" != "$EXPECTED_SHA" ]]; then
-                printf 'Tag %s already exists at %s but its GitHub release is missing; refusing to attach newer build %s.\n' \
-                  "$tag" "$tag_commit" "$EXPECTED_SHA" >&2
+          if gh release view "$tag" >/dev/null 2>&1; then
+            if [[ -z "$tag_commit" ]]; then
+              printf 'GitHub release %s exists but its git tag is missing.\n' "$tag" >&2
+              exit 1
+            fi
+
+            is_draft=$(gh release view "$tag" --json isDraft --jq '.isDraft')
+            if [[ "$is_draft" != 'true' ]]; then
+              published_assets=$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)
+              expected_assets=$(printf 'SHA256SUMS\ninfiltrator-file-manager_%s_amd64.deb\n' "$VERSION" | sort)
+              if [[ "$published_assets" != "$expected_assets" ]]; then
+                printf 'Published release %s has an unexpected immutable asset set.\n' "$tag" >&2
                 exit 1
               fi
 
-              gh release create "$tag" "$deb" "$sums" \
-                --verify-tag \
-                --target "$EXPECTED_SHA" \
-                --title "Infiltrator File Manager ${VERSION}" \
-                --notes "Infiltrator File Manager ${VERSION}. See the repository README for the current implementation surface and release status." \
-                --latest
-            else
-              printf 'Version %s is already released at %s; no new publication is needed.\n' \
-                "$VERSION" "$tag_commit"
-            fi
-          else
-            current_main=$(git rev-parse origin/main)
-            if [[ "$current_main" != "$EXPECTED_SHA" ]]; then
-              printf 'A newer main commit %s superseded tested commit %s; its Verify run now owns release publication.\n' \
-                "$current_main" "$EXPECTED_SHA"
+              printf 'Release %s is already complete at %s.\n' "$tag" "$EXPECTED_SHA"
               exit 0
             fi
-
-            git tag "$tag" "$EXPECTED_SHA"
-            git push origin "$tag"
-
-            gh release create "$tag" "$deb" "$sums" \
-              --verify-tag \
+          else
+            gh release create "$tag" \
+              --draft \
               --target "$EXPECTED_SHA" \
               --title "Infiltrator File Manager ${VERSION}" \
-              --notes "Infiltrator File Manager ${VERSION}. See the repository README for the current implementation surface and release status." \
-              --latest
+              --notes "Infiltrator File Manager ${VERSION}. See the repository README for the current implementation surface and release status."
           fi
 
-          published_assets=$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)
+          # Draft releases are deliberately recoverable. A retry resumes the same
+          # exact tag, uploads only missing assets, then publishes once complete.
+          git fetch origin --tags --force
+          if ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            printf 'Draft release %s did not create its expected git tag.\n' "$tag" >&2
+            exit 1
+          fi
+
+          tag_commit=$(git rev-list -n 1 "$tag")
+          if [[ "$tag_commit" != "$EXPECTED_SHA" ]]; then
+            printf 'Release tag %s moved to %s while publishing expected commit %s.\n' \
+              "$tag" "$tag_commit" "$EXPECTED_SHA" >&2
+            exit 1
+          fi
+
+          for asset in "$deb" "$sums"; do
+            name=$(basename "$asset")
+            existing_assets=$(gh release view "$tag" --json assets --jq '.assets[].name')
+            if ! grep -Fxq "$name" <<<"$existing_assets"; then
+              gh release upload "$tag" "$asset"
+            fi
+          done
+
+          draft_assets=$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)
           expected_assets=$(printf 'SHA256SUMS\ninfiltrator-file-manager_%s_amd64.deb\n' "$VERSION" | sort)
+          if [[ "$draft_assets" != "$expected_assets" ]]; then
+            printf 'Draft release %s does not contain exactly the expected assets.\n' "$tag" >&2
+            exit 1
+          fi
+
+          gh release edit "$tag" --draft=false --latest
+
+          test "$(gh release view "$tag" --json isDraft --jq '.isDraft')" = 'false'
+          published_assets=$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)
           if [[ "$published_assets" != "$expected_assets" ]]; then
-            printf 'Unexpected published asset set for %s.\n' "$tag" >&2
+            printf 'Published release %s does not contain exactly the expected assets.\n' "$tag" >&2
             exit 1
           fi
