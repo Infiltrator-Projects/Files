@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-name: Publish release
+name: Verify APT publication
 
 on:
   workflow_run:
@@ -10,178 +10,74 @@ permissions:
   contents: read
 
 concurrency:
-  group: publish-release-${{ github.repository }}
+  group: verify-apt-publication-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
-  gate:
+  verify:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    outputs:
-      publish: ${{ steps.release_commit.outputs.publish }}
+    timeout-minutes: 25
     env:
       EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
-      - name: Check out exact tested commit
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
-          fetch-depth: 1
-          submodules: false
-
-      - name: Detect release commit
-        id: release_commit
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          version=$(tr -d '[:space:]' < VERSION)
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          subject=$(git log -1 --format=%s HEAD)
-          if [[ "$subject" == "Release ${version}" || "$subject" == "Release ${version}:"* ]]; then
-            echo 'publish=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'publish=false' >> "$GITHUB_OUTPUT"
-          fi
-
-  publish:
-    needs: gate
-    if: needs.gate.outputs.publish == 'true'
-    permissions:
-      contents: write
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    env:
-      EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
-    steps:
-      - name: Check out exact tested main commit
+      - name: Check out exact verified commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
-          submodules: recursive
+          submodules: false
 
-      - name: Install release dependencies
+      - name: Install publication-check dependencies
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build pkg-config libgtk-4-dev dpkg-dev curl jq xvfb xauth dbus-x11
+          sudo apt-get install -y --no-install-recommends curl jq
 
-      - name: Verify exact current main and release commit
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch origin main --tags
-          head_commit=$(git rev-parse HEAD)
-          test "$head_commit" = "$EXPECTED_SHA"
-          current_main=$(git rev-parse origin/main)
-          if [[ "$current_main" != "$EXPECTED_SHA" ]]; then
-            printf 'Refusing to publish stale tested commit %s; current main is %s.\n' \
-              "$EXPECTED_SHA" "$current_main" >&2
-            exit 1
-          fi
-          version=$(tr -d '[:space:]' < VERSION)
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          subject=$(git log -1 --format=%s "$head_commit")
-          if [[ "$subject" != "Release ${version}" && "$subject" != "Release ${version}:"* ]]; then
-            printf 'Release commit subject must begin with Release %s.\n' "$version" >&2
-            exit 1
-          fi
-
-      - name: Build and test release
-        shell: bash
-        run: |
-          set -euo pipefail
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --parallel
-          ctest --test-dir build --output-on-failure
-
-      - name: Build Debian package
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          cpack --config build/CPackConfig.cmake -G DEB -B dist
-          version=$(tr -d '[:space:]' < VERSION)
-          mapfile -t packages < <(find dist -maxdepth 1 -type f -name '*.deb' -printf '%p\n')
-          if [[ ${#packages[@]} -ne 1 ]]; then
-            printf 'Expected exactly one Debian package, found %s.\n' "${#packages[@]}" >&2
-            exit 1
-          fi
-          deb=${packages[0]}
-          canonical="dist/infiltrator-file-manager_${version}_amd64.deb"
-          test "$(dpkg-deb -f "$deb" Package)" = "infiltrator-file-manager"
-          test "$(dpkg-deb -f "$deb" Version)" = "$version"
-          dependencies=$(dpkg-deb -f "$deb" Depends)
-          grep -Eq 'libgtk-4-1' <<<"$dependencies"
-          tmp=$(mktemp -d)
-          trap 'rm -rf "$tmp"' EXIT
-          dpkg-deb -x "$deb" "$tmp/root"
-          test -x "$tmp/root/usr/bin/infiltrator-file-manager"
-          test -f "$tmp/root/usr/share/applications/infiltrator-file-manager.desktop"
-          if [[ "$deb" != "$canonical" ]]; then
-            mv "$deb" "$canonical"
-          fi
-          cd dist
-          sha256sum "infiltrator-file-manager_${version}_amd64.deb" > SHA256SUMS
-
-      - name: Publish immutable GitHub release
+      - name: Determine whether this commit was released
+        id: released
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          git fetch origin main --tags
-          head_commit=$(git rev-parse HEAD)
-          test "$head_commit" = "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
           version=$(tr -d '[:space:]' < VERSION)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           tag="v${version}"
-          deb="dist/infiltrator-file-manager_${version}_amd64.deb"
-          sums="dist/SHA256SUMS"
-          test -f "$deb"
-          test -f "$sums"
 
-          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
-            tag_commit=$(git rev-list -n 1 "$tag")
-            if [[ "$tag_commit" != "$head_commit" ]]; then
-              printf 'Release tag %s points to %s instead of %s.\n' \
-                "$tag" "$tag_commit" "$head_commit" >&2
-              exit 1
-            fi
-          else
-            git tag "$tag" "$head_commit"
-            git push origin "$tag"
+          git fetch origin --tags --force
+
+          if ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo 'check=false' >> "$GITHUB_OUTPUT"
+            echo "No ${tag} exists; this was an ordinary verified main commit."
+            exit 0
           fi
 
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release ${tag} already exists on the exact immutable tag; verifying assets without mutating it."
-          else
-            gh release create "$tag" "$deb" "$sums" \
-              --verify-tag \
-              --target "$head_commit" \
-              --title "Infiltrator File Manager ${version}" \
-              --notes "Infiltrator File Manager ${version}. See the repository README for the current implementation surface and release status." \
-              --latest
+          tag_commit=$(git rev-list -n 1 "$tag")
+          if [[ "$tag_commit" != "$EXPECTED_SHA" ]]; then
+            echo 'check=false' >> "$GITHUB_OUTPUT"
+            echo "${tag} belongs to ${tag_commit}, not this later main commit ${EXPECTED_SHA}."
+            exit 0
           fi
 
-          published_assets=$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)
-          expected_assets=$(printf 'SHA256SUMS\ninfiltrator-file-manager_%s_amd64.deb\n' "$version" | sort)
-          if [[ "$published_assets" != "$expected_assets" ]]; then
-            printf 'Unexpected published asset set for %s.\n' "$tag" >&2
-            exit 1
-          fi
+          gh release view "$tag" >/dev/null
+          echo 'check=true' >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Verify central APT publication
+      - name: Verify public central APT publication
+        if: steps.released.outputs.check == 'true'
+        env:
+          VERSION: ${{ steps.released.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
-          version=$(tr -d '[:space:]' < VERSION)
+
           base='https://infiltrator-projects.github.io/Infiltrator-Repository'
           app_id='infiltrator-file-manager'
           package='infiltrator-file-manager'
@@ -207,15 +103,16 @@ jobs:
               }
             ' <<<"$packages")
 
-            if [[ "$catalogue_version" == "$version" ]] && grep -Fxq "$version" <<<"$package_versions"; then
-              printf 'Central APT publication verified for Files %s.\n' "$version"
+            if [[ "$catalogue_version" == "$VERSION" ]] && grep -Fxq "$VERSION" <<<"$package_versions"; then
+              printf 'Central APT publication verified for Files %s.\n' "$VERSION"
               exit 0
             fi
 
             printf 'Waiting for central APT publication of Files %s (catalogue=%s, attempt %s/80)...\n' \
-              "$version" "${catalogue_version:-<unavailable>}" "$attempt"
+              "$VERSION" "${catalogue_version:-<unavailable>}" "$attempt"
             sleep 15
           done
 
-          printf 'Central APT did not publish Files %s within the verification window.\n' "$version" >&2
+          printf 'Central APT has not published Files %s yet. GitHub release remains valid; distribution is pending.\n' \
+            "$VERSION" >&2
           exit 1
