@@ -9,13 +9,16 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build-test-package:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:
-      version: ${{ steps.release_intent.outputs.version }}
-      release_intent: ${{ steps.release_intent.outputs.release_intent }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -23,33 +26,14 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Read VERSION and detect release intent
-        id: release_intent
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Read VERSION
+        id: version
         shell: bash
         run: |
           set -euo pipefail
-
           version=$(tr -d '[:space:]' < VERSION)
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-
-          release_intent=false
-          if [[ "$GITHUB_EVENT_NAME" == 'push' && "$GITHUB_REF" == 'refs/heads/main' ]]; then
-            tag="v${version}"
-            expected_assets=$(printf 'SHA256SUMS\ninfiltrator-file-manager_%s_amd64.deb\n' "$version" | sort)
-            latest=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" 2>/dev/null || true)
-            latest_tag=$(jq -r '.tag_name // empty' <<<"$latest" 2>/dev/null || true)
-            latest_assets=$(jq -r '.assets[]?.name' <<<"$latest" 2>/dev/null | sort || true)
-
-            if [[ "$latest_tag" != "$tag" || "$latest_assets" != "$expected_assets" ]]; then
-              release_intent=true
-              printf 'VERSION %s is not a complete latest published release; publication is required.\n' "$tag"
-            fi
-          fi
-
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "release_intent=$release_intent" >> "$GITHUB_OUTPUT"
 
       - name: Install build dependencies
         env:
@@ -70,7 +54,7 @@ jobs:
 
       - name: Build and validate Debian package
         env:
-          VERSION: ${{ steps.release_intent.outputs.version }}
+          VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -109,20 +93,21 @@ jobs:
 
       - name: Preserve exact tested release package
         if: >-
-          github.event_name == 'push' &&
-          github.ref == 'refs/heads/main' &&
-          steps.release_intent.outputs.release_intent == 'true'
+          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+          github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: release-package-${{ github.sha }}
           path: |
-            dist/infiltrator-file-manager_${{ steps.release_intent.outputs.version }}_amd64.deb
+            dist/infiltrator-file-manager_${{ steps.version.outputs.version }}_amd64.deb
             dist/SHA256SUMS
           if-no-files-found: error
           retention-days: 7
 
   publish:
-    if: needs.build-test-package.outputs.release_intent == 'true'
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      github.event_name == 'workflow_dispatch'
     needs: build-test-package
     permissions:
       contents: write
@@ -145,7 +130,7 @@ jobs:
           name: release-package-${{ github.sha }}
           path: dist
 
-      - name: Publish exact tested VERSION
+      - name: Publish or verify exact tested VERSION
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_SHA: ${{ github.sha }}
@@ -162,48 +147,77 @@ jobs:
           deb="dist/infiltrator-file-manager_${VERSION}_amd64.deb"
           sums='dist/SHA256SUMS'
           expected_assets=$(printf 'SHA256SUMS\ninfiltrator-file-manager_%s_amd64.deb\n' "$VERSION" | sort)
+
           test -f "$deb"
           test -f "$sums"
 
-          # One immutable identity: the version tag must always name the exact
-          # commit whose tests and package succeeded in this run.
           git fetch origin --tags --force
+
+          tag_exists=false
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            tag_exists=true
             tag_commit=$(git rev-list -n 1 "$tag")
             if [[ "$tag_commit" != "$EXPECTED_SHA" ]]; then
-              printf 'Release tag %s belongs to %s, not tested commit %s.\n' \
+              printf '%s already belongs to %s, not tested main commit %s. Bump VERSION before merging another main commit.\n' \
                 "$tag" "$tag_commit" "$EXPECTED_SHA" >&2
               exit 1
             fi
-          else
+          fi
+
+          published_id=''
+          draft_ids=()
+          while IFS=$'\t' read -r release_id is_draft; do
+            [[ -z "$release_id" ]] && continue
+            if [[ "$is_draft" == 'true' ]]; then
+              draft_ids+=("$release_id")
+            elif [[ -z "$published_id" ]]; then
+              published_id="$release_id"
+            else
+              printf 'More than one published release claims %s; refusing ambiguous publication.\n' "$tag" >&2
+              exit 1
+            fi
+          done < <(
+            gh api --paginate "repos/${repo}/releases?per_page=100" |
+              jq -r --arg tag "$tag" '.[] | select(.tag_name == $tag) | [.id, .draft] | @tsv'
+          )
+
+          if [[ -n "$published_id" ]]; then
+            release=$(gh api "repos/${repo}/releases/${published_id}")
+            test "$(jq -r '.prerelease' <<<"$release")" = 'false'
+            published_assets=$(jq -r '.assets[]?.name' <<<"$release" | sort)
+            if [[ "$published_assets" != "$expected_assets" ]]; then
+              printf 'Published release %s has an unexpected asset set; refusing to rewrite a public release.\n' "$tag" >&2
+              exit 1
+            fi
+
+            for draft_id in "${draft_ids[@]}"; do
+              gh api --method DELETE "repos/${repo}/releases/${draft_id}" >/dev/null
+            done
+
+            latest_tag=$(gh api "repos/${repo}/releases/latest" --jq '.tag_name')
+            if [[ "$latest_tag" != "$tag" ]]; then
+              gh release edit "$tag" --latest
+            fi
+
+            printf '%s is already the complete published release for tested commit %s.\n' "$tag" "$EXPECTED_SHA"
+            exit 0
+          fi
+
+          for draft_id in "${draft_ids[@]}"; do
+            printf 'Removing incomplete draft release %s (%s) before retrying publication.\n' "$tag" "$draft_id"
+            gh api --method DELETE "repos/${repo}/releases/${draft_id}" >/dev/null
+          done
+
+          if [[ "$tag_exists" == 'false' ]]; then
             git tag "$tag" "$EXPECTED_SHA"
             git push origin "refs/tags/${tag}"
           fi
 
-          # Do not use draft releases. GitHub deliberately gives drafts an
-          # untagged-* identity, which makes a tag-driven transaction brittle.
-          # A direct published release is simpler, and any partial publication
-          # is recoverable because the next main push checks both tag and assets.
-          release=$(gh api "repos/${repo}/releases/tags/${tag}" 2>/dev/null || true)
-          release_id=$(jq -r '.id // empty' <<<"$release" 2>/dev/null || true)
-
-          if [[ -z "$release_id" ]]; then
-            gh release create "$tag" "$deb" "$sums" \
-              --verify-tag \
-              --latest \
-              --title "Infiltrator File Manager ${VERSION}" \
-              --notes "Infiltrator File Manager ${VERSION}. See the repository README for the current implementation surface and release status."
-          else
-            # Recovery path only: replace the public release's asset set with the
-            # exact package from this successful Verify run and restore latest.
-            mapfile -t asset_ids < <(jq -r '.assets[]?.id' <<<"$release")
-            for asset_id in "${asset_ids[@]}"; do
-              [[ -z "$asset_id" ]] && continue
-              gh api --method DELETE "repos/${repo}/releases/assets/${asset_id}" >/dev/null
-            done
-            gh release upload "$tag" "$deb" "$sums"
-            gh release edit "$tag" --latest
-          fi
+          gh release create "$tag" "$deb" "$sums" \
+            --verify-tag \
+            --latest \
+            --title "Infiltrator File Manager ${VERSION}" \
+            --notes "Infiltrator File Manager ${VERSION}. See the repository README for the current implementation surface and release status."
 
           git fetch origin --tags --force
           test "$(git rev-list -n 1 "$tag")" = "$EXPECTED_SHA"
@@ -211,6 +225,7 @@ jobs:
           published=$(gh api "repos/${repo}/releases/tags/${tag}")
           test "$(jq -r '.draft' <<<"$published")" = 'false'
           test "$(jq -r '.prerelease' <<<"$published")" = 'false'
+
           published_assets=$(jq -r '.assets[]?.name' <<<"$published" | sort)
           if [[ "$published_assets" != "$expected_assets" ]]; then
             printf 'Published release %s does not contain exactly the expected assets.\n' "$tag" >&2
