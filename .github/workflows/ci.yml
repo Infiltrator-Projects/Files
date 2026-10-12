@@ -37,11 +37,14 @@ jobs:
           release_intent=false
           if [[ "$GITHUB_EVENT_NAME" == 'push' && "$GITHUB_REF" == 'refs/heads/main' ]]; then
             tag="v${version}"
-            latest_tag=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name' 2>/dev/null || true)
-            if [[ "$tag" != "$latest_tag" ]]; then
+            expected_assets=$(printf 'SHA256SUMS\ninfiltrator-file-manager_%s_amd64.deb\n' "$version" | sort)
+            latest=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" 2>/dev/null || true)
+            latest_tag=$(jq -r '.tag_name // empty' <<<"$latest" 2>/dev/null || true)
+            latest_assets=$(jq -r '.assets[]?.name' <<<"$latest" 2>/dev/null | sort || true)
+
+            if [[ "$latest_tag" != "$tag" || "$latest_assets" != "$expected_assets" ]]; then
               release_intent=true
-              printf 'VERSION %s is not the latest published release (%s); publication is required.\n' \
-                "$tag" "${latest_tag:-none}"
+              printf 'VERSION %s is not a complete latest published release; publication is required.\n' "$tag"
             fi
           fi
 
@@ -162,8 +165,8 @@ jobs:
           test -f "$deb"
           test -f "$sums"
 
-          # Establish one immutable release identity first. A tag-only state is safe:
-          # until a release is published, the next main push will retry this version.
+          # One immutable identity: the version tag must always name the exact
+          # commit whose tests and package succeeded in this run.
           git fetch origin --tags --force
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
             tag_commit=$(git rev-list -n 1 "$tag")
@@ -177,63 +180,42 @@ jobs:
             git push origin "refs/tags/${tag}"
           fi
 
-          releases=$(gh api "repos/${repo}/releases?per_page=100")
-          release_count=$(jq --arg tag "$tag" '[.[] | select(.tag_name == $tag)] | length' <<<"$releases")
-          if (( release_count > 1 )); then
-            printf 'Multiple GitHub releases claim %s; refusing ambiguous publication.\n' "$tag" >&2
-            exit 1
-          fi
+          # Do not use draft releases. GitHub deliberately gives drafts an
+          # untagged-* identity, which makes a tag-driven transaction brittle.
+          # A direct published release is simpler, and any partial publication
+          # is recoverable because the next main push checks both tag and assets.
+          release=$(gh api "repos/${repo}/releases/tags/${tag}" 2>/dev/null || true)
+          release_id=$(jq -r '.id // empty' <<<"$release" 2>/dev/null || true)
 
-          release_id=''
-          if (( release_count == 1 )); then
-            release_id=$(jq -r --arg tag "$tag" '.[] | select(.tag_name == $tag) | .id' <<<"$releases")
-            is_draft=$(jq -r --arg tag "$tag" '.[] | select(.tag_name == $tag) | .draft' <<<"$releases")
-
-            if [[ "$is_draft" == 'false' ]]; then
-              published_assets=$(gh api "repos/${repo}/releases/${release_id}/assets?per_page=100" --jq '.[].name' | sort)
-              if [[ "$published_assets" != "$expected_assets" ]]; then
-                printf 'Published release %s has an unexpected asset set.\n' "$tag" >&2
-                exit 1
-              fi
-              printf 'Release %s is already complete at %s.\n' "$tag" "$EXPECTED_SHA"
-              exit 0
-            fi
-
-            # A draft is private recovery state. Replace any partial assets with the
-            # package produced by this exact successful Verify run, then publish once.
-            mapfile -t old_assets < <(gh api "repos/${repo}/releases/${release_id}/assets?per_page=100" --jq '.[].id')
-            for asset_id in "${old_assets[@]}"; do
+          if [[ -z "$release_id" ]]; then
+            gh release create "$tag" "$deb" "$sums" \
+              --verify-tag \
+              --latest \
+              --title "Infiltrator File Manager ${VERSION}" \
+              --notes "Infiltrator File Manager ${VERSION}. See the repository README for the current implementation surface and release status."
+          else
+            # Recovery path only: replace the public release's asset set with the
+            # exact package from this successful Verify run and restore latest.
+            mapfile -t asset_ids < <(jq -r '.assets[]?.id' <<<"$release")
+            for asset_id in "${asset_ids[@]}"; do
               [[ -z "$asset_id" ]] && continue
               gh api --method DELETE "repos/${repo}/releases/assets/${asset_id}" >/dev/null
             done
-            gh api --method PATCH "repos/${repo}/releases/${release_id}" -f target_commitish="$EXPECTED_SHA" >/dev/null
-          else
-            gh release create "$tag" \
-              --draft \
-              --verify-tag \
-              --title "Infiltrator File Manager ${VERSION}" \
-              --notes "Infiltrator File Manager ${VERSION}. See the repository README for the current implementation surface and release status."
-            releases=$(gh api "repos/${repo}/releases?per_page=100")
-            release_id=$(jq -r --arg tag "$tag" '.[] | select(.tag_name == $tag and .draft == true) | .id' <<<"$releases")
-            [[ "$release_id" =~ ^[0-9]+$ ]]
+            gh release upload "$tag" "$deb" "$sums"
+            gh release edit "$tag" --latest
           fi
-
-          gh release upload "$tag" "$deb" "$sums" --clobber
-
-          draft_assets=$(gh api "repos/${repo}/releases/${release_id}/assets?per_page=100" --jq '.[].name' | sort)
-          if [[ "$draft_assets" != "$expected_assets" ]]; then
-            printf 'Draft release %s does not contain exactly the expected assets.\n' "$tag" >&2
-            exit 1
-          fi
-
-          gh api --method PATCH "repos/${repo}/releases/${release_id}" -F draft=false -f make_latest=true >/dev/null
 
           git fetch origin --tags --force
           test "$(git rev-list -n 1 "$tag")" = "$EXPECTED_SHA"
-          test "$(gh api "repos/${repo}/releases/${release_id}" --jq '.draft')" = 'false'
 
-          published_assets=$(gh api "repos/${repo}/releases/${release_id}/assets?per_page=100" --jq '.[].name' | sort)
+          published=$(gh api "repos/${repo}/releases/tags/${tag}")
+          test "$(jq -r '.draft' <<<"$published")" = 'false'
+          test "$(jq -r '.prerelease' <<<"$published")" = 'false'
+          published_assets=$(jq -r '.assets[]?.name' <<<"$published" | sort)
           if [[ "$published_assets" != "$expected_assets" ]]; then
             printf 'Published release %s does not contain exactly the expected assets.\n' "$tag" >&2
             exit 1
           fi
+
+          latest_tag=$(gh api "repos/${repo}/releases/latest" --jq '.tag_name')
+          test "$latest_tag" = "$tag"
