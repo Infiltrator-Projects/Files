@@ -26,7 +26,6 @@ jobs:
       - name: Read VERSION and detect release intent
         id: release_intent
         env:
-          BEFORE_SHA: ${{ github.event.before }}
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
@@ -37,47 +36,12 @@ jobs:
 
           release_intent=false
           if [[ "$GITHUB_EVENT_NAME" == 'push' && "$GITHUB_REF" == 'refs/heads/main' ]]; then
-            previous_version=''
-            zero_sha='0000000000000000000000000000000000000000'
-
-            if [[ -n "${BEFORE_SHA:-}" && "$BEFORE_SHA" != "$zero_sha" ]]; then
-              if ! git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
-                git fetch --no-tags --depth=1 origin "$BEFORE_SHA"
-              fi
-              if ! git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
-                printf 'Cannot resolve pre-push commit %s; refusing to guess release intent.\n' "$BEFORE_SHA" >&2
-                exit 1
-              fi
-              if git cat-file -e "${BEFORE_SHA}:VERSION" 2>/dev/null; then
-                previous_version=$(git show "${BEFORE_SHA}:VERSION" | tr -d '[:space:]')
-                [[ "$previous_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-              fi
-            fi
-
-            if [[ "$version" != "$previous_version" ]]; then
+            tag="v${version}"
+            latest_tag=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name' 2>/dev/null || true)
+            if [[ "$tag" != "$latest_tag" ]]; then
               release_intent=true
-            else
-              tag="v${version}"
-              releases=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100")
-              release_count=$(jq --arg tag "$tag" '[.[] | select(.tag_name == $tag)] | length' <<<"$releases")
-              if (( release_count > 1 )); then
-                printf 'Multiple GitHub releases claim %s; refusing ambiguous recovery.\n' "$tag" >&2
-                exit 1
-              fi
-
-              if (( release_count == 1 )); then
-                is_draft=$(jq -r --arg tag "$tag" '.[] | select(.tag_name == $tag) | .draft' <<<"$releases")
-                if [[ "$is_draft" == 'true' ]]; then
-                  release_intent=true
-                  printf 'Resuming incomplete draft release %s.\n' "$tag"
-                fi
-              else
-                git fetch origin --tags --force
-                if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
-                  release_intent=true
-                  printf 'Resuming orphan release tag %s.\n' "$tag"
-                fi
-              fi
+              printf 'VERSION %s is not the latest published release (%s); publication is required.\n' \
+                "$tag" "${latest_tag:-none}"
             fi
           fi
 
@@ -198,15 +162,19 @@ jobs:
           test -f "$deb"
           test -f "$sums"
 
+          # Establish one immutable release identity first. A tag-only state is safe:
+          # until a release is published, the next main push will retry this version.
           git fetch origin --tags --force
-          tag_commit=''
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
             tag_commit=$(git rev-list -n 1 "$tag")
             if [[ "$tag_commit" != "$EXPECTED_SHA" ]]; then
-              printf 'Release tag %s already belongs to %s, not release commit %s.\n' \
+              printf 'Release tag %s belongs to %s, not tested commit %s.\n' \
                 "$tag" "$tag_commit" "$EXPECTED_SHA" >&2
               exit 1
             fi
+          else
+            git tag "$tag" "$EXPECTED_SHA"
+            git push origin "refs/tags/${tag}"
           fi
 
           releases=$(gh api "repos/${repo}/releases?per_page=100")
@@ -217,18 +185,11 @@ jobs:
           fi
 
           release_id=''
-          release_draft=''
-          release_target=''
           if (( release_count == 1 )); then
             release_id=$(jq -r --arg tag "$tag" '.[] | select(.tag_name == $tag) | .id' <<<"$releases")
-            release_draft=$(jq -r --arg tag "$tag" '.[] | select(.tag_name == $tag) | .draft' <<<"$releases")
-            release_target=$(jq -r --arg tag "$tag" '.[] | select(.tag_name == $tag) | .target_commitish' <<<"$releases")
+            is_draft=$(jq -r --arg tag "$tag" '.[] | select(.tag_name == $tag) | .draft' <<<"$releases")
 
-            if [[ "$release_draft" == 'false' ]]; then
-              if [[ -z "$tag_commit" ]]; then
-                printf 'Published release %s exists but its git tag is missing.\n' "$tag" >&2
-                exit 1
-              fi
+            if [[ "$is_draft" == 'false' ]]; then
               published_assets=$(gh api "repos/${repo}/releases/${release_id}/assets?per_page=100" --jq '.[].name' | sort)
               if [[ "$published_assets" != "$expected_assets" ]]; then
                 printf 'Published release %s has an unexpected asset set.\n' "$tag" >&2
@@ -238,34 +199,15 @@ jobs:
               exit 0
             fi
 
-            if [[ "$release_target" != "$EXPECTED_SHA" ]]; then
-              if [[ -n "$tag_commit" ]]; then
-                printf 'Draft %s targets %s but its immutable tag already exists at %s.\n' \
-                  "$tag" "$release_target" "$tag_commit" >&2
-                exit 1
-              fi
-
-              mapfile -t stale_asset_ids < <(gh api "repos/${repo}/releases/${release_id}/assets?per_page=100" --jq '.[].id')
-              for asset_id in "${stale_asset_ids[@]}"; do
-                [[ -z "$asset_id" ]] && continue
-                gh api --method DELETE "repos/${repo}/releases/assets/${asset_id}"
-              done
-              gh api --method PATCH "repos/${repo}/releases/${release_id}" -f target_commitish="$EXPECTED_SHA" >/dev/null
-              printf 'Retargeted recoverable draft %s to tested commit %s.\n' "$tag" "$EXPECTED_SHA"
-            fi
-          fi
-
-          # The tag is safe to create first because every later state is explicitly
-          # resumable. A retry can repair tag-only, draft-only, or partial-draft state.
-          if [[ -z "$tag_commit" ]]; then
-            git tag "$tag" "$EXPECTED_SHA"
-            git push origin "refs/tags/${tag}"
-            git fetch origin --tags --force
-            tag_commit=$(git rev-list -n 1 "$tag")
-            test "$tag_commit" = "$EXPECTED_SHA"
-          fi
-
-          if [[ -z "$release_id" ]]; then
+            # A draft is private recovery state. Replace any partial assets with the
+            # package produced by this exact successful Verify run, then publish once.
+            mapfile -t old_assets < <(gh api "repos/${repo}/releases/${release_id}/assets?per_page=100" --jq '.[].id')
+            for asset_id in "${old_assets[@]}"; do
+              [[ -z "$asset_id" ]] && continue
+              gh api --method DELETE "repos/${repo}/releases/assets/${asset_id}" >/dev/null
+            done
+            gh api --method PATCH "repos/${repo}/releases/${release_id}" -f target_commitish="$EXPECTED_SHA" >/dev/null
+          else
             gh release create "$tag" \
               --draft \
               --verify-tag \
@@ -276,13 +218,7 @@ jobs:
             [[ "$release_id" =~ ^[0-9]+$ ]]
           fi
 
-          for asset in "$deb" "$sums"; do
-            name=$(basename "$asset")
-            existing_assets=$(gh api "repos/${repo}/releases/${release_id}/assets?per_page=100" --jq '.[].name')
-            if ! grep -Fxq "$name" <<<"$existing_assets"; then
-              gh release upload "$tag" "$asset"
-            fi
-          done
+          gh release upload "$tag" "$deb" "$sums" --clobber
 
           draft_assets=$(gh api "repos/${repo}/releases/${release_id}/assets?per_page=100" --jq '.[].name' | sort)
           if [[ "$draft_assets" != "$expected_assets" ]]; then
@@ -293,17 +229,9 @@ jobs:
           gh api --method PATCH "repos/${repo}/releases/${release_id}" -F draft=false -f make_latest=true >/dev/null
 
           git fetch origin --tags --force
-          if ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
-            printf 'Published release %s is missing its expected tag.\n' "$tag" >&2
-            exit 1
-          fi
-          tag_commit=$(git rev-list -n 1 "$tag")
-          if [[ "$tag_commit" != "$EXPECTED_SHA" ]]; then
-            printf 'Published tag %s resolves to %s, expected %s.\n' "$tag" "$tag_commit" "$EXPECTED_SHA" >&2
-            exit 1
-          fi
-
+          test "$(git rev-list -n 1 "$tag")" = "$EXPECTED_SHA"
           test "$(gh api "repos/${repo}/releases/${release_id}" --jq '.draft')" = 'false'
+
           published_assets=$(gh api "repos/${repo}/releases/${release_id}/assets?per_page=100" --jq '.[].name' | sort)
           if [[ "$published_assets" != "$expected_assets" ]]; then
             printf 'Published release %s does not contain exactly the expected assets.\n' "$tag" >&2
