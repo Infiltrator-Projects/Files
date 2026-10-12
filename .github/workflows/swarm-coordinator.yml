@@ -33,10 +33,10 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     steps:
-      - name: Check out swarm control plane
+      - name: Check out repository control plane
         uses: actions/checkout@v4
         with:
-          ref: swarm/control
+          ref: main
           path: control
           fetch-depth: 1
 
