@@ -68,6 +68,12 @@ private:
     static void on_new_tab_action(GSimpleAction *action,
                                   GVariant *parameter,
                                   gpointer user_data);
+    static void on_close_tab_action(GSimpleAction *action,
+                                    GVariant *parameter,
+                                    gpointer user_data);
+    static void on_reopen_closed_tab_action(GSimpleAction *action,
+                                            GVariant *parameter,
+                                            gpointer user_data);
     static void on_tab_clicked(GtkButton *button, gpointer user_data);
     static void on_back_clicked(GtkButton *button, gpointer user_data);
     static void on_forward_clicked(GtkButton *button, gpointer user_data);
@@ -111,6 +117,8 @@ private:
     void build_ui(GtkApplication *application);
     void open_current_location_in_new_window();
     void open_current_location_in_new_tab();
+    void close_active_tab();
+    void reopen_recently_closed_tab();
     void activate_tab(std::size_t index);
     void sync_active_tab_state();
     void rebuild_tab_strip();
