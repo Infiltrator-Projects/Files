@@ -124,8 +124,14 @@ if(BUILD_TESTING)
 
     add_executable(window-state-test
         tests/window_state_test.cpp
+        src/ui/batch_item_operation_controller.cpp
+        src/ui/create_folder_controller.cpp
+        src/ui/destructive_operation_controller.cpp
+        src/ui/detail_metadata.cpp
         src/ui/file_manager_window.cpp
-        src/ui/detail_metadata.cpp)
+        src/ui/item_operation_controller.cpp
+        src/ui/journal_recovery_controller.cpp
+        src/ui/theme_controller.cpp)
     target_link_libraries(window-state-test PRIVATE infiltrator-files-core PkgConfig::GTK4)
     find_program(XVFB_RUN_EXECUTABLE xvfb-run)
     find_program(DBUS_RUN_SESSION_EXECUTABLE dbus-run-session)
