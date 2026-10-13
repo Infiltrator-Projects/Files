@@ -51,7 +51,7 @@ std::string colour_hex(const std::uint32_t rgb)
 GtkWidget *make_sidebar_content(const char *title, const char *icon_name)
 {
     const auto *metrics = infiltratr_design_metrics();
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, metrics->control_spacing);
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, static_cast<int>(metrics->control_spacing));
     gtk_widget_add_css_class(box, "ifm-sidebar-content");
 
     GtkWidget *icon = gtk_image_new_from_icon_name(icon_name);
@@ -397,11 +397,11 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     gtk_window_set_child(GTK_WINDOW(window_), root);
 
     const auto *metrics = infiltratr_design_metrics();
-    tab_strip_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, metrics->compact_spacing);
-    gtk_widget_set_margin_start(tab_strip_, metrics->control_spacing);
-    gtk_widget_set_margin_end(tab_strip_, metrics->control_spacing);
-    gtk_widget_set_margin_top(tab_strip_, metrics->compact_spacing);
-    gtk_widget_set_margin_bottom(tab_strip_, metrics->compact_spacing);
+    tab_strip_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, static_cast<int>(metrics->compact_spacing));
+    gtk_widget_set_margin_start(tab_strip_, static_cast<int>(metrics->control_spacing));
+    gtk_widget_set_margin_end(tab_strip_, static_cast<int>(metrics->control_spacing));
+    gtk_widget_set_margin_top(tab_strip_, static_cast<int>(metrics->compact_spacing));
+    gtk_widget_set_margin_bottom(tab_strip_, static_cast<int>(metrics->compact_spacing));
     gtk_widget_add_css_class(tab_strip_, "ifm-tab-strip");
     gtk_box_append(GTK_BOX(root), tab_strip_);
 
@@ -601,15 +601,15 @@ void FileManagerWindow::apply_theme()
         << ".ifm-sidebar row:hover { background: " << colour_hex(palette->surface_hover_rgb) << "; }\n"
         << ".ifm-tab-strip { background: " << colour_hex(palette->panel_rgb)
         << "; border-bottom: 1px solid " << colour_hex(palette->border_rgb) << "; }\n"
-        << ".ifm-view-switcher button { min-width: " << metrics->control_height << "px; "
-        << "min-height: " << metrics->control_height << "px; padding: 0; }\n"
+        << ".ifm-view-switcher button { min-width: " << (metrics->content_padding * 2U) << "px; "
+        << "min-height: " << (metrics->content_padding * 2U) << "px; padding: 0; }\n"
         << ".ifm-tab { padding: " << metrics->compact_spacing << "px "
         << metrics->section_spacing << "px; border-radius: " << metrics->control_radius
         << "px; color: " << colour_hex(palette->muted_rgb) << "; }\n"
         << ".ifm-tab:hover { background: " << colour_hex(palette->surface_hover_rgb) << "; }\n"
         << ".ifm-tab.selected { background: " << colour_hex(palette->selection_background_rgb)
         << "; color: " << colour_hex(palette->selection_foreground_rgb)
-        << "; font-weight: " << INFILTRATR_WEIGHT_BOLD << "; }\n"
+        << "; font-weight: " << typography->ui_bold_weight << "; }\n"
         << ".ifm-view-switcher button:focus-visible, .ifm-tab:focus-visible, "
         << ".ifm-sidebar row:focus-visible, .ifm-file-list row:focus-visible, "
         << ".ifm-icon-tile:focus-visible { outline: 2px solid "
