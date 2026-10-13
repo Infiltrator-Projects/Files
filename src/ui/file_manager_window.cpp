@@ -835,7 +835,9 @@ void FileManagerWindow::navigate_to(GFile *file, const bool record_history)
 
     g_free(uri_text);
     g_free(parse_name);
-    sync_active_tab_state();
+    if (!pending_tab_context_restore_) {
+        sync_active_tab_state();
+    }
     rebuild_tab_strip();
     update_navigation_state();
     update_status();
@@ -1168,11 +1170,7 @@ void FileManagerWindow::open_current_location_in_new_tab()
         return;
     }
 
-    history_ = tab->history;
-    history_index_ = tab->history_index;
-    GFile *file = g_file_new_for_uri(tab->current_location().uri.c_str());
-    navigate_to(file, false);
-    g_object_unref(file);
+    load_tab_state(*tab);
 }
 
 void FileManagerWindow::close_active_tab()
@@ -1199,11 +1197,7 @@ void FileManagerWindow::close_active_tab()
     if (tab == nullptr) {
         return;
     }
-    history_ = tab->history;
-    history_index_ = tab->history_index;
-    GFile *file = g_file_new_for_uri(tab->current_location().uri.c_str());
-    navigate_to(file, false);
-    g_object_unref(file);
+    load_tab_state(*tab);
 }
 
 void FileManagerWindow::reopen_recently_closed_tab()
@@ -1223,11 +1217,7 @@ void FileManagerWindow::reopen_recently_closed_tab()
     if (tab == nullptr) {
         return;
     }
-    history_ = tab->history;
-    history_index_ = tab->history_index;
-    GFile *file = g_file_new_for_uri(tab->current_location().uri.c_str());
-    navigate_to(file, false);
-    g_object_unref(file);
+    load_tab_state(*tab);
 }
 
 void FileManagerWindow::duplicate_active_tab()
@@ -1248,11 +1238,7 @@ void FileManagerWindow::duplicate_active_tab()
     if (tab == nullptr) {
         return;
     }
-    history_ = tab->history;
-    history_index_ = tab->history_index;
-    GFile *file = g_file_new_for_uri(tab->current_location().uri.c_str());
-    navigate_to(file, false);
-    g_object_unref(file);
+    load_tab_state(*tab);
 }
 
 void FileManagerWindow::reorder_active_tab(const int direction)
@@ -1313,12 +1299,7 @@ void FileManagerWindow::move_active_tab_to_new_window()
     if (survivor == nullptr) {
         return;
     }
-    history_ = survivor->history;
-    history_index_ = survivor->history_index;
-    GFile *file =
-        g_file_new_for_uri(survivor->current_location().uri.c_str());
-    navigate_to(file, false);
-    g_object_unref(file);
+    load_tab_state(*survivor);
 }
 
 void FileManagerWindow::adopt_transferred_tab(BrowseTabState state)
@@ -1330,11 +1311,7 @@ void FileManagerWindow::adopt_transferred_tab(BrowseTabState state)
         return;
     }
     *tab = std::move(state);
-    history_ = tab->history;
-    history_index_ = tab->history_index;
-    GFile *file = g_file_new_for_uri(tab->current_location().uri.c_str());
-    navigate_to(file, false);
-    g_object_unref(file);
+    load_tab_state(*tab);
 }
 
 void FileManagerWindow::activate_tab(const std::size_t index)
@@ -1353,11 +1330,96 @@ void FileManagerWindow::activate_tab(const std::size_t index)
         return;
     }
 
-    history_ = tab->history;
-    history_index_ = tab->history_index;
-    GFile *file = g_file_new_for_uri(tab->current_location().uri.c_str());
+    load_tab_state(*tab);
+}
+
+void FileManagerWindow::load_tab_state(const BrowseTabState &tab)
+{
+    history_ = tab.history;
+    history_index_ = tab.history_index;
+    pending_tab_context_restore_ = true;
+    GFile *file = g_file_new_for_uri(tab.current_location().uri.c_str());
     navigate_to(file, false);
     g_object_unref(file);
+
+    if (!gtk_directory_list_is_loading(directory_list_)) {
+        restore_active_tab_context();
+        pending_tab_context_restore_ = false;
+    }
+}
+
+GtkAdjustment *FileManagerWindow::active_scroll_adjustment() const
+{
+    if (content_stack_ == nullptr) {
+        return nullptr;
+    }
+    GtkWidget *visible = gtk_stack_get_visible_child(GTK_STACK(content_stack_));
+    return visible != nullptr && GTK_IS_SCROLLED_WINDOW(visible)
+               ? gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(visible))
+               : nullptr;
+}
+
+void FileManagerWindow::restore_active_tab_context()
+{
+    if (!browse_session_.has_value() ||
+        !browse_session_->active_index().has_value() ||
+        selection_ == nullptr || primary_selection_ == nullptr) {
+        return;
+    }
+    const BrowseTabState *tab =
+        browse_session_->tab(*browse_session_->active_index());
+    if (tab == nullptr) {
+        return;
+    }
+
+    selection_syncing_ = true;
+    gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection_));
+    gtk_single_selection_set_selected(primary_selection_,
+                                      GTK_INVALID_LIST_POSITION);
+
+    GListModel *presentation = gtk_multi_selection_get_model(selection_);
+    const guint presentation_count =
+        presentation == nullptr ? 0U : g_list_model_get_n_items(presentation);
+    for (guint index = 0; index < presentation_count; ++index) {
+        GFileInfo *info =
+            G_FILE_INFO(g_list_model_get_item(presentation, index));
+        const char *name = info == nullptr ? nullptr : g_file_info_get_name(info);
+        if (name != nullptr &&
+            std::find(tab->selected_names.begin(), tab->selected_names.end(),
+                      name) != tab->selected_names.end()) {
+            gtk_selection_model_select_item(GTK_SELECTION_MODEL(selection_),
+                                            index, false);
+        }
+        if (info != nullptr) {
+            g_object_unref(info);
+        }
+    }
+
+    if (tab->primary_selection.has_value()) {
+        GListModel *directory = G_LIST_MODEL(directory_list_);
+        const guint count = g_list_model_get_n_items(directory);
+        for (guint index = 0; index < count; ++index) {
+            GFileInfo *info =
+                G_FILE_INFO(g_list_model_get_item(directory, index));
+            const char *name =
+                info == nullptr ? nullptr : g_file_info_get_name(info);
+            const bool matches =
+                name != nullptr && name == *tab->primary_selection;
+            if (info != nullptr) {
+                g_object_unref(info);
+            }
+            if (matches) {
+                gtk_single_selection_set_selected(primary_selection_, index);
+                break;
+            }
+        }
+    }
+
+    if (GtkAdjustment *adjustment = active_scroll_adjustment();
+        adjustment != nullptr) {
+        gtk_adjustment_set_value(adjustment, tab->scroll_position);
+    }
+    selection_syncing_ = false;
 }
 
 void FileManagerWindow::sync_active_tab_state()
@@ -1374,6 +1436,45 @@ void FileManagerWindow::sync_active_tab_state()
     }
     tab->history = history_;
     tab->history_index = history_index_;
+    tab->selected_names.clear();
+    tab->primary_selection.reset();
+
+    if (selection_ != nullptr) {
+        GListModel *presentation = gtk_multi_selection_get_model(selection_);
+        const guint count =
+            presentation == nullptr ? 0U : g_list_model_get_n_items(presentation);
+        for (guint index = 0; index < count; ++index) {
+            if (!gtk_selection_model_is_selected(GTK_SELECTION_MODEL(selection_),
+                                                 index)) {
+                continue;
+            }
+            GFileInfo *info =
+                G_FILE_INFO(g_list_model_get_item(presentation, index));
+            const char *name =
+                info == nullptr ? nullptr : g_file_info_get_name(info);
+            if (name != nullptr) {
+                tab->selected_names.emplace_back(name);
+            }
+            if (info != nullptr) {
+                g_object_unref(info);
+            }
+        }
+    }
+
+    if (primary_selection_ != nullptr) {
+        GFileInfo *primary = G_FILE_INFO(
+            gtk_single_selection_get_selected_item(primary_selection_));
+        const char *name =
+            primary == nullptr ? nullptr : g_file_info_get_name(primary);
+        if (name != nullptr) {
+            tab->primary_selection = name;
+        }
+    }
+
+    if (GtkAdjustment *adjustment = active_scroll_adjustment();
+        adjustment != nullptr) {
+        tab->scroll_position = gtk_adjustment_get_value(adjustment);
+    }
 }
 
 void FileManagerWindow::rebuild_tab_strip()
@@ -1799,7 +1900,13 @@ void FileManagerWindow::on_loading_changed(GObject *object, GParamSpec *pspec, g
 {
     (void)object;
     (void)pspec;
-    static_cast<FileManagerWindow *>(user_data)->update_status();
+    auto *self = static_cast<FileManagerWindow *>(user_data);
+    self->update_status();
+    if (self->pending_tab_context_restore_ &&
+        !gtk_directory_list_is_loading(self->directory_list_)) {
+        self->restore_active_tab_context();
+        self->pending_tab_context_restore_ = false;
+    }
 }
 
 void FileManagerWindow::on_launch_finished(GObject *source, GAsyncResult *result, gpointer user_data)
