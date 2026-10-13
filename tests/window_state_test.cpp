@@ -48,6 +48,10 @@ struct FileManagerWindowTestAccess {
     {
         return window.temporal_policy_monitor_ != nullptr && !window.temporal_policy_monitoring_parent_;
     }
+    static void rearm_temporal_policy(FileManagerWindow &window)
+    {
+        window.arm_temporal_policy_monitor();
+    }
     static std::string watch_name(const FileManagerWindow &window)
     {
         return window.temporal_policy_watch_name_;
@@ -363,6 +367,11 @@ int main()
             return g_list_length(gtk_application_get_windows(application)) ==
                    window_count;
         });
+        // The appearance assertion intentionally persists a preference. Reset
+        // that independent side effect so the temporal-policy test below still
+        // begins from its specified missing-parent profile state.
+        std::filesystem::remove_all(config);
+        FileManagerWindowTestAccess::rearm_temporal_policy(*window);
 
         require(FileManagerWindowTestAccess::tab_count(*window) == 1U,
                 "A Files window must start with one browse tab");
