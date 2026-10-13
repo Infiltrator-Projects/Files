@@ -194,18 +194,36 @@ int main()
             {"win.move-tab-right", "<Control><Shift>Page_Down"},
             {"win.move-tab-new-window", "<Control><Shift>m"},
         };
-        std::set<std::string> distinct_shortcuts;
+        std::set<std::pair<guint, GdkModifierType>> distinct_shortcuts;
+        guint new_folder_key = 0;
+        GdkModifierType new_folder_modifiers = static_cast<GdkModifierType>(0);
+        require(gtk_accelerator_parse("<Control><Shift>n", &new_folder_key,
+                                      &new_folder_modifiers),
+                "Reserved New Folder accelerator must parse");
         for (const auto &shortcut : session_shortcuts) {
             char **configured =
                 gtk_application_get_accels_for_action(application, shortcut.action);
             require(configured != nullptr && configured[0] != nullptr &&
                         configured[1] == nullptr,
                     "Each session action must expose exactly one accelerator");
-            require(g_strcmp0(configured[0], shortcut.accelerator) == 0,
+            guint configured_key = 0;
+            guint expected_key = 0;
+            GdkModifierType configured_modifiers = static_cast<GdkModifierType>(0);
+            GdkModifierType expected_modifiers = static_cast<GdkModifierType>(0);
+            require(gtk_accelerator_parse(configured[0], &configured_key,
+                                          &configured_modifiers) &&
+                        gtk_accelerator_parse(shortcut.accelerator, &expected_key,
+                                              &expected_modifiers),
+                    "Session accelerators must parse");
+            require(configured_key == expected_key &&
+                        configured_modifiers == expected_modifiers,
                     "Session action accelerator must match the documented map");
-            require(distinct_shortcuts.insert(configured[0]).second,
+            require(distinct_shortcuts
+                        .emplace(configured_key, configured_modifiers)
+                        .second,
                     "Session accelerators must not collide");
-            require(g_strcmp0(configured[0], "<Control><Shift>n") != 0,
+            require(configured_key != new_folder_key ||
+                        configured_modifiers != new_folder_modifiers,
                     "Session accelerators must preserve Ctrl+Shift+N for New Folder");
             g_strfreev(configured);
         }
