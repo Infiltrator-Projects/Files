@@ -57,6 +57,22 @@ struct FileManagerWindowTestAccess {
             g_object_get_data(G_OBJECT(native), "ifm-window-owner"));
     }
     static GFile *current(FileManagerWindow &window) { return window.current_location_; }
+    static std::size_t tab_count(const FileManagerWindow &window)
+    {
+        return window.browse_session_.has_value()
+                   ? window.browse_session_->tabs().size()
+                   : 0U;
+    }
+    static std::size_t closed_tab_count(const FileManagerWindow &window)
+    {
+        return window.browse_session_.has_value()
+                   ? window.browse_session_->closed_count()
+                   : 0U;
+    }
+    static void activate_tab(FileManagerWindow &window, const std::size_t index)
+    {
+        window.activate_tab(index);
+    }
     static void finish_launch(GObject *source, GAsyncResult *result, GtkLabel *status)
     {
         FileManagerWindow::on_launch_finished(source, result, status);
@@ -191,6 +207,64 @@ int main()
             return g_list_length(gtk_application_get_windows(application)) ==
                    window_count;
         });
+
+        require(FileManagerWindowTestAccess::tab_count(*window) == 1U,
+                "A Files window must start with one browse tab");
+        g_action_group_activate_action(
+            G_ACTION_GROUP(window->native_window()), "new-tab", nullptr);
+        await([&] {
+            return !gtk_directory_list_is_loading(
+                FileManagerWindowTestAccess::directory(*window));
+        });
+        require(FileManagerWindowTestAccess::tab_count(*window) == 2U,
+                "New-tab action must add and activate an independent tab");
+        FileManagerWindowTestAccess::navigate(*window, root);
+        await([&] {
+            return !gtk_directory_list_is_loading(
+                FileManagerWindowTestAccess::directory(*window));
+        });
+        FileManagerWindowTestAccess::activate_tab(*window, 0U);
+        await([&] {
+            return !gtk_directory_list_is_loading(
+                FileManagerWindowTestAccess::directory(*window));
+        });
+        GFile *source_tab_file = g_file_new_for_path(folder.c_str());
+        require(g_file_equal(FileManagerWindowTestAccess::current(*window),
+                             source_tab_file),
+                "Switching tabs must restore the source tab location");
+        g_object_unref(source_tab_file);
+
+        g_action_group_activate_action(
+            G_ACTION_GROUP(window->native_window()), "close-tab", nullptr);
+        await([&] {
+            return !gtk_directory_list_is_loading(
+                FileManagerWindowTestAccess::directory(*window));
+        });
+        require(FileManagerWindowTestAccess::tab_count(*window) == 1U &&
+                    FileManagerWindowTestAccess::closed_tab_count(*window) == 1U,
+                "Close-tab action must retain one bounded restorable snapshot");
+        GFile *root_file = g_file_new_for_path(root.c_str());
+        require(g_file_equal(FileManagerWindowTestAccess::current(*window),
+                             root_file),
+                "Closing the active tab must activate the surviving tab");
+        g_object_unref(root_file);
+
+        g_action_group_activate_action(
+            G_ACTION_GROUP(window->native_window()),
+            "reopen-closed-tab", nullptr);
+        await([&] {
+            return !gtk_directory_list_is_loading(
+                FileManagerWindowTestAccess::directory(*window));
+        });
+        require(FileManagerWindowTestAccess::tab_count(*window) == 2U &&
+                    FileManagerWindowTestAccess::closed_tab_count(*window) == 0U,
+                "Reopen action must restore the most recently closed tab");
+        GFile *folder_file = g_file_new_for_path(folder.c_str());
+        require(g_file_equal(FileManagerWindowTestAccess::current(*window),
+                             folder_file),
+                "Reopened tab must restore its browsing location");
+        g_object_unref(folder_file);
+
         GtkMultiSelection *selection = FileManagerWindowTestAccess::selection(*window);
         auto *presentation = GTK_SORT_LIST_MODEL(gtk_multi_selection_get_model(selection));
         GtkSorter *sorter = GTK_SORTER(gtk_custom_sorter_new(reverse_names, nullptr, nullptr));
