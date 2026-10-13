@@ -4,6 +4,7 @@
 #include "../core/location.hpp"
 #include "../core/mounted_places.hpp"
 #include "batch_item_operation_controller.hpp"
+#include "browse_session.hpp"
 #include "create_folder_controller.hpp"
 #include "destructive_operation_controller.hpp"
 #include "item_operation_controller.hpp"
@@ -64,6 +65,10 @@ private:
     static void on_new_window_action(GSimpleAction *action,
                                      GVariant *parameter,
                                      gpointer user_data);
+    static void on_new_tab_action(GSimpleAction *action,
+                                  GVariant *parameter,
+                                  gpointer user_data);
+    static void on_tab_clicked(GtkButton *button, gpointer user_data);
     static void on_back_clicked(GtkButton *button, gpointer user_data);
     static void on_forward_clicked(GtkButton *button, gpointer user_data);
     static void on_up_clicked(GtkButton *button, gpointer user_data);
@@ -105,6 +110,10 @@ private:
 
     void build_ui(GtkApplication *application);
     void open_current_location_in_new_window();
+    void open_current_location_in_new_tab();
+    void activate_tab(std::size_t index);
+    void sync_active_tab_state();
+    void rebuild_tab_strip();
     void apply_theme();
     void add_sidebar_location(const char *title, const char *icon_name, const char *target);
     void refresh_mounted_places();
@@ -131,6 +140,7 @@ private:
     GtkWidget *location_entry_{nullptr};
     GtkWidget *sidebar_{nullptr};
     GtkWidget *content_stack_{nullptr};
+    GtkWidget *tab_strip_{nullptr};
     GtkWidget *list_view_button_{nullptr};
     GtkWidget *icon_view_button_{nullptr};
     GtkWidget *compact_view_button_{nullptr};
@@ -148,6 +158,7 @@ private:
     GFileMonitor *temporal_policy_monitor_{nullptr};
     std::unordered_set<GtkWidget *> modified_cells_;
     std::vector<Location> history_;
+    std::optional<BrowseSessionState> browse_session_;
     std::size_t history_index_{0};
     ViewMode view_mode_{ViewMode::List};
     bool operation_surface_installed_{false};
