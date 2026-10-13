@@ -248,6 +248,38 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     gtk_application_set_accels_for_action(
         application, "win.reopen-closed-tab", reopen_tab_accels);
 
+    GSimpleAction *duplicate_tab_action =
+        g_simple_action_new("duplicate-tab", nullptr);
+    g_signal_connect(duplicate_tab_action, "activate",
+                     G_CALLBACK(on_duplicate_tab_action), this);
+    g_action_map_add_action(G_ACTION_MAP(window_), G_ACTION(duplicate_tab_action));
+    g_object_unref(duplicate_tab_action);
+    const char *duplicate_tab_accels[] = {"<Control><Shift>d", nullptr};
+    gtk_application_set_accels_for_action(
+        application, "win.duplicate-tab", duplicate_tab_accels);
+
+    GSimpleAction *move_tab_left_action =
+        g_simple_action_new("move-tab-left", nullptr);
+    g_signal_connect(move_tab_left_action, "activate",
+                     G_CALLBACK(on_move_tab_left_action), this);
+    g_action_map_add_action(G_ACTION_MAP(window_), G_ACTION(move_tab_left_action));
+    g_object_unref(move_tab_left_action);
+    const char *move_tab_left_accels[] = {
+        "<Control><Shift>Page_Up", nullptr};
+    gtk_application_set_accels_for_action(
+        application, "win.move-tab-left", move_tab_left_accels);
+
+    GSimpleAction *move_tab_right_action =
+        g_simple_action_new("move-tab-right", nullptr);
+    g_signal_connect(move_tab_right_action, "activate",
+                     G_CALLBACK(on_move_tab_right_action), this);
+    g_action_map_add_action(G_ACTION_MAP(window_), G_ACTION(move_tab_right_action));
+    g_object_unref(move_tab_right_action);
+    const char *move_tab_right_accels[] = {
+        "<Control><Shift>Page_Down", nullptr};
+    gtk_application_set_accels_for_action(
+        application, "win.move-tab-right", move_tab_right_accels);
+
     GtkWidget *header = gtk_header_bar_new();
     gtk_window_set_titlebar(GTK_WINDOW(window_), header);
 
@@ -308,6 +340,9 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     g_menu_append(window_menu, "Close Current Tab", "win.close-tab");
     g_menu_append(window_menu, "Reopen Recently Closed Tab",
                   "win.reopen-closed-tab");
+    g_menu_append(window_menu, "Duplicate Current Tab", "win.duplicate-tab");
+    g_menu_append(window_menu, "Move Current Tab Left", "win.move-tab-left");
+    g_menu_append(window_menu, "Move Current Tab Right", "win.move-tab-right");
     GtkWidget *menu_button = gtk_menu_button_new();
     gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(menu_button),
                                   "open-menu-symbolic");
@@ -1180,6 +1215,52 @@ void FileManagerWindow::reopen_recently_closed_tab()
     g_object_unref(file);
 }
 
+void FileManagerWindow::duplicate_active_tab()
+{
+    if (!browse_session_.has_value() ||
+        !browse_session_->active_index().has_value()) {
+        return;
+    }
+
+    sync_active_tab_state();
+    const std::optional<std::size_t> duplicated =
+        browse_session_->duplicate(*browse_session_->active_index(), true);
+    if (!duplicated.has_value()) {
+        return;
+    }
+
+    const BrowseTabState *tab = browse_session_->tab(*duplicated);
+    if (tab == nullptr) {
+        return;
+    }
+    history_ = tab->history;
+    history_index_ = tab->history_index;
+    GFile *file = g_file_new_for_uri(tab->current_location().uri.c_str());
+    navigate_to(file, false);
+    g_object_unref(file);
+}
+
+void FileManagerWindow::reorder_active_tab(const int direction)
+{
+    if (!browse_session_.has_value() ||
+        !browse_session_->active_index().has_value() || direction == 0) {
+        return;
+    }
+
+    const std::size_t from = *browse_session_->active_index();
+    if ((direction < 0 && from == 0U) ||
+        (direction > 0 && from + 1U >= browse_session_->tabs().size())) {
+        return;
+    }
+
+    sync_active_tab_state();
+    const std::size_t to =
+        direction < 0 ? from - 1U : from + 1U;
+    if (browse_session_->reorder(from, to)) {
+        rebuild_tab_strip();
+    }
+}
+
 void FileManagerWindow::activate_tab(const std::size_t index)
 {
     if (!browse_session_.has_value() ||
@@ -1286,6 +1367,33 @@ void FileManagerWindow::on_reopen_closed_tab_action(GSimpleAction *action,
     (void)action;
     (void)parameter;
     static_cast<FileManagerWindow *>(user_data)->reopen_recently_closed_tab();
+}
+
+void FileManagerWindow::on_duplicate_tab_action(GSimpleAction *action,
+                                                GVariant *parameter,
+                                                gpointer user_data)
+{
+    (void)action;
+    (void)parameter;
+    static_cast<FileManagerWindow *>(user_data)->duplicate_active_tab();
+}
+
+void FileManagerWindow::on_move_tab_left_action(GSimpleAction *action,
+                                                GVariant *parameter,
+                                                gpointer user_data)
+{
+    (void)action;
+    (void)parameter;
+    static_cast<FileManagerWindow *>(user_data)->reorder_active_tab(-1);
+}
+
+void FileManagerWindow::on_move_tab_right_action(GSimpleAction *action,
+                                                 GVariant *parameter,
+                                                 gpointer user_data)
+{
+    (void)action;
+    (void)parameter;
+    static_cast<FileManagerWindow *>(user_data)->reorder_active_tab(1);
 }
 
 void FileManagerWindow::on_tab_clicked(GtkButton *button, gpointer user_data)
