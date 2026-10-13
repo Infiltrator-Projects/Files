@@ -33,6 +33,8 @@ public:
     explicit BrowseSessionState(Location initial, std::size_t closed_limit = 12);
 
     [[nodiscard]] const std::vector<BrowseTabState> &tabs() const noexcept { return tabs_; }
+    [[nodiscard]] BrowseTabState *tab(std::size_t index) noexcept;
+    [[nodiscard]] const BrowseTabState *tab(std::size_t index) const noexcept;
     [[nodiscard]] std::optional<std::size_t> active_index() const noexcept;
     [[nodiscard]] std::size_t closed_count() const noexcept { return closed_.size(); }
 
