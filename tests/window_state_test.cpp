@@ -180,6 +180,13 @@ int main()
         std::filesystem::create_directories(folder);
         std::ofstream(folder / "alpha.txt") << "a";
         std::ofstream(folder / "zeta.txt") << "zz";
+        // Use real scrollable content so context restoration is exercised
+        // against GTK's layout-owned adjustment bounds, not synthetic bounds
+        // that a later allocation is allowed to replace.
+        for (unsigned index = 0; index < 96; ++index) {
+            std::ofstream(folder / ("entry-" + std::to_string(index) + ".txt"))
+                << index;
+        }
         const MountedPlace outer_mount{"Outer", uri(outer), uri(outer), "outer", true};
         const MountedPlace inner_mount{"Inner", uri(inner), uri(inner), "inner", true};
         const MountedPlace alternate{"Alias", uri(folder), uri(inner), "inner", true};
@@ -268,7 +275,7 @@ int main()
 
         FileManagerWindowTestAccess::navigate(*window, folder);
         await([&] { return !gtk_directory_list_is_loading(FileManagerWindowTestAccess::directory(*window)); });
-        require(g_list_model_get_n_items(G_LIST_MODEL(FileManagerWindowTestAccess::directory(*window))) == 2,
+        require(g_list_model_get_n_items(G_LIST_MODEL(FileManagerWindowTestAccess::directory(*window))) == 98,
                 "Directory fixture must load");
 
         const guint window_count =
@@ -363,8 +370,14 @@ int main()
             FileManagerWindowTestAccess::scroll(*window);
         require(context_scroll != nullptr,
                 "Active presentation must expose a vertical adjustment");
-        gtk_adjustment_configure(context_scroll, 37.0, 0.0, 200.0,
-                                 1.0, 10.0, 20.0);
+        await([&] {
+            return gtk_adjustment_get_upper(context_scroll) -
+                       gtk_adjustment_get_page_size(context_scroll) >=
+                   37.0;
+        });
+        gtk_adjustment_set_value(context_scroll, 37.0);
+        require(gtk_adjustment_get_value(context_scroll) == 37.0,
+                "Scrollable fixture must accept the context position");
 
         const std::uint64_t superseded_generation =
             FileManagerWindowTestAccess::tab_load_generation(*window);
@@ -399,9 +412,13 @@ int main()
         require(gtk_selection_model_is_selected(
                     GTK_SELECTION_MODEL(context_selection), alpha_position),
                 "Switching back must restore the tab's multi-selection");
-        require(FileManagerWindowTestAccess::scroll(*window) != nullptr &&
-                    gtk_adjustment_get_value(
-                        FileManagerWindowTestAccess::scroll(*window)) == 37.0,
+        await([&] {
+            return FileManagerWindowTestAccess::scroll(*window) != nullptr &&
+                   gtk_adjustment_get_value(
+                       FileManagerWindowTestAccess::scroll(*window)) == 37.0;
+        });
+        require(gtk_adjustment_get_value(
+                    FileManagerWindowTestAccess::scroll(*window)) == 37.0,
                 "Switching back must restore the tab's scroll position");
 
         g_action_group_activate_action(
