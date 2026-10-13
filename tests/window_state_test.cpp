@@ -315,6 +315,20 @@ int main()
                 "Reordering must preserve the active tab browsing context");
         g_object_unref(reordered_root_file);
 
+        // The reorder assertions intentionally leave the duplicate at the
+        // fixture root. Restore the original folder tab before continuing
+        // with the pre-existing sorted-selection and mount-identity checks.
+        FileManagerWindowTestAccess::activate_tab(*window, 1U);
+        await([&] {
+            return !gtk_directory_list_is_loading(
+                FileManagerWindowTestAccess::directory(*window));
+        });
+        GFile *selection_folder_file = g_file_new_for_path(folder.c_str());
+        require(g_file_equal(FileManagerWindowTestAccess::current(*window),
+                             selection_folder_file),
+                "Selection checks must run against the original folder tab");
+        g_object_unref(selection_folder_file);
+
         GtkMultiSelection *selection = FileManagerWindowTestAccess::selection(*window);
         auto *presentation = GTK_SORT_LIST_MODEL(gtk_multi_selection_get_model(selection));
         GtkSorter *sorter = GTK_SORTER(gtk_custom_sorter_new(reverse_names, nullptr, nullptr));
