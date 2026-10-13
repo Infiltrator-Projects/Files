@@ -90,6 +90,15 @@ struct FileManagerWindowTestAccess {
                    ? window.browse_session_->tab(index)
                    : nullptr;
     }
+    static std::uint64_t tab_load_generation(const FileManagerWindow &window)
+    {
+        return window.tab_load_generation_;
+    }
+    static bool restore_tab_context(FileManagerWindow &window,
+                                    const std::uint64_t generation)
+    {
+        return window.restore_tab_context_if_current(generation);
+    }
     static void finish_launch(GObject *source, GAsyncResult *result, GtkLabel *status)
     {
         FileManagerWindow::on_launch_finished(source, result, status);
@@ -280,7 +289,12 @@ int main()
         gtk_adjustment_configure(context_scroll, 37.0, 0.0, 200.0,
                                  1.0, 10.0, 20.0);
 
+        const std::uint64_t superseded_generation =
+            FileManagerWindowTestAccess::tab_load_generation(*window);
         FileManagerWindowTestAccess::activate_tab(*window, 1U);
+        require(!FileManagerWindowTestAccess::restore_tab_context(
+                    *window, superseded_generation),
+                "A superseded tab load must not restore context into the active tab");
         await([&] {
             return !gtk_directory_list_is_loading(
                 FileManagerWindowTestAccess::directory(*window));
