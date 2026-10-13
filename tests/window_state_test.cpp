@@ -192,10 +192,11 @@ int main()
             require(gtk_widget_get_tooltip_text(button) != nullptr,
                     "Symbolic view controls must retain discoverable tooltips");
         }
-        GtkWidget *sidebar_scroll =
-            gtk_widget_get_parent(FileManagerWindowTestAccess::sidebar(*window));
-        GtkWidget *paned = gtk_widget_get_parent(sidebar_scroll);
-        require(GTK_IS_PANED(paned) &&
+        GtkWidget *paned = FileManagerWindowTestAccess::sidebar(*window);
+        while (paned != nullptr && !GTK_IS_PANED(paned)) {
+            paned = gtk_widget_get_parent(paned);
+        }
+        require(paned != nullptr &&
                     gtk_paned_get_shrink_start_child(GTK_PANED(paned)),
                 "Sidebar must yield space in narrow layouts");
 
