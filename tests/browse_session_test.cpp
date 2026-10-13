@@ -43,10 +43,12 @@ int main()
 
         require(session.reorder(2, 0) && session.active_index() == 0,
                 "Reordering must preserve active-tab identity");
-        session.tabs()[0].navigate_to(location("file:///documents/work"));
-        session.tabs()[0].selected_names = {"report.odt"};
-        session.tabs()[0].primary_selection = "report.odt";
-        session.tabs()[0].scroll_position = 72.0;
+        BrowseTabState *active = session.tab(0);
+        require(active != nullptr, "Active tab state must exist");
+        active->navigate_to(location("file:///documents/work"));
+        active->selected_names = {"report.odt"};
+        active->primary_selection = "report.odt";
+        active->scroll_position = 72.0;
 
         auto moved = session.take(0);
         require(moved.has_value() && session.tabs().size() == 2,
