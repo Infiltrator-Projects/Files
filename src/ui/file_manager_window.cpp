@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <sstream>
 #include <string>
+#include <utility>
 
 namespace infiltrator::files {
 
@@ -280,6 +281,18 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     gtk_application_set_accels_for_action(
         application, "win.move-tab-right", move_tab_right_accels);
 
+    GSimpleAction *move_tab_new_window_action =
+        g_simple_action_new("move-tab-new-window", nullptr);
+    g_signal_connect(move_tab_new_window_action, "activate",
+                     G_CALLBACK(on_move_tab_new_window_action), this);
+    g_action_map_add_action(
+        G_ACTION_MAP(window_), G_ACTION(move_tab_new_window_action));
+    g_object_unref(move_tab_new_window_action);
+    const char *move_tab_new_window_accels[] = {
+        "<Control><Shift>m", nullptr};
+    gtk_application_set_accels_for_action(
+        application, "win.move-tab-new-window", move_tab_new_window_accels);
+
     GtkWidget *header = gtk_header_bar_new();
     gtk_window_set_titlebar(GTK_WINDOW(window_), header);
 
@@ -343,6 +356,8 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     g_menu_append(window_menu, "Duplicate Current Tab", "win.duplicate-tab");
     g_menu_append(window_menu, "Move Current Tab Left", "win.move-tab-left");
     g_menu_append(window_menu, "Move Current Tab Right", "win.move-tab-right");
+    g_menu_append(window_menu, "Move Current Tab to New Window",
+                  "win.move-tab-new-window");
     GtkWidget *menu_button = gtk_menu_button_new();
     gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(menu_button),
                                   "open-menu-symbolic");
@@ -1261,6 +1276,67 @@ void FileManagerWindow::reorder_active_tab(const int direction)
     }
 }
 
+void FileManagerWindow::move_active_tab_to_new_window()
+{
+    if (!browse_session_.has_value() ||
+        !browse_session_->active_index().has_value()) {
+        return;
+    }
+
+    GtkApplication *application =
+        gtk_window_get_application(GTK_WINDOW(window_));
+    if (application == nullptr) {
+        return;
+    }
+
+    sync_active_tab_state();
+    const std::size_t index = *browse_session_->active_index();
+    std::optional<BrowseTabState> moved = browse_session_->take(index);
+    if (!moved.has_value()) {
+        return;
+    }
+
+    GFile *location =
+        g_file_new_for_uri(moved->current_location().uri.c_str());
+    FileManagerWindow *destination =
+        FileManagerWindow::open(application, location);
+    g_object_unref(location);
+    destination->adopt_transferred_tab(std::move(*moved));
+
+    if (!browse_session_->active_index().has_value()) {
+        gtk_window_close(GTK_WINDOW(window_));
+        return;
+    }
+
+    const BrowseTabState *survivor =
+        browse_session_->tab(*browse_session_->active_index());
+    if (survivor == nullptr) {
+        return;
+    }
+    history_ = survivor->history;
+    history_index_ = survivor->history_index;
+    GFile *file =
+        g_file_new_for_uri(survivor->current_location().uri.c_str());
+    navigate_to(file, false);
+    g_object_unref(file);
+}
+
+void FileManagerWindow::adopt_transferred_tab(BrowseTabState state)
+{
+    const Location location = state.current_location();
+    browse_session_.emplace(location);
+    BrowseTabState *tab = browse_session_->tab(0U);
+    if (tab == nullptr) {
+        return;
+    }
+    *tab = std::move(state);
+    history_ = tab->history;
+    history_index_ = tab->history_index;
+    GFile *file = g_file_new_for_uri(tab->current_location().uri.c_str());
+    navigate_to(file, false);
+    g_object_unref(file);
+}
+
 void FileManagerWindow::activate_tab(const std::size_t index)
 {
     if (!browse_session_.has_value() ||
@@ -1394,6 +1470,16 @@ void FileManagerWindow::on_move_tab_right_action(GSimpleAction *action,
     (void)action;
     (void)parameter;
     static_cast<FileManagerWindow *>(user_data)->reorder_active_tab(1);
+}
+
+void FileManagerWindow::on_move_tab_new_window_action(GSimpleAction *action,
+                                                      GVariant *parameter,
+                                                      gpointer user_data)
+{
+    (void)action;
+    (void)parameter;
+    static_cast<FileManagerWindow *>(user_data)
+        ->move_active_tab_to_new_window();
 }
 
 void FileManagerWindow::on_tab_clicked(GtkButton *button, gpointer user_data)
