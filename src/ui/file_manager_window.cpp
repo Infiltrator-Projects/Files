@@ -142,6 +142,11 @@ FileManagerWindow::FileManagerWindow(GtkApplication *application, GFile *initial
         navigate_to(home, true);
         g_object_unref(home);
     }
+
+    if (!history_.empty()) {
+        browse_session_.emplace(history_[history_index_]);
+        rebuild_tab_strip();
+    }
 }
 
 FileManagerWindow *FileManagerWindow::open(GtkApplication *application,
@@ -215,6 +220,15 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     gtk_application_set_accels_for_action(
         application, "win.new-window", new_window_accels);
 
+    GSimpleAction *new_tab_action = g_simple_action_new("new-tab", nullptr);
+    g_signal_connect(new_tab_action, "activate",
+                     G_CALLBACK(on_new_tab_action), this);
+    g_action_map_add_action(G_ACTION_MAP(window_), G_ACTION(new_tab_action));
+    g_object_unref(new_tab_action);
+    const char *new_tab_accels[] = {"<Control>t", nullptr};
+    gtk_application_set_accels_for_action(
+        application, "win.new-tab", new_tab_accels);
+
     GtkWidget *header = gtk_header_bar_new();
     gtk_window_set_titlebar(GTK_WINDOW(window_), header);
 
@@ -270,6 +284,8 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     GMenu *window_menu = g_menu_new();
     g_menu_append(window_menu, "Open Current Location in New Window",
                   "win.new-window");
+    g_menu_append(window_menu, "Open Current Location in New Tab",
+                  "win.new-tab");
     GtkWidget *menu_button = gtk_menu_button_new();
     gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(menu_button),
                                   "open-menu-symbolic");
@@ -286,6 +302,14 @@ void FileManagerWindow::build_ui(GtkApplication *application)
 
     GtkWidget *root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_window_set_child(GTK_WINDOW(window_), root);
+
+    tab_strip_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    gtk_widget_set_margin_start(tab_strip_, 8);
+    gtk_widget_set_margin_end(tab_strip_, 8);
+    gtk_widget_set_margin_top(tab_strip_, 4);
+    gtk_widget_set_margin_bottom(tab_strip_, 4);
+    gtk_widget_add_css_class(tab_strip_, "ifm-tab-strip");
+    gtk_box_append(GTK_BOX(root), tab_strip_);
 
     GtkWidget *paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_widget_set_vexpand(paned, TRUE);
@@ -476,6 +500,13 @@ void FileManagerWindow::apply_theme()
         << "; border-right: 1px solid " << colour_hex(palette->border_rgb) << "; }\n"
         << ".ifm-sidebar row { margin: 2px 6px; border-radius: " << metrics->control_radius << "px; }\n"
         << ".ifm-sidebar row:hover { background: " << colour_hex(palette->surface_hover_rgb) << "; }\n"
+        << ".ifm-tab-strip { background: " << colour_hex(palette->panel_rgb)
+        << "; border-bottom: 1px solid " << colour_hex(palette->border_rgb) << "; }\n"
+        << ".ifm-tab { padding: 4px 12px; border-radius: " << metrics->control_radius
+        << "px; color: " << colour_hex(palette->muted_rgb) << "; }\n"
+        << ".ifm-tab:hover { background: " << colour_hex(palette->surface_hover_rgb) << "; }\n"
+        << ".ifm-tab.selected { background: " << colour_hex(palette->selection_background_rgb)
+        << "; color: " << colour_hex(palette->selection_foreground_rgb) << "; }\n"
         << ".ifm-file-list, .ifm-icon-grid { background: " << colour_hex(palette->background_rgb) << "; }\n"
         << ".ifm-file-list row { border-radius: " << metrics->control_radius << "px; }\n"
         << ".ifm-file-list row:hover { background: " << colour_hex(palette->surface_hover_rgb) << "; }\n"
@@ -732,6 +763,8 @@ void FileManagerWindow::navigate_to(GFile *file, const bool record_history)
 
     g_free(uri_text);
     g_free(parse_name);
+    sync_active_tab_state();
+    rebuild_tab_strip();
     update_navigation_state();
     update_status();
 }
@@ -1048,6 +1081,98 @@ void FileManagerWindow::open_current_location_in_new_window()
     FileManagerWindow::open(application, current_location_);
 }
 
+void FileManagerWindow::open_current_location_in_new_tab()
+{
+    if (!browse_session_.has_value() || history_.empty() ||
+        history_index_ >= history_.size()) {
+        return;
+    }
+
+    sync_active_tab_state();
+    const std::size_t index =
+        browse_session_->open(history_[history_index_], true);
+    const BrowseTabState *tab = browse_session_->tab(index);
+    if (tab == nullptr) {
+        return;
+    }
+
+    history_ = tab->history;
+    history_index_ = tab->history_index;
+    GFile *file = g_file_new_for_uri(tab->current_location().uri.c_str());
+    navigate_to(file, false);
+    g_object_unref(file);
+}
+
+void FileManagerWindow::activate_tab(const std::size_t index)
+{
+    if (!browse_session_.has_value() ||
+        browse_session_->active_index() == index) {
+        return;
+    }
+
+    sync_active_tab_state();
+    if (!browse_session_->activate(index)) {
+        return;
+    }
+    const BrowseTabState *tab = browse_session_->tab(index);
+    if (tab == nullptr) {
+        return;
+    }
+
+    history_ = tab->history;
+    history_index_ = tab->history_index;
+    GFile *file = g_file_new_for_uri(tab->current_location().uri.c_str());
+    navigate_to(file, false);
+    g_object_unref(file);
+}
+
+void FileManagerWindow::sync_active_tab_state()
+{
+    if (!browse_session_.has_value() ||
+        !browse_session_->active_index().has_value()) {
+        return;
+    }
+    BrowseTabState *tab =
+        browse_session_->tab(*browse_session_->active_index());
+    if (tab == nullptr || history_.empty() ||
+        history_index_ >= history_.size()) {
+        return;
+    }
+    tab->history = history_;
+    tab->history_index = history_index_;
+}
+
+void FileManagerWindow::rebuild_tab_strip()
+{
+    if (tab_strip_ == nullptr || !browse_session_.has_value()) {
+        return;
+    }
+
+    while (GtkWidget *child = gtk_widget_get_first_child(tab_strip_)) {
+        gtk_box_remove(GTK_BOX(tab_strip_), child);
+    }
+
+    const std::optional<std::size_t> active =
+        browse_session_->active_index();
+    const auto &tabs = browse_session_->tabs();
+    for (std::size_t index = 0; index < tabs.size(); ++index) {
+        const Location &location = tabs[index].current_location();
+        const std::string label =
+            location.display_name.empty() ? "Tab" : location.display_name;
+        GtkWidget *button = gtk_button_new_with_label(label.c_str());
+        gtk_widget_add_css_class(button, "ifm-tab");
+        gtk_widget_set_tooltip_text(button, location.uri.c_str());
+        g_object_set_data(G_OBJECT(button), "ifm-tab-index",
+                          GUINT_TO_POINTER(static_cast<guint>(index + 1U)));
+        if (active.has_value() && *active == index) {
+            gtk_widget_add_css_class(button, "selected");
+        }
+        g_signal_connect(button, "clicked", G_CALLBACK(on_tab_clicked), this);
+        gtk_box_append(GTK_BOX(tab_strip_), button);
+    }
+    gtk_widget_set_visible(tab_strip_, tabs.size() > 1U);
+}
+
 void FileManagerWindow::on_new_window_action(GSimpleAction *action,
                                              GVariant *parameter,
                                              gpointer user_data)
@@ -1056,6 +1181,27 @@ void FileManagerWindow::on_new_window_action(GSimpleAction *action,
     (void)parameter;
     static_cast<FileManagerWindow *>(user_data)
         ->open_current_location_in_new_window();
+}
+
+void FileManagerWindow::on_new_tab_action(GSimpleAction *action,
+                                          GVariant *parameter,
+                                          gpointer user_data)
+{
+    (void)action;
+    (void)parameter;
+    static_cast<FileManagerWindow *>(user_data)
+        ->open_current_location_in_new_tab();
+}
+
+void FileManagerWindow::on_tab_clicked(GtkButton *button, gpointer user_data)
+{
+    const guint encoded = GPOINTER_TO_UINT(
+        g_object_get_data(G_OBJECT(button), "ifm-tab-index"));
+    if (encoded == 0U) {
+        return;
+    }
+    static_cast<FileManagerWindow *>(user_data)
+        ->activate_tab(static_cast<std::size_t>(encoded - 1U));
 }
 
 void FileManagerWindow::on_back_clicked(GtkButton *button, gpointer user_data)
