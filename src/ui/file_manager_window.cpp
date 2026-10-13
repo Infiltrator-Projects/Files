@@ -403,7 +403,19 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     gtk_widget_set_margin_top(tab_strip_, static_cast<int>(metrics->compact_spacing));
     gtk_widget_set_margin_bottom(tab_strip_, static_cast<int>(metrics->compact_spacing));
     gtk_widget_add_css_class(tab_strip_, "ifm-tab-strip");
-    gtk_box_append(GTK_BOX(root), tab_strip_);
+    gtk_accessible_update_property(
+        GTK_ACCESSIBLE(tab_strip_), GTK_ACCESSIBLE_PROPERTY_LABEL,
+        "Open locations", -1);
+
+    GtkWidget *tab_scroll = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(tab_scroll),
+                                   GTK_POLICY_AUTOMATIC, GTK_POLICY_NEVER);
+    gtk_scrolled_window_set_has_frame(GTK_SCROLLED_WINDOW(tab_scroll), FALSE);
+    gtk_scrolled_window_set_propagate_natural_width(
+        GTK_SCROLLED_WINDOW(tab_scroll), FALSE);
+    gtk_widget_set_hexpand(tab_scroll, TRUE);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(tab_scroll), tab_strip_);
+    gtk_box_append(GTK_BOX(root), tab_scroll);
 
     GtkWidget *paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_widget_set_vexpand(paned, TRUE);
@@ -1394,9 +1406,14 @@ void FileManagerWindow::load_tab_state(const BrowseTabState &tab)
         g_source_remove(tab_context_restore_source_id_);
         tab_context_restore_source_id_ = 0U;
     }
+    const std::optional<MountedPlace> unavailable_source =
+        tab.unavailable_mounted_place;
     GFile *file = g_file_new_for_uri(tab.current_location().uri.c_str());
     navigate_to(file, false);
     g_object_unref(file);
+    if (unavailable_source.has_value()) {
+        mark_current_location_unavailable(*unavailable_source);
+    }
 
     if (!gtk_directory_list_is_loading(directory_list_)) {
         schedule_tab_context_restore();
@@ -1537,6 +1554,7 @@ void FileManagerWindow::sync_active_tab_state()
     }
     tab->history = history_;
     tab->history_index = history_index_;
+    tab->unavailable_mounted_place = unavailable_mounted_place_;
     tab->selected_names.clear();
     tab->primary_selection.reset();
 
@@ -1591,18 +1609,39 @@ void FileManagerWindow::rebuild_tab_strip()
     const std::optional<std::size_t> active =
         browse_session_->active_index();
     const auto &tabs = browse_session_->tabs();
+    GtkToggleButton *group = nullptr;
     for (std::size_t index = 0; index < tabs.size(); ++index) {
         const Location &location = tabs[index].current_location();
         const std::string label =
             location.display_name.empty() ? "Tab" : location.display_name;
-        GtkWidget *button = gtk_button_new_with_label(label.c_str());
+        GtkWidget *button = gtk_toggle_button_new_with_label(label.c_str());
+        if (group == nullptr) {
+            group = GTK_TOGGLE_BUTTON(button);
+        } else {
+            gtk_toggle_button_set_group(GTK_TOGGLE_BUTTON(button), group);
+        }
+        GtkWidget *label_widget = gtk_button_get_child(GTK_BUTTON(button));
+        if (GTK_IS_LABEL(label_widget)) {
+            gtk_label_set_single_line_mode(GTK_LABEL(label_widget), TRUE);
+            gtk_label_set_ellipsize(GTK_LABEL(label_widget), PANGO_ELLIPSIZE_END);
+            gtk_label_set_max_width_chars(GTK_LABEL(label_widget), 24);
+        }
         gtk_widget_add_css_class(button, "ifm-tab");
         gtk_widget_set_tooltip_text(button, location.uri.c_str());
         g_object_set_data(G_OBJECT(button), "ifm-tab-index",
                           GUINT_TO_POINTER(static_cast<guint>(index + 1U)));
-        if (active.has_value() && *active == index) {
+        const bool selected = active.has_value() && *active == index;
+        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(button), selected);
+        if (selected) {
             gtk_widget_add_css_class(button, "selected");
         }
+        const std::string accessible_label =
+            "Location tab " + std::to_string(index + 1U) + " of " +
+            std::to_string(tabs.size()) + ": " + label +
+            (selected ? ", active" : "");
+        gtk_accessible_update_property(
+            GTK_ACCESSIBLE(button), GTK_ACCESSIBLE_PROPERTY_LABEL,
+            accessible_label.c_str(), -1);
         g_signal_connect(button, "clicked", G_CALLBACK(on_tab_clicked), this);
         gtk_box_append(GTK_BOX(tab_strip_), button);
     }

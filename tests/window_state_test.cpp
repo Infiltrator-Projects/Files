@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "../src/ui/file_manager_window.hpp"
+#include "../src/ui/theme_controller.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -58,6 +59,12 @@ struct FileManagerWindowTestAccess {
                 window.compact_view_button_};
     }
     static GtkWidget *sidebar(FileManagerWindow &window) { return window.sidebar_; }
+    static GtkWidget *tab_strip(FileManagerWindow &window) { return window.tab_strip_; }
+    static const std::optional<MountedPlace> &unavailable_source(
+        const FileManagerWindow &window)
+    {
+        return window.unavailable_mounted_place_;
+    }
     static FileManagerWindow *owner(GtkWindow *native)
     {
         return static_cast<FileManagerWindow *>(
@@ -115,6 +122,27 @@ struct FileManagerWindowTestAccess {
     static void finish_launch(GObject *source, GAsyncResult *result, GtkLabel *status)
     {
         FileManagerWindow::on_launch_finished(source, result, status);
+    }
+};
+
+struct ThemeControllerTestAccess {
+    static ThemeController *for_window(GtkWindow *window)
+    {
+        for (ThemeController *controller : ThemeController::controllers_) {
+            if (controller->window_ == window) {
+                return controller;
+            }
+        }
+        return nullptr;
+    }
+    static GtkWidget *mode_button(ThemeController &controller,
+                                  const InfiltratrThemeMode mode)
+    {
+        return controller.mode_buttons_[static_cast<std::size_t>(mode)];
+    }
+    static InfiltratrThemeMode mode(const ThemeController &controller)
+    {
+        return controller.mode_;
     }
 };
 
@@ -192,6 +220,7 @@ int main()
         const MountedPlace alternate{"Alias", uri(folder), uri(inner), "inner", true};
 
         auto *window = new FileManagerWindow(application);
+        new ThemeController(window->native_window());
 
         for (GtkWidget *button : FileManagerWindowTestAccess::view_buttons(*window)) {
             require(GTK_IS_IMAGE(gtk_button_get_child(GTK_BUTTON(button))),
@@ -299,6 +328,23 @@ int main()
         }
         require(spawned != nullptr,
                 "New-window action must create an owned Files window");
+        ThemeController *source_theme =
+            ThemeControllerTestAccess::for_window(window->native_window());
+        ThemeController *spawned_theme =
+            ThemeControllerTestAccess::for_window(spawned->native_window());
+        require(source_theme != nullptr && spawned_theme != nullptr,
+                "Every live window must participate in shared appearance state");
+        gtk_check_button_set_active(
+            GTK_CHECK_BUTTON(ThemeControllerTestAccess::mode_button(
+                *source_theme, INFILTRATR_THEME_NIGHT)), TRUE);
+        require(ThemeControllerTestAccess::mode(*source_theme) ==
+                    INFILTRATR_THEME_NIGHT &&
+                    ThemeControllerTestAccess::mode(*spawned_theme) ==
+                    INFILTRATR_THEME_NIGHT &&
+                    gtk_check_button_get_active(GTK_CHECK_BUTTON(
+                        ThemeControllerTestAccess::mode_button(
+                            *spawned_theme, INFILTRATR_THEME_NIGHT))),
+                "Changing appearance in one window must synchronize every live window");
         require(g_file_equal(FileManagerWindowTestAccess::current(*window),
                              FileManagerWindowTestAccess::current(*spawned)),
                 "New window must inherit the intended current location");
@@ -328,6 +374,26 @@ int main()
         });
         require(FileManagerWindowTestAccess::tab_count(*window) == 2U,
                 "New-tab action must add and activate an independent tab");
+        GtkWidget *tab_strip = FileManagerWindowTestAccess::tab_strip(*window);
+        require(GTK_IS_SCROLLED_WINDOW(gtk_widget_get_parent(tab_strip)),
+                "The tab strip must remain horizontally reachable at narrow widths");
+        guint active_tab_controls = 0U;
+        for (GtkWidget *tab_button = gtk_widget_get_first_child(tab_strip);
+             tab_button != nullptr;
+             tab_button = gtk_widget_get_next_sibling(tab_button)) {
+            require(GTK_IS_TOGGLE_BUTTON(tab_button),
+                    "Location tabs must expose an active toggle state");
+            active_tab_controls += gtk_toggle_button_get_active(
+                GTK_TOGGLE_BUTTON(tab_button)) ? 1U : 0U;
+            GtkWidget *tab_label = gtk_button_get_child(GTK_BUTTON(tab_button));
+            require(GTK_IS_LABEL(tab_label) &&
+                        gtk_label_get_max_width_chars(GTK_LABEL(tab_label)) == 24 &&
+                        gtk_label_get_ellipsize(GTK_LABEL(tab_label)) ==
+                            PANGO_ELLIPSIZE_END,
+                    "Tab labels must be bounded and ellipsized for narrow windows");
+        }
+        require(active_tab_controls == 1U,
+                "Exactly one location tab must expose the active state");
         FileManagerWindowTestAccess::navigate(*window, root);
         await([&] {
             return !gtk_directory_list_is_loading(
@@ -532,6 +598,22 @@ int main()
         replacement.mount_uuid = "different-device";
         FileManagerWindowTestAccess::mounts(*window, {outer_mount, replacement});
         require(!FileManagerWindowTestAccess::available(*window), "Same path with another UUID must not restore");
+        FileManagerWindowTestAccess::activate_tab(*window, 0U);
+        await([&] {
+            return !gtk_directory_list_is_loading(
+                FileManagerWindowTestAccess::directory(*window));
+        });
+        FileManagerWindowTestAccess::activate_tab(*window, 1U);
+        await([&] {
+            return gtk_directory_list_get_file(
+                       FileManagerWindowTestAccess::directory(*window)) == nullptr;
+        });
+        require(!FileManagerWindowTestAccess::available(*window) &&
+                    FileManagerWindowTestAccess::unavailable_source(*window)
+                        .has_value() &&
+                    FileManagerWindowTestAccess::unavailable_source(*window)
+                            ->mount_uuid == inner_mount.mount_uuid,
+                "Tab switching must preserve unavailable source identity");
         FileManagerWindowTestAccess::mounts(*window, {outer_mount, inner_mount});
         require(FileManagerWindowTestAccess::available(*window), "Matching source UUID must restore");
 

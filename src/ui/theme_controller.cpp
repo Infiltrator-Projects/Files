@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "theme_controller.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <sstream>
 #include <string>
 
 namespace infiltrator::files {
+
+std::vector<ThemeController *> ThemeController::controllers_{};
+bool ThemeController::synchronizing_{false};
 
 namespace {
 
@@ -61,6 +65,7 @@ ThemeController::ThemeController(GtkWindow *window)
             GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 1U);
     }
 
+    controllers_.push_back(this);
     install_picker();
     apply_theme();
     g_object_weak_ref(G_OBJECT(window_), &ThemeController::on_window_finalized, this);
@@ -68,6 +73,10 @@ ThemeController::ThemeController(GtkWindow *window)
 
 ThemeController::~ThemeController()
 {
+    controllers_.erase(
+        std::remove(controllers_.begin(), controllers_.end(), this),
+        controllers_.end());
+
     if (settings_ != nullptr) {
         if (theme_name_handler_ != 0U) {
             g_signal_handler_disconnect(settings_, theme_name_handler_);
@@ -232,21 +241,43 @@ void ThemeController::apply_theme()
 
 void ThemeController::set_mode(const InfiltratrThemeMode mode)
 {
-    if (mode_ == mode) {
-        update_picker();
+    apply_mode_to_all(mode);
+}
+
+void ThemeController::apply_mode_to_all(const InfiltratrThemeMode mode)
+{
+    if (synchronizing_) {
         return;
     }
 
-    mode_ = mode;
-    save_mode(mode_);
-    apply_theme();
-    update_picker();
+    synchronizing_ = true;
+    save_mode(mode);
+    // Theme CSS is display-global. Commit the mode to every live controller
+    // before updating any picker so toggled callbacks observe one authority
+    // and cannot recursively reintroduce a stale per-window mode.
+    for (ThemeController *controller : controllers_) {
+        controller->mode_ = mode;
+    }
+    for (ThemeController *controller : controllers_) {
+        controller->apply_theme();
+        controller->update_picker();
+    }
+    synchronizing_ = false;
 }
 
 void ThemeController::update_picker()
 {
     if (menu_button_ == nullptr) {
         return;
+    }
+
+    const auto active_index = static_cast<std::size_t>(mode_);
+    if (active_index < mode_buttons_.size() &&
+        mode_buttons_[active_index] != nullptr &&
+        !gtk_check_button_get_active(
+            GTK_CHECK_BUTTON(mode_buttons_[active_index]))) {
+        gtk_check_button_set_active(
+            GTK_CHECK_BUTTON(mode_buttons_[active_index]), TRUE);
     }
 
     std::string tooltip = "Appearance: ";

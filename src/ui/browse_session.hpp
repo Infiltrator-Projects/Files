@@ -2,6 +2,7 @@
 #pragma once
 
 #include "../core/location.hpp"
+#include "../core/mounted_places.hpp"
 
 #include <cstddef>
 #include <deque>
@@ -17,6 +18,10 @@ struct BrowseTabState {
     std::vector<std::string> selected_names;
     std::optional<std::string> primary_selection;
     double scroll_position{0.0};
+    // When a removable source disappears, retain its root/UUID proof with the
+    // tab so switching presentation contexts cannot silently re-authorize a
+    // different device that later appears at the same path.
+    std::optional<MountedPlace> unavailable_mounted_place;
 
     explicit BrowseTabState(Location initial);
 
