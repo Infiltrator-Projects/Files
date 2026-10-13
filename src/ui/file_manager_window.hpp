@@ -136,7 +136,10 @@ private:
     void move_active_tab_to_new_window();
     void adopt_transferred_tab(BrowseTabState state);
     void activate_tab(std::size_t index);
+    void load_tab_state(const BrowseTabState &tab);
     void sync_active_tab_state();
+    void restore_active_tab_context();
+    [[nodiscard]] GtkAdjustment *active_scroll_adjustment() const;
     void rebuild_tab_strip();
     void apply_theme();
     void add_sidebar_location(const char *title, const char *icon_name, const char *target);
@@ -187,6 +190,7 @@ private:
     ViewMode view_mode_{ViewMode::List};
     bool operation_surface_installed_{false};
     bool selection_syncing_{false};
+    bool pending_tab_context_restore_{false};
     bool current_location_available_{true};
     bool temporal_policy_monitoring_parent_{false};
     std::string temporal_policy_watch_name_;
