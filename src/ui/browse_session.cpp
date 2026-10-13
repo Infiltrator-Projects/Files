@@ -73,6 +73,16 @@ BrowseSessionState::BrowseSessionState(Location initial, const std::size_t close
     open(std::move(initial));
 }
 
+BrowseTabState *BrowseSessionState::tab(const std::size_t index) noexcept
+{
+    return index < tabs_.size() ? &tabs_[index] : nullptr;
+}
+
+const BrowseTabState *BrowseSessionState::tab(const std::size_t index) const noexcept
+{
+    return index < tabs_.size() ? &tabs_[index] : nullptr;
+}
+
 std::optional<std::size_t> BrowseSessionState::active_index() const noexcept
 {
     return active_index_;
