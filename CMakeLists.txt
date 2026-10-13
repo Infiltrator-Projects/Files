@@ -125,6 +125,7 @@ if(BUILD_TESTING)
     add_executable(window-state-test
         tests/window_state_test.cpp
         src/ui/batch_item_operation_controller.cpp
+        src/ui/browse_session.cpp
         src/ui/create_folder_controller.cpp
         src/ui/destructive_operation_controller.cpp
         src/ui/detail_metadata.cpp
