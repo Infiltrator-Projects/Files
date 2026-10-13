@@ -69,6 +69,12 @@ struct FileManagerWindowTestAccess {
                    ? window.browse_session_->closed_count()
                    : 0U;
     }
+    static std::optional<std::size_t> active_tab(const FileManagerWindow &window)
+    {
+        return window.browse_session_.has_value()
+                   ? window.browse_session_->active_index()
+                   : std::nullopt;
+    }
     static void activate_tab(FileManagerWindow &window, const std::size_t index)
     {
         window.activate_tab(index);
@@ -264,6 +270,50 @@ int main()
                              folder_file),
                 "Reopened tab must restore its browsing location");
         g_object_unref(folder_file);
+
+        g_action_group_activate_action(
+            G_ACTION_GROUP(window->native_window()), "duplicate-tab", nullptr);
+        await([&] {
+            return !gtk_directory_list_is_loading(
+                FileManagerWindowTestAccess::directory(*window));
+        });
+        require(FileManagerWindowTestAccess::tab_count(*window) == 3U &&
+                    FileManagerWindowTestAccess::active_tab(*window) == 2U,
+                "Duplicate action must insert and activate an adjacent tab");
+        FileManagerWindowTestAccess::navigate(*window, root);
+        await([&] {
+            return !gtk_directory_list_is_loading(
+                FileManagerWindowTestAccess::directory(*window));
+        });
+        FileManagerWindowTestAccess::activate_tab(*window, 1U);
+        await([&] {
+            return !gtk_directory_list_is_loading(
+                FileManagerWindowTestAccess::directory(*window));
+        });
+        GFile *original_folder_file = g_file_new_for_path(folder.c_str());
+        require(g_file_equal(FileManagerWindowTestAccess::current(*window),
+                             original_folder_file),
+                "Navigating a duplicate must not mutate the source tab");
+        g_object_unref(original_folder_file);
+
+        FileManagerWindowTestAccess::activate_tab(*window, 2U);
+        await([&] {
+            return !gtk_directory_list_is_loading(
+                FileManagerWindowTestAccess::directory(*window));
+        });
+        g_action_group_activate_action(
+            G_ACTION_GROUP(window->native_window()), "move-tab-left", nullptr);
+        require(FileManagerWindowTestAccess::active_tab(*window) == 1U,
+                "Move-left action must preserve active-tab identity");
+        g_action_group_activate_action(
+            G_ACTION_GROUP(window->native_window()), "move-tab-right", nullptr);
+        require(FileManagerWindowTestAccess::active_tab(*window) == 2U,
+                "Move-right action must restore the active tab position");
+        GFile *reordered_root_file = g_file_new_for_path(root.c_str());
+        require(g_file_equal(FileManagerWindowTestAccess::current(*window),
+                             reordered_root_file),
+                "Reordering must preserve the active tab browsing context");
+        g_object_unref(reordered_root_file);
 
         GtkMultiSelection *selection = FileManagerWindowTestAccess::selection(*window);
         auto *presentation = GTK_SORT_LIST_MODEL(gtk_multi_selection_get_model(selection));
