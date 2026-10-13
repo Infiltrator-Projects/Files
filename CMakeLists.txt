@@ -76,6 +76,7 @@ target_link_libraries(infiltrator-files-core PUBLIC
 add_executable(infiltrator-file-manager
     src/main.cpp
     src/ui/batch_item_operation_controller.cpp
+    src/ui/browse_session.cpp
     src/ui/create_folder_controller.cpp
     src/ui/destructive_operation_controller.cpp
     src/ui/detail_metadata.cpp
@@ -100,6 +101,12 @@ if(BUILD_TESTING)
     add_executable(location-model-test tests/location_model_test.cpp)
     target_link_libraries(location-model-test PRIVATE infiltrator-files-core)
     add_test(NAME location-model COMMAND location-model-test)
+
+    add_executable(browse-session-test
+        tests/browse_session_test.cpp
+        src/ui/browse_session.cpp)
+    target_link_libraries(browse-session-test PRIVATE infiltrator-files-core)
+    add_test(NAME browse-session COMMAND browse-session-test)
 
     add_executable(detail-metadata-test
         tests/detail_metadata_test.cpp
