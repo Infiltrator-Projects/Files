@@ -375,7 +375,11 @@ int main()
         require(FileManagerWindowTestAccess::tab_count(*window) == 2U,
                 "New-tab action must add and activate an independent tab");
         GtkWidget *tab_strip = FileManagerWindowTestAccess::tab_strip(*window);
-        require(GTK_IS_SCROLLED_WINDOW(gtk_widget_get_parent(tab_strip)),
+        GtkWidget *tab_scroll = gtk_widget_get_parent(tab_strip);
+        while (tab_scroll != nullptr && !GTK_IS_SCROLLED_WINDOW(tab_scroll)) {
+            tab_scroll = gtk_widget_get_parent(tab_scroll);
+        }
+        require(tab_scroll != nullptr,
                 "The tab strip must remain horizontally reachable at narrow widths");
         guint active_tab_controls = 0U;
         for (GtkWidget *tab_button = gtk_widget_get_first_child(tab_strip);
