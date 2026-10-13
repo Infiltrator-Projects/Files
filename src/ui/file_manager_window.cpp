@@ -229,6 +229,25 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     gtk_application_set_accels_for_action(
         application, "win.new-tab", new_tab_accels);
 
+    GSimpleAction *close_tab_action = g_simple_action_new("close-tab", nullptr);
+    g_signal_connect(close_tab_action, "activate",
+                     G_CALLBACK(on_close_tab_action), this);
+    g_action_map_add_action(G_ACTION_MAP(window_), G_ACTION(close_tab_action));
+    g_object_unref(close_tab_action);
+    const char *close_tab_accels[] = {"<Control>w", nullptr};
+    gtk_application_set_accels_for_action(
+        application, "win.close-tab", close_tab_accels);
+
+    GSimpleAction *reopen_tab_action =
+        g_simple_action_new("reopen-closed-tab", nullptr);
+    g_signal_connect(reopen_tab_action, "activate",
+                     G_CALLBACK(on_reopen_closed_tab_action), this);
+    g_action_map_add_action(G_ACTION_MAP(window_), G_ACTION(reopen_tab_action));
+    g_object_unref(reopen_tab_action);
+    const char *reopen_tab_accels[] = {"<Control><Shift>t", nullptr};
+    gtk_application_set_accels_for_action(
+        application, "win.reopen-closed-tab", reopen_tab_accels);
+
     GtkWidget *header = gtk_header_bar_new();
     gtk_window_set_titlebar(GTK_WINDOW(window_), header);
 
@@ -286,6 +305,9 @@ void FileManagerWindow::build_ui(GtkApplication *application)
                   "win.new-window");
     g_menu_append(window_menu, "Open Current Location in New Tab",
                   "win.new-tab");
+    g_menu_append(window_menu, "Close Current Tab", "win.close-tab");
+    g_menu_append(window_menu, "Reopen Recently Closed Tab",
+                  "win.reopen-closed-tab");
     GtkWidget *menu_button = gtk_menu_button_new();
     gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(menu_button),
                                   "open-menu-symbolic");
@@ -1103,6 +1125,61 @@ void FileManagerWindow::open_current_location_in_new_tab()
     g_object_unref(file);
 }
 
+void FileManagerWindow::close_active_tab()
+{
+    if (!browse_session_.has_value() ||
+        !browse_session_->active_index().has_value()) {
+        return;
+    }
+
+    if (browse_session_->tabs().size() == 1U) {
+        gtk_window_close(GTK_WINDOW(window_));
+        return;
+    }
+
+    sync_active_tab_state();
+    const std::size_t index = *browse_session_->active_index();
+    if (!browse_session_->close(index, true) ||
+        !browse_session_->active_index().has_value()) {
+        return;
+    }
+
+    const BrowseTabState *tab =
+        browse_session_->tab(*browse_session_->active_index());
+    if (tab == nullptr) {
+        return;
+    }
+    history_ = tab->history;
+    history_index_ = tab->history_index;
+    GFile *file = g_file_new_for_uri(tab->current_location().uri.c_str());
+    navigate_to(file, false);
+    g_object_unref(file);
+}
+
+void FileManagerWindow::reopen_recently_closed_tab()
+{
+    if (!browse_session_.has_value()) {
+        return;
+    }
+
+    sync_active_tab_state();
+    const std::optional<std::size_t> reopened =
+        browse_session_->reopen_closed(true);
+    if (!reopened.has_value()) {
+        return;
+    }
+
+    const BrowseTabState *tab = browse_session_->tab(*reopened);
+    if (tab == nullptr) {
+        return;
+    }
+    history_ = tab->history;
+    history_index_ = tab->history_index;
+    GFile *file = g_file_new_for_uri(tab->current_location().uri.c_str());
+    navigate_to(file, false);
+    g_object_unref(file);
+}
+
 void FileManagerWindow::activate_tab(const std::size_t index)
 {
     if (!browse_session_.has_value() ||
@@ -1191,6 +1268,24 @@ void FileManagerWindow::on_new_tab_action(GSimpleAction *action,
     (void)parameter;
     static_cast<FileManagerWindow *>(user_data)
         ->open_current_location_in_new_tab();
+}
+
+void FileManagerWindow::on_close_tab_action(GSimpleAction *action,
+                                            GVariant *parameter,
+                                            gpointer user_data)
+{
+    (void)action;
+    (void)parameter;
+    static_cast<FileManagerWindow *>(user_data)->close_active_tab();
+}
+
+void FileManagerWindow::on_reopen_closed_tab_action(GSimpleAction *action,
+                                                    GVariant *parameter,
+                                                    gpointer user_data)
+{
+    (void)action;
+    (void)parameter;
+    static_cast<FileManagerWindow *>(user_data)->reopen_recently_closed_tab();
 }
 
 void FileManagerWindow::on_tab_clicked(GtkButton *button, gpointer user_data)
