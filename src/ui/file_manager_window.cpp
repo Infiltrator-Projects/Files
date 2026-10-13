@@ -1985,7 +1985,7 @@ void FileManagerWindow::on_loading_changed(GObject *object, GParamSpec *pspec, g
 gboolean FileManagerWindow::on_tab_context_restore_idle(gpointer user_data)
 {
     auto *dispatch = static_cast<TabContextRestoreDispatch *>(user_data);
-    GObject *window = g_weak_ref_get(&dispatch->window);
+    auto *window = static_cast<GObject *>(g_weak_ref_get(&dispatch->window));
     if (window == nullptr) {
         return G_SOURCE_REMOVE;
     }
