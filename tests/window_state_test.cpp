@@ -5,6 +5,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <set>
 #include <stdexcept>
 
 namespace infiltrator::files {
@@ -99,6 +100,12 @@ struct FileManagerWindowTestAccess {
     {
         return window.restore_tab_context_if_current(generation);
     }
+    static guint queue_tab_context_restore(FileManagerWindow &window)
+    {
+        window.pending_tab_context_restore_ = true;
+        window.schedule_tab_context_restore();
+        return window.tab_context_restore_source_id_;
+    }
     static void finish_launch(GObject *source, GAsyncResult *result, GtkLabel *status)
     {
         FileManagerWindow::on_launch_finished(source, result, status);
@@ -172,6 +179,37 @@ int main()
         const MountedPlace alternate{"Alias", uri(folder), uri(inner), "inner", true};
 
         auto *window = new FileManagerWindow(application);
+
+        struct SessionShortcut {
+            const char *action;
+            const char *accelerator;
+        };
+        const SessionShortcut session_shortcuts[] = {
+            {"win.new-window", "<Control>n"},
+            {"win.new-tab", "<Control>t"},
+            {"win.close-tab", "<Control>w"},
+            {"win.reopen-closed-tab", "<Control><Shift>t"},
+            {"win.duplicate-tab", "<Control><Shift>d"},
+            {"win.move-tab-left", "<Control><Shift>Page_Up"},
+            {"win.move-tab-right", "<Control><Shift>Page_Down"},
+            {"win.move-tab-new-window", "<Control><Shift>m"},
+        };
+        std::set<std::string> distinct_shortcuts;
+        for (const auto &shortcut : session_shortcuts) {
+            char **configured =
+                gtk_application_get_accels_for_action(application, shortcut.action);
+            require(configured != nullptr && configured[0] != nullptr &&
+                        configured[1] == nullptr,
+                    "Each session action must expose exactly one accelerator");
+            require(g_strcmp0(configured[0], shortcut.accelerator) == 0,
+                    "Session action accelerator must match the documented map");
+            require(distinct_shortcuts.insert(configured[0]).second,
+                    "Session accelerators must not collide");
+            require(g_strcmp0(configured[0], "<Control><Shift>n") != 0,
+                    "Session accelerators must preserve Ctrl+Shift+N for New Folder");
+            g_strfreev(configured);
+        }
+
         FileManagerWindowTestAccess::mounts(*window, {outer_mount, inner_mount, alternate});
         require(FileManagerWindowTestAccess::row_count(*window) == 3, "Mount targets must own distinct rows");
         GtkWidget *inner_row = FileManagerWindowTestAccess::row(*window, inner_mount.uri);
@@ -515,8 +553,17 @@ int main()
                 FileManagerWindowTestAccess::finish_launch(source, result, pending->status);
                 pending->complete = true;
             }, &completion);
+        const guint pending_restore_source =
+            FileManagerWindowTestAccess::queue_tab_context_restore(*window);
+        require(pending_restore_source != 0U &&
+                    g_main_context_find_source_by_id(nullptr,
+                                                     pending_restore_source) != nullptr,
+                "Destruction test must begin with a pending tab-context callback");
         gtk_window_destroy(window->native_window());
         await([&] { return finalized && completion.complete; });
+        require(g_main_context_find_source_by_id(nullptr,
+                                                 pending_restore_source) == nullptr,
+                "Window destruction must cancel its pending tab-context callback");
         gtk_single_selection_set_selected(primary, 0);
         gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection));
         GFile *reload = g_file_new_for_path(folder.c_str());
