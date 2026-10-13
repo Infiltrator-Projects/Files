@@ -110,6 +110,8 @@ private:
                                          GtkListItem *item,
                                          gpointer user_data);
     static void on_loading_changed(GObject *object, GParamSpec *pspec, gpointer user_data);
+    static gboolean on_tab_context_restore_idle(gpointer user_data);
+    static void free_tab_context_restore_dispatch(gpointer user_data);
     static void on_launch_finished(GObject *source, GAsyncResult *result, gpointer user_data);
     static void on_multi_selection_changed(GtkSelectionModel *model,
                                            guint position,
@@ -139,6 +141,8 @@ private:
     void load_tab_state(const BrowseTabState &tab);
     void sync_active_tab_state();
     void restore_active_tab_context();
+    void schedule_tab_context_restore();
+    [[nodiscard]] bool restore_tab_context_if_current(std::uint64_t generation);
     [[nodiscard]] GtkAdjustment *active_scroll_adjustment() const;
     void rebuild_tab_strip();
     void apply_theme();
@@ -191,6 +195,9 @@ private:
     bool operation_surface_installed_{false};
     bool selection_syncing_{false};
     bool pending_tab_context_restore_{false};
+    guint tab_context_restore_source_id_{0};
+    std::uint64_t tab_load_generation_{0};
+    std::string pending_tab_context_uri_;
     bool current_location_available_{true};
     bool temporal_policy_monitoring_parent_{false};
     std::string temporal_policy_watch_name_;
