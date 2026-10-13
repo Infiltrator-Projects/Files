@@ -65,6 +65,10 @@ It currently provides:
 - Home, Desktop, Documents, Downloads, Computer and Trash entry points;
 - live mounted local/removable places discovered through GIO, with shadowed implementation mounts excluded and each place opening at GIO's user-facing default location;
 - mounted-place availability tracking that distinguishes the most-specific supplying mount for nested mounts, reports a neutral unavailable state when that source disappears and only auto-restores the current view when GIO provides matching root-and-UUID evidence;
+- independent windows and an “Open Current Location in New Window” workflow;
+- current-session tabs with independent location, navigation history, selection and scroll context, plus open, close, reorder, duplicate, move-to-window and reopen-recently-closed actions;
+- a bounded recently closed-tab stack for the live session; normal-restart and crash restoration remain future work;
+- a reduced symbolic/Common shell whose sidebar yields content space at narrow widths;
 - Back, Forward and Up navigation;
 - an editable location field accepting paths and URIs;
 - asynchronous, monitored directory enumeration through GTK/GIO;

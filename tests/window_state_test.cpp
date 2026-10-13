@@ -52,6 +52,12 @@ struct FileManagerWindowTestAccess {
         return window.temporal_policy_watch_name_;
     }
     static GtkLabel *status(FileManagerWindow &window) { return GTK_LABEL(window.status_label_); }
+    static std::array<GtkWidget *, 3> view_buttons(FileManagerWindow &window)
+    {
+        return {window.list_view_button_, window.icon_view_button_,
+                window.compact_view_button_};
+    }
+    static GtkWidget *sidebar(FileManagerWindow &window) { return window.sidebar_; }
     static FileManagerWindow *owner(GtkWindow *native)
     {
         return static_cast<FileManagerWindow *>(
@@ -179,6 +185,20 @@ int main()
         const MountedPlace alternate{"Alias", uri(folder), uri(inner), "inner", true};
 
         auto *window = new FileManagerWindow(application);
+
+        for (GtkWidget *button : FileManagerWindowTestAccess::view_buttons(*window)) {
+            require(GTK_IS_IMAGE(gtk_button_get_child(GTK_BUTTON(button))),
+                    "View switcher controls must use symbolic images");
+            require(gtk_widget_get_tooltip_text(button) != nullptr,
+                    "Symbolic view controls must retain discoverable tooltips");
+        }
+        GtkWidget *sidebar_scroll =
+            gtk_widget_get_parent(FileManagerWindowTestAccess::sidebar(*window));
+        GtkWidget *paned = gtk_widget_get_parent(sidebar_scroll);
+        require(GTK_IS_PANED(paned) &&
+                    gtk_paned_get_shrink_start_child(GTK_PANED(paned)),
+                "Sidebar must yield space in narrow layouts");
+
 
         struct SessionShortcut {
             const char *action;

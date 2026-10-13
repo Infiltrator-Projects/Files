@@ -50,11 +50,9 @@ std::string colour_hex(const std::uint32_t rgb)
 
 GtkWidget *make_sidebar_content(const char *title, const char *icon_name)
 {
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
-    gtk_widget_set_margin_start(box, 10);
-    gtk_widget_set_margin_end(box, 10);
-    gtk_widget_set_margin_top(box, 7);
-    gtk_widget_set_margin_bottom(box, 7);
+    const auto *metrics = infiltratr_design_metrics();
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, metrics->control_spacing);
+    gtk_widget_add_css_class(box, "ifm-sidebar-content");
 
     GtkWidget *icon = gtk_image_new_from_icon_name(icon_name);
     gtk_image_set_pixel_size(GTK_IMAGE(icon), 18);
@@ -329,12 +327,26 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     gtk_widget_add_css_class(view_switcher, "linked");
     gtk_widget_add_css_class(view_switcher, "ifm-view-switcher");
 
-    list_view_button_ = gtk_toggle_button_new_with_label("List");
-    icon_view_button_ = gtk_toggle_button_new_with_label("Icons");
-    compact_view_button_ = gtk_toggle_button_new_with_label("Compact");
-    gtk_widget_set_tooltip_text(list_view_button_, "Detail / list view");
-    gtk_widget_set_tooltip_text(icon_view_button_, "Visual / icon view");
-    gtk_widget_set_tooltip_text(compact_view_button_, "Compact dense-scan view");
+    const auto make_view_button = [](const char *icon_name,
+                                     const char *accessible_label,
+                                     const char *tooltip) {
+        GtkWidget *button = gtk_toggle_button_new();
+        GtkWidget *icon = gtk_image_new_from_icon_name(icon_name);
+        gtk_button_set_child(GTK_BUTTON(button), icon);
+        gtk_accessible_update_property(GTK_ACCESSIBLE(button),
+                                       GTK_ACCESSIBLE_PROPERTY_LABEL,
+                                       accessible_label,
+                                       -1);
+        gtk_widget_set_tooltip_text(button, tooltip);
+        return button;
+    };
+
+    list_view_button_ = make_view_button(
+        "view-list-symbolic", "Detail view", "Detail / list view");
+    icon_view_button_ = make_view_button(
+        "view-grid-symbolic", "Visual view", "Visual / icon view");
+    compact_view_button_ = make_view_button(
+        "view-more-symbolic", "Compact view", "Compact dense-scan view");
 
     gtk_toggle_button_set_group(GTK_TOGGLE_BUTTON(icon_view_button_),
                                 GTK_TOGGLE_BUTTON(list_view_button_));
@@ -384,11 +396,12 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     GtkWidget *root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_window_set_child(GTK_WINDOW(window_), root);
 
-    tab_strip_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
-    gtk_widget_set_margin_start(tab_strip_, 8);
-    gtk_widget_set_margin_end(tab_strip_, 8);
-    gtk_widget_set_margin_top(tab_strip_, 4);
-    gtk_widget_set_margin_bottom(tab_strip_, 4);
+    const auto *metrics = infiltratr_design_metrics();
+    tab_strip_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, metrics->compact_spacing);
+    gtk_widget_set_margin_start(tab_strip_, metrics->control_spacing);
+    gtk_widget_set_margin_end(tab_strip_, metrics->control_spacing);
+    gtk_widget_set_margin_top(tab_strip_, metrics->compact_spacing);
+    gtk_widget_set_margin_bottom(tab_strip_, metrics->compact_spacing);
     gtk_widget_add_css_class(tab_strip_, "ifm-tab-strip");
     gtk_box_append(GTK_BOX(root), tab_strip_);
 
@@ -398,7 +411,9 @@ void FileManagerWindow::build_ui(GtkApplication *application)
 
     sidebar_ = gtk_list_box_new();
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(sidebar_), GTK_SELECTION_NONE);
-    gtk_widget_set_size_request(sidebar_, 220, -1);
+    // Preserve useful labels at ordinary widths while allowing the content
+    // pane to win space in narrow and split-screen layouts.
+    gtk_widget_set_size_request(sidebar_, 168, -1);
     gtk_widget_add_css_class(sidebar_, "ifm-sidebar");
 
     GtkWidget *sidebar_scroll = gtk_scrolled_window_new();
@@ -406,9 +421,9 @@ void FileManagerWindow::build_ui(GtkApplication *application)
                                    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(sidebar_scroll), sidebar_);
     gtk_paned_set_start_child(GTK_PANED(paned), sidebar_scroll);
-    gtk_paned_set_position(GTK_PANED(paned), 220);
+    gtk_paned_set_position(GTK_PANED(paned), 208);
     gtk_paned_set_resize_start_child(GTK_PANED(paned), FALSE);
-    gtk_paned_set_shrink_start_child(GTK_PANED(paned), FALSE);
+    gtk_paned_set_shrink_start_child(GTK_PANED(paned), TRUE);
 
     add_sidebar_location("Home", "user-home-symbolic", g_get_home_dir());
     if (const char *desktop = g_get_user_special_dir(G_USER_DIRECTORY_DESKTOP); desktop != nullptr) {
@@ -579,15 +594,27 @@ void FileManagerWindow::apply_theme()
         << "; border-bottom: 1px solid " << colour_hex(palette->border_rgb) << "; }\n"
         << ".ifm-sidebar { background: " << colour_hex(palette->panel_rgb)
         << "; border-right: 1px solid " << colour_hex(palette->border_rgb) << "; }\n"
-        << ".ifm-sidebar row { margin: 2px 6px; border-radius: " << metrics->control_radius << "px; }\n"
+        << ".ifm-sidebar-content { padding: " << metrics->compact_spacing << "px "
+        << metrics->control_spacing << "px; }\n"
+        << ".ifm-sidebar row { margin: " << metrics->compact_spacing << "px "
+        << metrics->control_spacing << "px; border-radius: " << metrics->control_radius << "px; }\n"
         << ".ifm-sidebar row:hover { background: " << colour_hex(palette->surface_hover_rgb) << "; }\n"
         << ".ifm-tab-strip { background: " << colour_hex(palette->panel_rgb)
         << "; border-bottom: 1px solid " << colour_hex(palette->border_rgb) << "; }\n"
-        << ".ifm-tab { padding: 4px 12px; border-radius: " << metrics->control_radius
+        << ".ifm-view-switcher button { min-width: " << metrics->control_height << "px; "
+        << "min-height: " << metrics->control_height << "px; padding: 0; }\n"
+        << ".ifm-tab { padding: " << metrics->compact_spacing << "px "
+        << metrics->section_spacing << "px; border-radius: " << metrics->control_radius
         << "px; color: " << colour_hex(palette->muted_rgb) << "; }\n"
         << ".ifm-tab:hover { background: " << colour_hex(palette->surface_hover_rgb) << "; }\n"
         << ".ifm-tab.selected { background: " << colour_hex(palette->selection_background_rgb)
-        << "; color: " << colour_hex(palette->selection_foreground_rgb) << "; }\n"
+        << "; color: " << colour_hex(palette->selection_foreground_rgb)
+        << "; font-weight: " << INFILTRATR_WEIGHT_BOLD << "; }\n"
+        << ".ifm-view-switcher button:focus-visible, .ifm-tab:focus-visible, "
+        << ".ifm-sidebar row:focus-visible, .ifm-file-list row:focus-visible, "
+        << ".ifm-icon-tile:focus-visible { outline: 2px solid "
+        << colour_hex(palette->neutral_accent_rgb)
+        << "; outline-offset: 2px; }\n"
         << ".ifm-file-list, .ifm-icon-grid { background: " << colour_hex(palette->background_rgb) << "; }\n"
         << ".ifm-file-list row { border-radius: " << metrics->control_radius << "px; }\n"
         << ".ifm-file-list row:hover { background: " << colour_hex(palette->surface_hover_rgb) << "; }\n"
