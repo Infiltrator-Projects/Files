@@ -368,6 +368,48 @@ int main()
         std::filesystem::create_directories(config / "infiltrator");
         await([&] { return FileManagerWindowTestAccess::watching_policy(*window); });
 
+        const guint before_move_window_count =
+            g_list_length(gtk_application_get_windows(application));
+        g_action_group_activate_action(
+            G_ACTION_GROUP(window->native_window()),
+            "move-tab-new-window", nullptr);
+        await([&] {
+            return g_list_length(gtk_application_get_windows(application)) ==
+                   before_move_window_count + 1U;
+        });
+        FileManagerWindow *moved_window = nullptr;
+        for (GList *node = gtk_application_get_windows(application);
+             node != nullptr; node = node->next) {
+            if (node->data != window->native_window()) {
+                moved_window = FileManagerWindowTestAccess::owner(
+                    GTK_WINDOW(node->data));
+                if (moved_window != nullptr) {
+                    break;
+                }
+            }
+        }
+        require(moved_window != nullptr,
+                "Move-to-new-window must create one owned destination window");
+        require(FileManagerWindowTestAccess::tab_count(*window) == 2U &&
+                    FileManagerWindowTestAccess::tab_count(*moved_window) == 1U,
+                "Moving must transfer one tab to exactly one window");
+        GFile *moved_folder_file = g_file_new_for_path(folder.c_str());
+        require(g_file_equal(
+                    FileManagerWindowTestAccess::current(*moved_window),
+                    moved_folder_file),
+                "Moved tab must preserve its browsing location");
+        g_object_unref(moved_folder_file);
+        GFile *surviving_root_file = g_file_new_for_path(root.c_str());
+        require(g_file_equal(FileManagerWindowTestAccess::current(*window),
+                             surviving_root_file),
+                "Source window must activate its deterministic surviving tab");
+        g_object_unref(surviving_root_file);
+        gtk_window_destroy(moved_window->native_window());
+        await([&] {
+            return g_list_length(gtk_application_get_windows(application)) ==
+                   before_move_window_count;
+        });
+
         // Keep external model references after the window is destroyed. No
         // model callback may retain the deleted C++ window as user_data.
         g_object_ref(selection);
