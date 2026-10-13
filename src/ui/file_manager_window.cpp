@@ -16,6 +16,11 @@ namespace infiltrator::files {
 
 namespace {
 
+struct TabContextRestoreDispatch {
+    GWeakRef window;
+    std::uint64_t generation{0};
+};
+
 constexpr const char *kDirectoryAttributes =
     "standard::name,standard::display-name,standard::type,standard::size,"
     "standard::content-type,standard::icon,standard::is-hidden,standard::is-symlink,"
@@ -164,6 +169,10 @@ FileManagerWindow::~FileManagerWindow()
 {
     // Stop external callbacks before any UI/model references owned by this object are released.
     mounted_places_monitor_.reset();
+    if (tab_context_restore_source_id_ != 0U) {
+        g_source_remove(tab_context_restore_source_id_);
+        tab_context_restore_source_id_ = 0U;
+    }
     if (temporal_policy_monitor_ != nullptr) {
         g_signal_handlers_disconnect_by_data(temporal_policy_monitor_, this);
         g_object_unref(temporal_policy_monitor_);
@@ -806,6 +815,20 @@ void FileManagerWindow::navigate_to(GFile *file, const bool record_history)
 
     Location location{uri_text, parse_name, classify_location_uri(uri_text)};
 
+    // A user navigation that overtakes a pending tab load must invalidate its
+    // deferred context restore. The tab-loading path pre-registers the same URI,
+    // so its own navigate_to() call remains qualified.
+    if (pending_tab_context_restore_ &&
+        pending_tab_context_uri_ != location.uri) {
+        ++tab_load_generation_;
+        pending_tab_context_restore_ = false;
+        pending_tab_context_uri_.clear();
+        if (tab_context_restore_source_id_ != 0U) {
+            g_source_remove(tab_context_restore_source_id_);
+            tab_context_restore_source_id_ = 0U;
+        }
+    }
+
     if (record_history) {
         const bool duplicate_current = !history_.empty() && history_index_ < history_.size() &&
                                        history_[history_index_].uri == location.uri;
@@ -1337,15 +1360,66 @@ void FileManagerWindow::load_tab_state(const BrowseTabState &tab)
 {
     history_ = tab.history;
     history_index_ = tab.history_index;
+    ++tab_load_generation_;
     pending_tab_context_restore_ = true;
+    pending_tab_context_uri_ = tab.current_location().uri;
+    if (tab_context_restore_source_id_ != 0U) {
+        g_source_remove(tab_context_restore_source_id_);
+        tab_context_restore_source_id_ = 0U;
+    }
     GFile *file = g_file_new_for_uri(tab.current_location().uri.c_str());
     navigate_to(file, false);
     g_object_unref(file);
 
     if (!gtk_directory_list_is_loading(directory_list_)) {
-        restore_active_tab_context();
-        pending_tab_context_restore_ = false;
+        schedule_tab_context_restore();
     }
+}
+
+void FileManagerWindow::schedule_tab_context_restore()
+{
+    if (!pending_tab_context_restore_ ||
+        tab_context_restore_source_id_ != 0U) {
+        return;
+    }
+
+    auto *dispatch = new TabContextRestoreDispatch{};
+    g_weak_ref_init(&dispatch->window, G_OBJECT(window_));
+    dispatch->generation = tab_load_generation_;
+    tab_context_restore_source_id_ = g_idle_add_full(
+        G_PRIORITY_DEFAULT_IDLE,
+        &FileManagerWindow::on_tab_context_restore_idle,
+        dispatch,
+        &FileManagerWindow::free_tab_context_restore_dispatch);
+}
+
+bool FileManagerWindow::restore_tab_context_if_current(
+    const std::uint64_t generation)
+{
+    if (!pending_tab_context_restore_ || generation != tab_load_generation_ ||
+        gtk_directory_list_is_loading(directory_list_) ||
+        !browse_session_.has_value() ||
+        !browse_session_->active_index().has_value()) {
+        return false;
+    }
+
+    const BrowseTabState *tab =
+        browse_session_->tab(*browse_session_->active_index());
+    GFile *loaded_file = gtk_directory_list_get_file(directory_list_);
+    char *loaded_uri = loaded_file == nullptr ? nullptr : g_file_get_uri(loaded_file);
+    const bool location_matches =
+        tab != nullptr && loaded_uri != nullptr &&
+        tab->current_location().uri == pending_tab_context_uri_ &&
+        pending_tab_context_uri_ == loaded_uri;
+    g_free(loaded_uri);
+    if (!location_matches) {
+        return false;
+    }
+
+    restore_active_tab_context();
+    pending_tab_context_restore_ = false;
+    pending_tab_context_uri_.clear();
+    return true;
 }
 
 GtkAdjustment *FileManagerWindow::active_scroll_adjustment() const
@@ -1904,9 +1978,33 @@ void FileManagerWindow::on_loading_changed(GObject *object, GParamSpec *pspec, g
     self->update_status();
     if (self->pending_tab_context_restore_ &&
         !gtk_directory_list_is_loading(self->directory_list_)) {
-        self->restore_active_tab_context();
-        self->pending_tab_context_restore_ = false;
+        self->schedule_tab_context_restore();
     }
+}
+
+gboolean FileManagerWindow::on_tab_context_restore_idle(gpointer user_data)
+{
+    auto *dispatch = static_cast<TabContextRestoreDispatch *>(user_data);
+    GObject *window = g_weak_ref_get(&dispatch->window);
+    if (window == nullptr) {
+        return G_SOURCE_REMOVE;
+    }
+
+    auto *self = static_cast<FileManagerWindow *>(
+        g_object_get_data(window, "ifm-window-owner"));
+    if (self != nullptr) {
+        self->tab_context_restore_source_id_ = 0U;
+        (void)self->restore_tab_context_if_current(dispatch->generation);
+    }
+    g_object_unref(window);
+    return G_SOURCE_REMOVE;
+}
+
+void FileManagerWindow::free_tab_context_restore_dispatch(gpointer user_data)
+{
+    auto *dispatch = static_cast<TabContextRestoreDispatch *>(user_data);
+    g_weak_ref_clear(&dispatch->window);
+    delete dispatch;
 }
 
 void FileManagerWindow::on_launch_finished(GObject *source, GAsyncResult *result, gpointer user_data)
