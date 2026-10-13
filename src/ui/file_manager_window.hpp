@@ -23,8 +23,11 @@ namespace infiltrator::files {
 
 class FileManagerWindow final {
 public:
-    explicit FileManagerWindow(GtkApplication *application);
+    explicit FileManagerWindow(GtkApplication *application, GFile *initial_location = nullptr);
     ~FileManagerWindow();
+
+    static FileManagerWindow *open(GtkApplication *application,
+                                   GFile *initial_location = nullptr);
 
     FileManagerWindow(const FileManagerWindow &) = delete;
     FileManagerWindow &operator=(const FileManagerWindow &) = delete;
@@ -58,6 +61,9 @@ private:
     };
 
     static void on_window_finalized(gpointer user_data, GObject *where_object_was);
+    static void on_new_window_action(GSimpleAction *action,
+                                     GVariant *parameter,
+                                     gpointer user_data);
     static void on_back_clicked(GtkButton *button, gpointer user_data);
     static void on_forward_clicked(GtkButton *button, gpointer user_data);
     static void on_up_clicked(GtkButton *button, gpointer user_data);
@@ -98,6 +104,7 @@ private:
                                            GObject *where_object_was);
 
     void build_ui(GtkApplication *application);
+    void open_current_location_in_new_window();
     void apply_theme();
     void add_sidebar_location(const char *title, const char *icon_name, const char *target);
     void refresh_mounted_places();

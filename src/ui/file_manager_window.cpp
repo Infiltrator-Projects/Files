@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "file_manager_window.hpp"
 #include "detail_metadata.hpp"
+#include "theme_controller.hpp"
 
 #include <infiltratr/design.h>
 #include <infiltratr/temporal_posix.h>
@@ -125,17 +126,32 @@ guint find_item_position(GListModel *model, GFileInfo *needle)
 
 } // namespace
 
-FileManagerWindow::FileManagerWindow(GtkApplication *application)
+FileManagerWindow::FileManagerWindow(GtkApplication *application, GFile *initial_location)
 {
     build_ui(application);
     apply_theme();
     arm_temporal_policy_monitor();
 
+    g_object_set_data(G_OBJECT(window_), "ifm-window-owner", this);
     g_object_weak_ref(G_OBJECT(window_), &FileManagerWindow::on_window_finalized, this);
 
-    GFile *home = g_file_new_for_path(g_get_home_dir());
-    navigate_to(home, true);
-    g_object_unref(home);
+    if (initial_location != nullptr) {
+        navigate_to(initial_location, true);
+    } else {
+        GFile *home = g_file_new_for_path(g_get_home_dir());
+        navigate_to(home, true);
+        g_object_unref(home);
+    }
+}
+
+FileManagerWindow *FileManagerWindow::open(GtkApplication *application,
+                                           GFile *initial_location)
+{
+    auto *window = new FileManagerWindow(application, initial_location);
+    window->install_operation_surface();
+    new ThemeController(window->native_window());
+    window->present();
+    return window;
 }
 
 FileManagerWindow::~FileManagerWindow()
@@ -190,6 +206,15 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     gtk_window_set_title(GTK_WINDOW(window_), "Files");
     gtk_window_set_default_size(GTK_WINDOW(window_), 1120, 760);
 
+    GSimpleAction *new_window_action = g_simple_action_new("new-window", nullptr);
+    g_signal_connect(new_window_action, "activate",
+                     G_CALLBACK(on_new_window_action), this);
+    g_action_map_add_action(G_ACTION_MAP(window_), G_ACTION(new_window_action));
+    g_object_unref(new_window_action);
+    const char *new_window_accels[] = {"<Control>n", nullptr};
+    gtk_application_set_accels_for_action(
+        application, "win.new-window", new_window_accels);
+
     GtkWidget *header = gtk_header_bar_new();
     gtk_window_set_titlebar(GTK_WINDOW(window_), header);
 
@@ -241,6 +266,18 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     gtk_box_append(GTK_BOX(view_switcher), icon_view_button_);
     gtk_box_append(GTK_BOX(view_switcher), compact_view_button_);
     gtk_header_bar_pack_end(GTK_HEADER_BAR(header), view_switcher);
+
+    GMenu *window_menu = g_menu_new();
+    g_menu_append(window_menu, "Open Current Location in New Window",
+                  "win.new-window");
+    GtkWidget *menu_button = gtk_menu_button_new();
+    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(menu_button),
+                                  "open-menu-symbolic");
+    gtk_widget_set_tooltip_text(menu_button, "Window and tab actions");
+    gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(menu_button),
+                                   G_MENU_MODEL(window_menu));
+    g_object_unref(window_menu);
+    gtk_header_bar_pack_end(GTK_HEADER_BAR(header), menu_button);
 
     g_signal_connect(back_button_, "clicked", G_CALLBACK(on_back_clicked), this);
     g_signal_connect(forward_button_, "clicked", G_CALLBACK(on_forward_clicked), this);
@@ -999,6 +1036,26 @@ GFile *FileManagerWindow::file_from_location_text(const char *text) const
         return g_file_new_for_uri(value.c_str());
     }
     return g_file_new_for_commandline_arg(value.c_str());
+}
+
+void FileManagerWindow::open_current_location_in_new_window()
+{
+    GtkApplication *application =
+        gtk_window_get_application(GTK_WINDOW(window_));
+    if (application == nullptr || current_location_ == nullptr) {
+        return;
+    }
+    FileManagerWindow::open(application, current_location_);
+}
+
+void FileManagerWindow::on_new_window_action(GSimpleAction *action,
+                                             GVariant *parameter,
+                                             gpointer user_data)
+{
+    (void)action;
+    (void)parameter;
+    static_cast<FileManagerWindow *>(user_data)
+        ->open_current_location_in_new_window();
 }
 
 void FileManagerWindow::on_back_clicked(GtkButton *button, gpointer user_data)

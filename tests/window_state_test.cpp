@@ -51,6 +51,12 @@ struct FileManagerWindowTestAccess {
         return window.temporal_policy_watch_name_;
     }
     static GtkLabel *status(FileManagerWindow &window) { return GTK_LABEL(window.status_label_); }
+    static FileManagerWindow *owner(GtkWindow *native)
+    {
+        return static_cast<FileManagerWindow *>(
+            g_object_get_data(G_OBJECT(native), "ifm-window-owner"));
+    }
+    static GFile *current(FileManagerWindow &window) { return window.current_location_; }
     static void finish_launch(GObject *source, GAsyncResult *result, GtkLabel *status)
     {
         FileManagerWindow::on_launch_finished(source, result, status);
@@ -145,6 +151,46 @@ int main()
         await([&] { return !gtk_directory_list_is_loading(FileManagerWindowTestAccess::directory(*window)); });
         require(g_list_model_get_n_items(G_LIST_MODEL(FileManagerWindowTestAccess::directory(*window))) == 2,
                 "Directory fixture must load");
+
+        const guint window_count =
+            g_list_length(gtk_application_get_windows(application));
+        g_action_group_activate_action(
+            G_ACTION_GROUP(window->native_window()), "new-window", nullptr);
+        await([&] {
+            return g_list_length(gtk_application_get_windows(application)) ==
+                   window_count + 1;
+        });
+        FileManagerWindow *spawned = nullptr;
+        for (GList *node = gtk_application_get_windows(application);
+             node != nullptr; node = node->next) {
+            if (node->data != window->native_window()) {
+                spawned = FileManagerWindowTestAccess::owner(
+                    GTK_WINDOW(node->data));
+                if (spawned != nullptr) {
+                    break;
+                }
+            }
+        }
+        require(spawned != nullptr,
+                "New-window action must create an owned Files window");
+        require(g_file_equal(FileManagerWindowTestAccess::current(*window),
+                             FileManagerWindowTestAccess::current(*spawned)),
+                "New window must inherit the intended current location");
+        GFile *source_before =
+            G_FILE(g_object_ref(FileManagerWindowTestAccess::current(*window)));
+        FileManagerWindowTestAccess::navigate(*spawned, root);
+        require(g_file_equal(FileManagerWindowTestAccess::current(*window),
+                             source_before),
+                "Navigating the new window must not change the source window");
+        require(!g_file_equal(FileManagerWindowTestAccess::current(*window),
+                              FileManagerWindowTestAccess::current(*spawned)),
+                "Independent windows must retain distinct current locations");
+        g_object_unref(source_before);
+        gtk_window_destroy(spawned->native_window());
+        await([&] {
+            return g_list_length(gtk_application_get_windows(application)) ==
+                   window_count;
+        });
         GtkMultiSelection *selection = FileManagerWindowTestAccess::selection(*window);
         auto *presentation = GTK_SORT_LIST_MODEL(gtk_multi_selection_get_model(selection));
         GtkSorter *sorter = GTK_SORTER(gtk_custom_sorter_new(reverse_names, nullptr, nullptr));
