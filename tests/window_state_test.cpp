@@ -79,6 +79,17 @@ struct FileManagerWindowTestAccess {
     {
         window.activate_tab(index);
     }
+    static GtkAdjustment *scroll(FileManagerWindow &window)
+    {
+        return window.active_scroll_adjustment();
+    }
+    static const BrowseTabState *tab(const FileManagerWindow &window,
+                                     const std::size_t index)
+    {
+        return window.browse_session_.has_value()
+                   ? window.browse_session_->tab(index)
+                   : nullptr;
+    }
     static void finish_launch(GObject *source, GAsyncResult *result, GtkLabel *status)
     {
         FileManagerWindow::on_launch_finished(source, result, status);
@@ -239,6 +250,68 @@ int main()
                              source_tab_file),
                 "Switching tabs must restore the source tab location");
         g_object_unref(source_tab_file);
+
+        GtkMultiSelection *context_selection =
+            FileManagerWindowTestAccess::selection(*window);
+        GListModel *context_model =
+            gtk_multi_selection_get_model(context_selection);
+        guint alpha_position = GTK_INVALID_LIST_POSITION;
+        for (guint index = 0; index < g_list_model_get_n_items(context_model);
+             ++index) {
+            GFileInfo *info =
+                G_FILE_INFO(g_list_model_get_item(context_model, index));
+            if (info != nullptr &&
+                g_strcmp0(g_file_info_get_name(info), "alpha.txt") == 0) {
+                alpha_position = index;
+            }
+            if (info != nullptr) {
+                g_object_unref(info);
+            }
+        }
+        require(alpha_position != GTK_INVALID_LIST_POSITION,
+                "Selection fixture must expose alpha.txt");
+        gtk_selection_model_select_item(
+            GTK_SELECTION_MODEL(context_selection), alpha_position, TRUE);
+
+        GtkAdjustment *context_scroll =
+            FileManagerWindowTestAccess::scroll(*window);
+        require(context_scroll != nullptr,
+                "Active presentation must expose a vertical adjustment");
+        gtk_adjustment_configure(context_scroll, 37.0, 0.0, 200.0,
+                                 1.0, 10.0, 20.0);
+
+        FileManagerWindowTestAccess::activate_tab(*window, 1U);
+        await([&] {
+            return !gtk_directory_list_is_loading(
+                FileManagerWindowTestAccess::directory(*window));
+        });
+        const BrowseTabState *stored_context =
+            FileManagerWindowTestAccess::tab(*window, 0U);
+        require(stored_context != nullptr &&
+                    stored_context->primary_selection == "alpha.txt" &&
+                    stored_context->scroll_position == 37.0,
+                "Switching away must persist selection and scroll context");
+
+        FileManagerWindowTestAccess::activate_tab(*window, 0U);
+        await([&] {
+            return !gtk_directory_list_is_loading(
+                FileManagerWindowTestAccess::directory(*window));
+        });
+        auto *restored_primary =
+            FileManagerWindowTestAccess::primary(*window);
+        auto *restored_info = G_FILE_INFO(
+            gtk_single_selection_get_selected_item(restored_primary));
+        require(restored_info != nullptr &&
+                    g_strcmp0(g_file_info_get_name(restored_info),
+                              "alpha.txt") == 0,
+                "Switching back must restore the tab's primary selection");
+        require(gtk_selection_model_is_selected(
+                    GTK_SELECTION_MODEL(context_selection), alpha_position),
+                "Switching back must restore the tab's multi-selection");
+        require(FileManagerWindowTestAccess::scroll(*window) != nullptr &&
+                    gtk_adjustment_get_value(
+                        FileManagerWindowTestAccess::scroll(*window)) == 37.0,
+                "Switching back must restore the tab's scroll position");
 
         g_action_group_activate_action(
             G_ACTION_GROUP(window->native_window()), "close-tab", nullptr);
