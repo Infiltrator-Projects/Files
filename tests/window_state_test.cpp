@@ -370,7 +370,7 @@ int main()
         // The appearance assertion intentionally persists a preference. Reset
         // that independent side effect so the temporal-policy test below still
         // begins from its specified missing-parent profile state.
-        std::filesystem::remove_all(config);
+        std::filesystem::remove_all(root / "fresh");
         FileManagerWindowTestAccess::rearm_temporal_policy(*window);
 
         require(FileManagerWindowTestAccess::tab_count(*window) == 1U,
