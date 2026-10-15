@@ -27,6 +27,16 @@ OperationResult failure(const OperationStatus status,
         status, phase, destination, std::move(message), changed, std::move(retained_paths)};
 }
 
+std::string retained_paths_message(
+    const std::vector<std::filesystem::path> &retained_paths)
+{
+    std::string message;
+    for (const auto &path : retained_paths) {
+        message += " Remaining data is available at “" + path.string() + "”.";
+    }
+    return message;
+}
+
 std::string quoted_name(const std::filesystem::path &path)
 {
     return "“" + path.filename().string() + "”";
@@ -100,7 +110,8 @@ OperationStatus OperationEngine::status_for_error(const std::error_code &error) 
     if (error == std::errc::read_only_file_system) {
         return OperationStatus::ReadOnlyLocation;
     }
-    if (error == std::errc::filename_too_long || error == std::errc::invalid_argument) {
+    if (error == std::errc::filename_too_long || error == std::errc::invalid_argument ||
+        error == std::errc::no_such_file_or_directory || error == std::errc::not_a_directory) {
         return OperationStatus::InvalidRequest;
     }
     return OperationStatus::ExecutionFailure;
@@ -146,56 +157,84 @@ OperationResult OperationEngine::create_directory(const std::filesystem::path &p
                        "The destination is not a folder.");
     }
 
-    const bool destination_exists = path_present(plan.destination, error);
-    if (error) {
+    // New Folder uses the same ownership boundary as copy/move: assemble the
+    // directory under a descriptor-rooted private staging directory and publish
+    // it with an atomic no-replace rename. This removes the old path precheck /
+    // mkdir / path-only verification split, so one authority now owns namespace
+    // collision and object-identity semantics for visible destinations.
+    destination_ownership::ProtectedStaging staging;
+    destination_ownership::OwnedOutputs owned;
+    if (!destination_ownership::create_protected_staging(plan.parent, staging, error)) {
         const OperationStatus status = status_for_error(error);
-        return failure(status,
-                       OperationPhase::Preflight,
-                       plan.destination,
-                       status == OperationStatus::PermissionFailure
-                           ? "You do not have permission to inspect the destination."
-                           : "The destination could not be checked.");
-    }
-    if (destination_exists) {
-        return failure(OperationStatus::DestinationConflict,
-                       OperationPhase::Preflight,
-                       plan.destination,
-                       "An item named " + quoted_name(plan.destination) + " already exists.");
+        const std::string message =
+            status == OperationStatus::PermissionFailure
+                ? "You do not have permission to create a folder here."
+                : status == OperationStatus::ReadOnlyLocation
+                      ? "This location is read-only."
+                      : "A private folder staging area could not be created: " + error.message();
+        return failure(status, OperationPhase::Execute, plan.destination, message);
     }
 
-    const bool created = std::filesystem::create_directory(plan.destination, error);
-    if (error || !created) {
-        const OperationStatus status = error ? status_for_error(error)
-                                             : OperationStatus::DestinationConflict;
-        std::string message;
-        switch (status) {
-        case OperationStatus::DestinationConflict:
-            message = "An item named " + quoted_name(plan.destination) + " already exists.";
-            break;
-        case OperationStatus::PermissionFailure:
-            message = "You do not have permission to create " + quoted_name(plan.destination) + " here.";
-            break;
-        case OperationStatus::ReadOnlyLocation:
-            message = "This location is read-only.";
-            break;
-        case OperationStatus::InvalidRequest:
-            message = "The folder name is not valid for this location.";
-            break;
-        default:
-            message = error ? "The folder could not be created: " + error.message()
-                            : "The folder could not be created.";
-            break;
-        }
-        return failure(status, OperationPhase::Execute, plan.destination, std::move(message));
+    if (::mkdirat(staging.descriptor, "payload", 0777) != 0) {
+        error = std::error_code(errno, std::generic_category());
+        return failure(status_for_error(error),
+                       OperationPhase::Execute,
+                       plan.destination,
+                       "The folder could not be created: " + error.message());
     }
 
-    error.clear();
-    const std::filesystem::file_status result_status = std::filesystem::status(plan.destination, error);
-    if (error || !std::filesystem::is_directory(result_status)) {
+    const std::filesystem::path private_path = staging.access_root() / "payload";
+    if (!destination_ownership::record_at(
+            staging.descriptor, "payload", private_path, owned, error)) {
+        std::error_code cleanup_error;
+        std::vector<std::filesystem::path> retained_paths;
+        const bool cleaned = destination_ownership::cleanup_unpublished(
+            staging, plan.destination, owned, cleanup_error, &retained_paths);
         return failure(OperationStatus::VerificationFailure,
                        OperationPhase::Verify,
                        plan.destination,
-                       "The folder was created but could not be verified.",
+                       "The new folder identity could not be recorded before publication." +
+                           (cleaned ? std::string{} : retained_paths_message(retained_paths)),
+                       !cleaned,
+                       std::move(retained_paths));
+    }
+
+    if (!destination_ownership::publish_private_tree(
+            staging, private_path, plan.destination, owned, error)) {
+        const OperationStatus status = status_for_error(error);
+        std::error_code cleanup_error;
+        std::vector<std::filesystem::path> retained_paths;
+        const bool cleaned = destination_ownership::cleanup_unpublished(
+            staging, plan.destination, owned, cleanup_error, &retained_paths);
+
+        std::string message;
+        if (status == OperationStatus::DestinationConflict) {
+            message = "An item named " + quoted_name(plan.destination) + " already exists.";
+        } else if (status == OperationStatus::PermissionFailure) {
+            message = "You do not have permission to create " + quoted_name(plan.destination) + " here.";
+        } else if (status == OperationStatus::ReadOnlyLocation) {
+            message = "This location is read-only.";
+        } else if (status == OperationStatus::UnsupportedCapability) {
+            message = "This location does not provide the atomic no-replace operation required for safe folder creation.";
+        } else {
+            message = "The folder could not be published: " + error.message();
+        }
+        if (!cleaned) {
+            message += retained_paths_message(retained_paths);
+        }
+        return failure(status,
+                       OperationPhase::Execute,
+                       plan.destination,
+                       std::move(message),
+                       !cleaned,
+                       std::move(retained_paths));
+    }
+
+    if (!destination_ownership::verify_all(owned, error)) {
+        return failure(OperationStatus::VerificationFailure,
+                       OperationPhase::Verify,
+                       plan.destination,
+                       "The folder was created but its published identity could not be verified.",
                        true);
     }
 

@@ -105,6 +105,7 @@ jobs:
           canonical="dist/infiltrator-file-manager_${VERSION}_amd64.deb"
           test "$(dpkg-deb -f "$deb" Package)" = 'infiltrator-file-manager'
           test "$(dpkg-deb -f "$deb" Version)" = "$VERSION"
+          test "$(dpkg-deb -f "$deb" Architecture)" = 'amd64'
 
           dependencies=$(dpkg-deb -f "$deb" Depends)
           grep -Eq 'libgtk-4-1' <<<"$dependencies"
@@ -173,6 +174,5 @@ jobs:
           EXPECTED_SHA: ${{ github.sha }}
         run: ./ci/release.sh publish "$EXPECTED_SHA" dist
 
-      - name: Observe central catalogue and beta APT propagation
-        continue-on-error: true
+      - name: Verify central catalogue and beta APT publication
         run: ./ci/release.sh wait-apt dist

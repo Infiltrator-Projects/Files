@@ -7,6 +7,7 @@ set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 VERSION_FILE="$ROOT/VERSION"
+readonly RELEASE_ARCHITECTURE='amd64'
 
 fail() {
     printf 'release: %s\n' "$*" >&2
@@ -36,7 +37,7 @@ load_artifacts() {
 
     RELEASE_VERSION=$(release_version)
     RELEASE_DIRECTORY=$(cd -- "$directory" && pwd)
-    RELEASE_DEB="infiltrator-file-manager_${RELEASE_VERSION}_amd64.deb"
+    RELEASE_DEB="infiltrator-file-manager_${RELEASE_VERSION}_${RELEASE_ARCHITECTURE}.deb"
     RELEASE_SUMS='SHA256SUMS'
 
     cd "$RELEASE_DIRECTORY"
@@ -47,6 +48,8 @@ load_artifacts() {
         fail "Debian package identity is not infiltrator-file-manager"
     [[ "$(dpkg-deb -f "$RELEASE_DEB" Version)" == "$RELEASE_VERSION" ]] ||
         fail "Debian package version does not match VERSION"
+    [[ "$(dpkg-deb -f "$RELEASE_DEB" Architecture)" == "$RELEASE_ARCHITECTURE" ]] ||
+        fail "Debian package architecture does not match release architecture"
 }
 
 publish_release() {
@@ -127,7 +130,7 @@ publish_release() {
     [[ "$published_assets" == "$expected_assets" ]] ||
         fail "published release $tag does not contain exactly the expected assets"
 
-    # GitHub exposes SHA-256 digests for release assets.  Compare those against
+    # GitHub exposes SHA-256 digests for release assets. Compare those against
     # the exact tested files rather than assuming a matching asset name is enough.
     for asset in "$deb" "$sums"; do
         name=$(basename "$asset")
@@ -151,7 +154,7 @@ wait_for_apt() {
     need_command jq
 
     local catalogue='https://infiltrator-projects.github.io/Infiltrator-Repository/catalogue/apps.json'
-    local packages='https://infiltrator-projects.github.io/Infiltrator-Repository/dists/beta/main/binary-amd64/Packages.gz'
+    local packages="https://infiltrator-projects.github.io/Infiltrator-Repository/dists/beta/main/binary-${RELEASE_ARCHITECTURE}/Packages.gz"
     local attempt cache_key catalogue_version apt_match
 
     for attempt in $(seq 1 20); do
@@ -199,7 +202,7 @@ Usage: ci/release.sh COMMAND [ARGS]
 
 Commands:
   publish EXPECTED_SHA DIRECTORY   Publish/resume the exact tested GitHub release.
-  wait-apt DIRECTORY               Observe central catalogue and beta APT propagation.
+  wait-apt DIRECTORY               Verify central catalogue and beta APT publication.
 USAGE
 }
 

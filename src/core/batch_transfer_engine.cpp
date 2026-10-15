@@ -4,6 +4,7 @@
 #include "operation_journal.hpp"
 #include "recovery_operation_engine.hpp"
 
+#include <limits>
 #include <string>
 #include <utility>
 
@@ -39,6 +40,15 @@ bool path_present(const std::filesystem::path &path, std::error_code &error)
     return !error && status.type() != std::filesystem::file_type::not_found;
 }
 
+bool checked_add(const std::uintmax_t value, std::uintmax_t &total) noexcept
+{
+    if (value > std::numeric_limits<std::uintmax_t>::max() - total) {
+        return false;
+    }
+    total += value;
+    return true;
+}
+
 bool measure_item(const std::filesystem::path &source,
                   std::uintmax_t &bytes,
                   std::uintmax_t &items,
@@ -53,7 +63,10 @@ bool measure_item(const std::filesystem::path &source,
         return false;
     }
 
-    ++items;
+    if (!checked_add(1U, items)) {
+        error = std::make_error_code(std::errc::value_too_large);
+        return false;
+    }
     if (std::filesystem::is_regular_file(status)) {
         bytes = std::filesystem::file_size(source, error);
         return !error;
@@ -69,14 +82,21 @@ bool measure_item(const std::filesystem::path &source,
     for (std::filesystem::recursive_directory_iterator iterator(source, error), end;
          !error && iterator != end;
          iterator.increment(error)) {
-        ++items;
+        if (!checked_add(1U, items)) {
+            error = std::make_error_code(std::errc::value_too_large);
+            return false;
+        }
         const auto entry_status = iterator->symlink_status(error);
         if (error) {
             return false;
         }
         if (std::filesystem::is_regular_file(entry_status)) {
-            bytes += iterator->file_size(error);
+            const std::uintmax_t size = iterator->file_size(error);
             if (error) {
+                return false;
+            }
+            if (!checked_add(size, bytes)) {
+                error = std::make_error_code(std::errc::value_too_large);
                 return false;
             }
         }
@@ -158,10 +178,17 @@ OperationResult BatchTransferEngine::execute(
             return failure(OperationEngine::status_for_error(error),
                            OperationPhase::Preflight,
                            item.destination,
-                           "A selected item could not be measured safely.");
+                           error == std::errc::value_too_large
+                               ? "A selected item is too large to represent safely."
+                               : "A selected item could not be measured safely.");
         }
-        total_bytes += item.bytes;
-        total_items += item.items;
+        if (!checked_add(item.bytes, total_bytes) ||
+            !checked_add(item.items, total_items)) {
+            return failure(OperationStatus::ExecutionFailure,
+                           OperationPhase::Preflight,
+                           item.destination,
+                           "The batch byte or item total is too large to represent safely.");
+        }
 
         if (!(kind == BatchTransferKind::Move && source.parent_path() == destination_parent)) {
             item.destination_exists = path_present(item.destination, error);

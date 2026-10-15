@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "theme_controller.hpp"
 
+#include <infiltratr/posix.h>
+
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <filesystem>
 #include <sstream>
 #include <string>
 
@@ -17,14 +21,22 @@ std::string colour_hex(const std::uint32_t rgb)
     return buffer;
 }
 
-char *theme_directory()
+std::filesystem::path theme_directory()
 {
-    return g_build_filename(g_get_user_config_dir(), "infiltrator-file-manager", nullptr);
+    char *config_home = nullptr;
+    if (!infiltratr_xdg_config_home_alloc(&config_home) || config_home == nullptr) {
+        return {};
+    }
+    const std::filesystem::path directory =
+        std::filesystem::path(config_home) / "infiltrator-file-manager";
+    std::free(config_home);
+    return directory;
 }
 
-char *theme_file()
+std::filesystem::path theme_file()
 {
-    return g_build_filename(g_get_user_config_dir(), "infiltrator-file-manager", "theme", nullptr);
+    const std::filesystem::path directory = theme_directory();
+    return directory.empty() ? std::filesystem::path{} : directory / "theme";
 }
 
 } // namespace
@@ -286,36 +298,32 @@ bool ThemeController::system_prefers_dark() const
 
 InfiltratrThemeMode ThemeController::load_mode()
 {
-    char *path = theme_file();
-    gchar *contents = nullptr;
-    gsize length = 0U;
-    if (!g_file_get_contents(path, &contents, &length, nullptr)) {
-        g_free(path);
+    const std::filesystem::path path = theme_file();
+    if (path.empty()) {
         return INFILTRATR_THEME_SYSTEM;
     }
-    g_free(path);
 
-    g_strstrip(contents);
+    char contents[64]{};
+    if (infiltratr_read_text_file_ex(path.c_str(), contents, sizeof(contents), nullptr) !=
+        INFILTRATR_IO_OK) {
+        return INFILTRATR_THEME_SYSTEM;
+    }
+
     InfiltratrThemeMode mode = INFILTRATR_THEME_SYSTEM;
-    const bool valid = infiltratr_theme_mode_parse(contents, &mode);
-    g_free(contents);
-    return valid ? mode : INFILTRATR_THEME_SYSTEM;
+    return infiltratr_theme_mode_parse(contents, &mode) ? mode : INFILTRATR_THEME_SYSTEM;
 }
 
 void ThemeController::save_mode(const InfiltratrThemeMode mode)
 {
-    char *directory = theme_directory();
-    if (g_mkdir_with_parents(directory, 0700) != 0) {
-        g_free(directory);
+    const std::filesystem::path directory = theme_directory();
+    if (directory.empty() || infiltratr_mkdir_parents(directory.c_str(), 0700U) != 0) {
         return;
     }
 
-    char *path = theme_file();
+    const std::filesystem::path path = directory / "theme";
     const std::string value = std::string(infiltratr_theme_mode_key(mode)) + "\n";
-    (void)g_file_set_contents(
-        path, value.c_str(), static_cast<gssize>(value.size()), nullptr);
-    g_free(path);
-    g_free(directory);
+    (void)infiltratr_atomic_file_write_bytes(
+        path.c_str(), INFILTRATR_ATOMIC_FILE_PRIVATE, value.data(), value.size());
 }
 
 const char *ThemeController::mode_label(const InfiltratrThemeMode mode) noexcept
