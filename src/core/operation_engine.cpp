@@ -157,11 +157,27 @@ OperationResult OperationEngine::create_directory(const std::filesystem::path &p
                        "The destination is not a folder.");
     }
 
+    // Avoid creating private staging for a conflict that is already visible.
+    // This observation is deliberately not the namespace authority: another
+    // writer may still create the destination immediately afterwards, so the
+    // final publication below remains an atomic no-replace operation.
+    const bool destination_exists = path_present(plan.destination, error);
+    if (error) {
+        return failure(status_for_error(error),
+                       OperationPhase::Preflight,
+                       plan.destination,
+                       "The destination could not be checked.");
+    }
+    if (destination_exists) {
+        return failure(OperationStatus::DestinationConflict,
+                       OperationPhase::Preflight,
+                       plan.destination,
+                       "An item named " + quoted_name(plan.destination) + " already exists.");
+    }
+
     // New Folder uses the same ownership boundary as copy/move: assemble the
-    // directory under a descriptor-rooted private staging directory and publish
-    // it with an atomic no-replace rename. This removes the old path precheck /
-    // mkdir / path-only verification split, so one authority now owns namespace
-    // collision and object-identity semantics for visible destinations.
+    // directory under a descriptor-rooted private staging directory, publish
+    // it with an atomic no-replace rename, and verify the recorded identity.
     destination_ownership::ProtectedStaging staging;
     destination_ownership::OwnedOutputs owned;
     if (!destination_ownership::create_protected_staging(plan.parent, staging, error)) {
@@ -242,7 +258,8 @@ OperationResult OperationEngine::create_directory(const std::filesystem::path &p
                            OperationPhase::Complete,
                            plan.destination,
                            "Created " + quoted_name(plan.destination) + ".",
-                           true};
+                           true,
+                           {}};
 }
 
 OperationResult OperationEngine::rename_item(const std::filesystem::path &source,
@@ -277,7 +294,8 @@ OperationResult OperationEngine::rename_item(const std::filesystem::path &source
                                OperationPhase::Complete,
                                destination,
                                "The name is unchanged.",
-                               false};
+                               false,
+                               {}};
     }
 
     std::error_code error;
@@ -372,7 +390,8 @@ OperationResult OperationEngine::rename_item(const std::filesystem::path &source
                            OperationPhase::Complete,
                            destination,
                            "Renamed to " + quoted_name(destination) + ".",
-                           true};
+                           true,
+                           {}};
 }
 
 OperationResult OperationEngine::copy_item(const std::filesystem::path &source,
