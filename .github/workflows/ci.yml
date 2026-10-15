@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: Publish the tested current main VERSION after verification
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -31,6 +37,7 @@ jobs:
         id: release
         env:
           BEFORE_SHA: ${{ github.event.before }}
+          MANUAL_RELEASE: ${{ inputs.release || false }}
         shell: bash
         run: |
           set -euo pipefail
@@ -42,19 +49,24 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == 'push' && "$GITHUB_REF" == 'refs/heads/main' ]]; then
             zero=0000000000000000000000000000000000000000
             previous_version=''
-
             if [[ -n "${BEFORE_SHA:-}" && "$BEFORE_SHA" != "$zero" ]] &&
                git cat-file -e "${BEFORE_SHA}:VERSION" 2>/dev/null; then
               previous_version=$(git show "${BEFORE_SHA}:VERSION" | tr -d '[:space:]')
             fi
-
             if [[ "$version" != "$previous_version" ]]; then
               release_intent=true
             fi
+          elif [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' &&
+                  "$GITHUB_REF" == 'refs/heads/main' &&
+                  "$MANUAL_RELEASE" == 'true' ]]; then
+            release_intent=true
           fi
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "release_intent=$release_intent" >> "$GITHUB_OUTPUT"
+
+      - name: Validate release authority syntax
+        run: bash -n ci/release.sh
 
       - name: Install build dependencies
         env:
@@ -111,10 +123,11 @@ jobs:
             cd dist
             sha256sum "infiltrator-file-manager_${VERSION}_amd64.deb" > SHA256SUMS
           )
+          (cd dist && sha256sum -c SHA256SUMS)
 
       - name: Preserve exact tested release package
         if: steps.release.outputs.release_intent == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-package-${{ github.sha }}
           path: |
@@ -129,7 +142,7 @@ jobs:
     permissions:
       contents: write
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     concurrency:
       group: publish-release-${{ github.repository }}
       cancel-in-progress: false
@@ -142,94 +155,24 @@ jobs:
           submodules: false
 
       - name: Download exact tested package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-package-${{ github.sha }}
           path: dist
+
+      - name: Install publication verification tools
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dpkg-dev jq curl gzip
 
       - name: Publish or resume exact tested VERSION
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_SHA: ${{ github.sha }}
-          VERSION: ${{ needs.build-test-package.outputs.version }}
-        shell: bash
-        run: |
-          set -euo pipefail
+        run: ./ci/release.sh publish "$EXPECTED_SHA" dist
 
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          repo="$GITHUB_REPOSITORY"
-          tag="v${VERSION}"
-          deb="dist/infiltrator-file-manager_${VERSION}_amd64.deb"
-          sums='dist/SHA256SUMS'
-          expected_assets=$(printf 'SHA256SUMS\ninfiltrator-file-manager_%s_amd64.deb\n' "$VERSION" | sort)
-
-          test -f "$deb"
-          test -f "$sums"
-
-          git fetch origin --tags --force
-
-          tag_exists=false
-          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
-            tag_exists=true
-            tag_commit=$(git rev-list -n 1 "$tag")
-            if [[ "$tag_commit" != "$EXPECTED_SHA" ]]; then
-              printf '%s belongs to %s, not tested release commit %s.\n' \
-                "$tag" "$tag_commit" "$EXPECTED_SHA" >&2
-              exit 1
-            fi
-          fi
-
-          if gh release view "$tag" >/dev/null 2>&1; then
-            if [[ "$tag_exists" != 'true' ]]; then
-              printf 'Release %s exists without its git tag; refusing ambiguous recovery.\n' "$tag" >&2
-              exit 1
-            fi
-
-            test "$(gh release view "$tag" --json isDraft --jq '.isDraft')" = 'false'
-            test "$(gh release view "$tag" --json isPrerelease --jq '.isPrerelease')" = 'false'
-
-            existing_assets=$(gh release view "$tag" --json assets --jq '.assets[].name')
-            while IFS= read -r name; do
-              [[ -z "$name" ]] && continue
-              case "$name" in
-                SHA256SUMS|"infiltrator-file-manager_${VERSION}_amd64.deb") ;;
-                *)
-                  printf 'Release %s has unexpected asset %s; refusing to rewrite it.\n' "$tag" "$name" >&2
-                  exit 1
-                  ;;
-              esac
-            done <<<"$existing_assets"
-
-            for asset in "$deb" "$sums"; do
-              name=$(basename "$asset")
-              if ! grep -Fxq "$name" <<<"$existing_assets"; then
-                gh release upload "$tag" "$asset"
-              fi
-            done
-          elif [[ "$tag_exists" == 'true' ]]; then
-            gh release create "$tag" "$deb" "$sums" \
-              --verify-tag \
-              --latest \
-              --title "Infiltrator File Manager ${VERSION}" \
-              --notes "Infiltrator File Manager ${VERSION}. See the repository README for the current implementation surface and release status."
-          else
-            gh release create "$tag" "$deb" "$sums" \
-              --target "$EXPECTED_SHA" \
-              --latest \
-              --title "Infiltrator File Manager ${VERSION}" \
-              --notes "Infiltrator File Manager ${VERSION}. See the repository README for the current implementation surface and release status."
-          fi
-
-          gh release edit "$tag" --latest
-
-          git fetch origin --tags --force
-          test "$(git rev-list -n 1 "$tag")" = "$EXPECTED_SHA"
-
-          test "$(gh release view "$tag" --json isDraft --jq '.isDraft')" = 'false'
-          test "$(gh release view "$tag" --json isPrerelease --jq '.isPrerelease')" = 'false'
-
-          published_assets=$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)
-          if [[ "$published_assets" != "$expected_assets" ]]; then
-            printf 'Published release %s does not contain exactly the expected assets.\n' "$tag" >&2
-            exit 1
-          fi
+      - name: Observe central catalogue and beta APT propagation
+        continue-on-error: true
+        run: ./ci/release.sh wait-apt dist

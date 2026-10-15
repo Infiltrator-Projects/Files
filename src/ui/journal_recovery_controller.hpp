@@ -27,7 +27,7 @@ private:
     GtkWidget *status_label_{nullptr};
     GtkWidget *review_button_{nullptr};
     std::vector<InterruptedOperation> interrupted_;
-    bool journal_closed_cleanly_{true};
+    bool journal_healthy_{true};
 };
 
 } // namespace infiltrator::files

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "file_manager_window.hpp"
 #include "detail_metadata.hpp"
-#include "theme_controller.hpp"
 
 #include <infiltratr/design.h>
 #include <infiltratr/temporal_posix.h>
@@ -10,16 +9,10 @@
 #include <cstdio>
 #include <sstream>
 #include <string>
-#include <utility>
 
 namespace infiltrator::files {
 
 namespace {
-
-struct TabContextRestoreDispatch {
-    GWeakRef window;
-    std::uint64_t generation{0};
-};
 
 constexpr const char *kDirectoryAttributes =
     "standard::name,standard::display-name,standard::type,standard::size,"
@@ -50,9 +43,11 @@ std::string colour_hex(const std::uint32_t rgb)
 
 GtkWidget *make_sidebar_content(const char *title, const char *icon_name)
 {
-    const auto *metrics = infiltratr_design_metrics();
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, static_cast<int>(metrics->control_spacing));
-    gtk_widget_add_css_class(box, "ifm-sidebar-content");
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    gtk_widget_set_margin_start(box, 10);
+    gtk_widget_set_margin_end(box, 10);
+    gtk_widget_set_margin_top(box, 7);
+    gtk_widget_set_margin_bottom(box, 7);
 
     GtkWidget *icon = gtk_image_new_from_icon_name(icon_name);
     gtk_image_set_pixel_size(GTK_IMAGE(icon), 18);
@@ -130,47 +125,23 @@ guint find_item_position(GListModel *model, GFileInfo *needle)
 
 } // namespace
 
-FileManagerWindow::FileManagerWindow(GtkApplication *application, GFile *initial_location)
+FileManagerWindow::FileManagerWindow(GtkApplication *application)
 {
     build_ui(application);
     apply_theme();
     arm_temporal_policy_monitor();
 
-    g_object_set_data(G_OBJECT(window_), "ifm-window-owner", this);
     g_object_weak_ref(G_OBJECT(window_), &FileManagerWindow::on_window_finalized, this);
 
-    if (initial_location != nullptr) {
-        navigate_to(initial_location, true);
-    } else {
-        GFile *home = g_file_new_for_path(g_get_home_dir());
-        navigate_to(home, true);
-        g_object_unref(home);
-    }
-
-    if (!history_.empty()) {
-        browse_session_.emplace(history_[history_index_]);
-        rebuild_tab_strip();
-    }
-}
-
-FileManagerWindow *FileManagerWindow::open(GtkApplication *application,
-                                           GFile *initial_location)
-{
-    auto *window = new FileManagerWindow(application, initial_location);
-    window->install_operation_surface();
-    new ThemeController(window->native_window());
-    window->present();
-    return window;
+    GFile *home = g_file_new_for_path(g_get_home_dir());
+    navigate_to(home, true);
+    g_object_unref(home);
 }
 
 FileManagerWindow::~FileManagerWindow()
 {
     // Stop external callbacks before any UI/model references owned by this object are released.
     mounted_places_monitor_.reset();
-    if (tab_context_restore_source_id_ != 0U) {
-        g_source_remove(tab_context_restore_source_id_);
-        tab_context_restore_source_id_ = 0U;
-    }
     if (temporal_policy_monitor_ != nullptr) {
         g_signal_handlers_disconnect_by_data(temporal_policy_monitor_, this);
         g_object_unref(temporal_policy_monitor_);
@@ -219,87 +190,6 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     gtk_window_set_title(GTK_WINDOW(window_), "Files");
     gtk_window_set_default_size(GTK_WINDOW(window_), 1120, 760);
 
-    GSimpleAction *new_window_action = g_simple_action_new("new-window", nullptr);
-    g_signal_connect(new_window_action, "activate",
-                     G_CALLBACK(on_new_window_action), this);
-    g_action_map_add_action(G_ACTION_MAP(window_), G_ACTION(new_window_action));
-    g_object_unref(new_window_action);
-    const char *new_window_accels[] = {"<Control>n", nullptr};
-    gtk_application_set_accels_for_action(
-        application, "win.new-window", new_window_accels);
-
-    GSimpleAction *new_tab_action = g_simple_action_new("new-tab", nullptr);
-    g_signal_connect(new_tab_action, "activate",
-                     G_CALLBACK(on_new_tab_action), this);
-    g_action_map_add_action(G_ACTION_MAP(window_), G_ACTION(new_tab_action));
-    g_object_unref(new_tab_action);
-    const char *new_tab_accels[] = {"<Control>t", nullptr};
-    gtk_application_set_accels_for_action(
-        application, "win.new-tab", new_tab_accels);
-
-    GSimpleAction *close_tab_action = g_simple_action_new("close-tab", nullptr);
-    g_signal_connect(close_tab_action, "activate",
-                     G_CALLBACK(on_close_tab_action), this);
-    g_action_map_add_action(G_ACTION_MAP(window_), G_ACTION(close_tab_action));
-    g_object_unref(close_tab_action);
-    const char *close_tab_accels[] = {"<Control>w", nullptr};
-    gtk_application_set_accels_for_action(
-        application, "win.close-tab", close_tab_accels);
-
-    GSimpleAction *reopen_tab_action =
-        g_simple_action_new("reopen-closed-tab", nullptr);
-    g_signal_connect(reopen_tab_action, "activate",
-                     G_CALLBACK(on_reopen_closed_tab_action), this);
-    g_action_map_add_action(G_ACTION_MAP(window_), G_ACTION(reopen_tab_action));
-    g_object_unref(reopen_tab_action);
-    const char *reopen_tab_accels[] = {"<Control><Shift>t", nullptr};
-    gtk_application_set_accels_for_action(
-        application, "win.reopen-closed-tab", reopen_tab_accels);
-
-    GSimpleAction *duplicate_tab_action =
-        g_simple_action_new("duplicate-tab", nullptr);
-    g_signal_connect(duplicate_tab_action, "activate",
-                     G_CALLBACK(on_duplicate_tab_action), this);
-    g_action_map_add_action(G_ACTION_MAP(window_), G_ACTION(duplicate_tab_action));
-    g_object_unref(duplicate_tab_action);
-    const char *duplicate_tab_accels[] = {"<Control><Shift>d", nullptr};
-    gtk_application_set_accels_for_action(
-        application, "win.duplicate-tab", duplicate_tab_accels);
-
-    GSimpleAction *move_tab_left_action =
-        g_simple_action_new("move-tab-left", nullptr);
-    g_signal_connect(move_tab_left_action, "activate",
-                     G_CALLBACK(on_move_tab_left_action), this);
-    g_action_map_add_action(G_ACTION_MAP(window_), G_ACTION(move_tab_left_action));
-    g_object_unref(move_tab_left_action);
-    const char *move_tab_left_accels[] = {
-        "<Control><Shift>Page_Up", nullptr};
-    gtk_application_set_accels_for_action(
-        application, "win.move-tab-left", move_tab_left_accels);
-
-    GSimpleAction *move_tab_right_action =
-        g_simple_action_new("move-tab-right", nullptr);
-    g_signal_connect(move_tab_right_action, "activate",
-                     G_CALLBACK(on_move_tab_right_action), this);
-    g_action_map_add_action(G_ACTION_MAP(window_), G_ACTION(move_tab_right_action));
-    g_object_unref(move_tab_right_action);
-    const char *move_tab_right_accels[] = {
-        "<Control><Shift>Page_Down", nullptr};
-    gtk_application_set_accels_for_action(
-        application, "win.move-tab-right", move_tab_right_accels);
-
-    GSimpleAction *move_tab_new_window_action =
-        g_simple_action_new("move-tab-new-window", nullptr);
-    g_signal_connect(move_tab_new_window_action, "activate",
-                     G_CALLBACK(on_move_tab_new_window_action), this);
-    g_action_map_add_action(
-        G_ACTION_MAP(window_), G_ACTION(move_tab_new_window_action));
-    g_object_unref(move_tab_new_window_action);
-    const char *move_tab_new_window_accels[] = {
-        "<Control><Shift>m", nullptr};
-    gtk_application_set_accels_for_action(
-        application, "win.move-tab-new-window", move_tab_new_window_accels);
-
     GtkWidget *header = gtk_header_bar_new();
     gtk_window_set_titlebar(GTK_WINDOW(window_), header);
 
@@ -327,26 +217,12 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     gtk_widget_add_css_class(view_switcher, "linked");
     gtk_widget_add_css_class(view_switcher, "ifm-view-switcher");
 
-    const auto make_view_button = [](const char *icon_name,
-                                     const char *accessible_label,
-                                     const char *tooltip) {
-        GtkWidget *button = gtk_toggle_button_new();
-        GtkWidget *icon = gtk_image_new_from_icon_name(icon_name);
-        gtk_button_set_child(GTK_BUTTON(button), icon);
-        gtk_accessible_update_property(GTK_ACCESSIBLE(button),
-                                       GTK_ACCESSIBLE_PROPERTY_LABEL,
-                                       accessible_label,
-                                       -1);
-        gtk_widget_set_tooltip_text(button, tooltip);
-        return button;
-    };
-
-    list_view_button_ = make_view_button(
-        "view-list-symbolic", "Detail view", "Detail / list view");
-    icon_view_button_ = make_view_button(
-        "view-grid-symbolic", "Visual view", "Visual / icon view");
-    compact_view_button_ = make_view_button(
-        "view-more-symbolic", "Compact view", "Compact dense-scan view");
+    list_view_button_ = gtk_toggle_button_new_with_label("List");
+    icon_view_button_ = gtk_toggle_button_new_with_label("Icons");
+    compact_view_button_ = gtk_toggle_button_new_with_label("Compact");
+    gtk_widget_set_tooltip_text(list_view_button_, "Detail / list view");
+    gtk_widget_set_tooltip_text(icon_view_button_, "Visual / icon view");
+    gtk_widget_set_tooltip_text(compact_view_button_, "Compact dense-scan view");
 
     gtk_toggle_button_set_group(GTK_TOGGLE_BUTTON(icon_view_button_),
                                 GTK_TOGGLE_BUTTON(list_view_button_));
@@ -366,28 +242,6 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     gtk_box_append(GTK_BOX(view_switcher), compact_view_button_);
     gtk_header_bar_pack_end(GTK_HEADER_BAR(header), view_switcher);
 
-    GMenu *window_menu = g_menu_new();
-    g_menu_append(window_menu, "Open Current Location in New Window",
-                  "win.new-window");
-    g_menu_append(window_menu, "Open Current Location in New Tab",
-                  "win.new-tab");
-    g_menu_append(window_menu, "Close Current Tab", "win.close-tab");
-    g_menu_append(window_menu, "Reopen Recently Closed Tab",
-                  "win.reopen-closed-tab");
-    g_menu_append(window_menu, "Duplicate Current Tab", "win.duplicate-tab");
-    g_menu_append(window_menu, "Move Current Tab Left", "win.move-tab-left");
-    g_menu_append(window_menu, "Move Current Tab Right", "win.move-tab-right");
-    g_menu_append(window_menu, "Move Current Tab to New Window",
-                  "win.move-tab-new-window");
-    GtkWidget *menu_button = gtk_menu_button_new();
-    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(menu_button),
-                                  "open-menu-symbolic");
-    gtk_widget_set_tooltip_text(menu_button, "Window and tab actions");
-    gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(menu_button),
-                                   G_MENU_MODEL(window_menu));
-    g_object_unref(window_menu);
-    gtk_header_bar_pack_end(GTK_HEADER_BAR(header), menu_button);
-
     g_signal_connect(back_button_, "clicked", G_CALLBACK(on_back_clicked), this);
     g_signal_connect(forward_button_, "clicked", G_CALLBACK(on_forward_clicked), this);
     g_signal_connect(up_button_, "clicked", G_CALLBACK(on_up_clicked), this);
@@ -396,36 +250,13 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     GtkWidget *root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_window_set_child(GTK_WINDOW(window_), root);
 
-    const auto *metrics = infiltratr_design_metrics();
-    tab_strip_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, static_cast<int>(metrics->compact_spacing));
-    gtk_widget_set_margin_start(tab_strip_, static_cast<int>(metrics->control_spacing));
-    gtk_widget_set_margin_end(tab_strip_, static_cast<int>(metrics->control_spacing));
-    gtk_widget_set_margin_top(tab_strip_, static_cast<int>(metrics->compact_spacing));
-    gtk_widget_set_margin_bottom(tab_strip_, static_cast<int>(metrics->compact_spacing));
-    gtk_widget_add_css_class(tab_strip_, "ifm-tab-strip");
-    gtk_accessible_update_property(
-        GTK_ACCESSIBLE(tab_strip_), GTK_ACCESSIBLE_PROPERTY_LABEL,
-        "Open locations", -1);
-
-    GtkWidget *tab_scroll = gtk_scrolled_window_new();
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(tab_scroll),
-                                   GTK_POLICY_AUTOMATIC, GTK_POLICY_NEVER);
-    gtk_scrolled_window_set_has_frame(GTK_SCROLLED_WINDOW(tab_scroll), FALSE);
-    gtk_scrolled_window_set_propagate_natural_width(
-        GTK_SCROLLED_WINDOW(tab_scroll), FALSE);
-    gtk_widget_set_hexpand(tab_scroll, TRUE);
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(tab_scroll), tab_strip_);
-    gtk_box_append(GTK_BOX(root), tab_scroll);
-
     GtkWidget *paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_widget_set_vexpand(paned, TRUE);
     gtk_box_append(GTK_BOX(root), paned);
 
     sidebar_ = gtk_list_box_new();
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(sidebar_), GTK_SELECTION_NONE);
-    // Preserve useful labels at ordinary widths while allowing the content
-    // pane to win space in narrow and split-screen layouts.
-    gtk_widget_set_size_request(sidebar_, 168, -1);
+    gtk_widget_set_size_request(sidebar_, 220, -1);
     gtk_widget_add_css_class(sidebar_, "ifm-sidebar");
 
     GtkWidget *sidebar_scroll = gtk_scrolled_window_new();
@@ -433,9 +264,9 @@ void FileManagerWindow::build_ui(GtkApplication *application)
                                    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(sidebar_scroll), sidebar_);
     gtk_paned_set_start_child(GTK_PANED(paned), sidebar_scroll);
-    gtk_paned_set_position(GTK_PANED(paned), 208);
+    gtk_paned_set_position(GTK_PANED(paned), 220);
     gtk_paned_set_resize_start_child(GTK_PANED(paned), FALSE);
-    gtk_paned_set_shrink_start_child(GTK_PANED(paned), TRUE);
+    gtk_paned_set_shrink_start_child(GTK_PANED(paned), FALSE);
 
     add_sidebar_location("Home", "user-home-symbolic", g_get_home_dir());
     if (const char *desktop = g_get_user_special_dir(G_USER_DIRECTORY_DESKTOP); desktop != nullptr) {
@@ -606,27 +437,8 @@ void FileManagerWindow::apply_theme()
         << "; border-bottom: 1px solid " << colour_hex(palette->border_rgb) << "; }\n"
         << ".ifm-sidebar { background: " << colour_hex(palette->panel_rgb)
         << "; border-right: 1px solid " << colour_hex(palette->border_rgb) << "; }\n"
-        << ".ifm-sidebar-content { padding: " << metrics->compact_spacing << "px "
-        << metrics->control_spacing << "px; }\n"
-        << ".ifm-sidebar row { margin: " << metrics->compact_spacing << "px "
-        << metrics->control_spacing << "px; border-radius: " << metrics->control_radius << "px; }\n"
+        << ".ifm-sidebar row { margin: 2px 6px; border-radius: " << metrics->control_radius << "px; }\n"
         << ".ifm-sidebar row:hover { background: " << colour_hex(palette->surface_hover_rgb) << "; }\n"
-        << ".ifm-tab-strip { background: " << colour_hex(palette->panel_rgb)
-        << "; border-bottom: 1px solid " << colour_hex(palette->border_rgb) << "; }\n"
-        << ".ifm-view-switcher button { min-width: " << (metrics->content_padding * 2U) << "px; "
-        << "min-height: " << (metrics->content_padding * 2U) << "px; padding: 0; }\n"
-        << ".ifm-tab { padding: " << metrics->compact_spacing << "px "
-        << metrics->section_spacing << "px; border-radius: " << metrics->control_radius
-        << "px; color: " << colour_hex(palette->muted_rgb) << "; }\n"
-        << ".ifm-tab:hover { background: " << colour_hex(palette->surface_hover_rgb) << "; }\n"
-        << ".ifm-tab.selected { background: " << colour_hex(palette->selection_background_rgb)
-        << "; color: " << colour_hex(palette->selection_foreground_rgb)
-        << "; font-weight: " << typography->ui_bold_weight << "; }\n"
-        << ".ifm-view-switcher button:focus-visible, .ifm-tab:focus-visible, "
-        << ".ifm-sidebar row:focus-visible, .ifm-file-list row:focus-visible, "
-        << ".ifm-icon-tile:focus-visible { outline: 2px solid "
-        << colour_hex(palette->neutral_accent_rgb)
-        << "; outline-offset: 2px; }\n"
         << ".ifm-file-list, .ifm-icon-grid { background: " << colour_hex(palette->background_rgb) << "; }\n"
         << ".ifm-file-list row { border-radius: " << metrics->control_radius << "px; }\n"
         << ".ifm-file-list row:hover { background: " << colour_hex(palette->surface_hover_rgb) << "; }\n"
@@ -854,20 +666,6 @@ void FileManagerWindow::navigate_to(GFile *file, const bool record_history)
 
     Location location{uri_text, parse_name, classify_location_uri(uri_text)};
 
-    // A user navigation that overtakes a pending tab load must invalidate its
-    // deferred context restore. The tab-loading path pre-registers the same URI,
-    // so its own navigate_to() call remains qualified.
-    if (pending_tab_context_restore_ &&
-        pending_tab_context_uri_ != location.uri) {
-        ++tab_load_generation_;
-        pending_tab_context_restore_ = false;
-        pending_tab_context_uri_.clear();
-        if (tab_context_restore_source_id_ != 0U) {
-            g_source_remove(tab_context_restore_source_id_);
-            tab_context_restore_source_id_ = 0U;
-        }
-    }
-
     if (record_history) {
         const bool duplicate_current = !history_.empty() && history_index_ < history_.size() &&
                                        history_[history_index_].uri == location.uri;
@@ -897,10 +695,6 @@ void FileManagerWindow::navigate_to(GFile *file, const bool record_history)
 
     g_free(uri_text);
     g_free(parse_name);
-    if (!pending_tab_context_restore_) {
-        sync_active_tab_state();
-    }
-    rebuild_tab_strip();
     update_navigation_state();
     update_status();
 }
@@ -1205,533 +999,6 @@ GFile *FileManagerWindow::file_from_location_text(const char *text) const
         return g_file_new_for_uri(value.c_str());
     }
     return g_file_new_for_commandline_arg(value.c_str());
-}
-
-void FileManagerWindow::open_current_location_in_new_window()
-{
-    GtkApplication *application =
-        gtk_window_get_application(GTK_WINDOW(window_));
-    if (application == nullptr || current_location_ == nullptr) {
-        return;
-    }
-    FileManagerWindow::open(application, current_location_);
-}
-
-void FileManagerWindow::open_current_location_in_new_tab()
-{
-    if (!browse_session_.has_value() || history_.empty() ||
-        history_index_ >= history_.size()) {
-        return;
-    }
-
-    sync_active_tab_state();
-    const std::size_t index =
-        browse_session_->open(history_[history_index_], true);
-    const BrowseTabState *tab = browse_session_->tab(index);
-    if (tab == nullptr) {
-        return;
-    }
-
-    load_tab_state(*tab);
-}
-
-void FileManagerWindow::close_active_tab()
-{
-    if (!browse_session_.has_value() ||
-        !browse_session_->active_index().has_value()) {
-        return;
-    }
-
-    if (browse_session_->tabs().size() == 1U) {
-        gtk_window_close(GTK_WINDOW(window_));
-        return;
-    }
-
-    sync_active_tab_state();
-    const std::size_t index = *browse_session_->active_index();
-    if (!browse_session_->close(index, true) ||
-        !browse_session_->active_index().has_value()) {
-        return;
-    }
-
-    const BrowseTabState *tab =
-        browse_session_->tab(*browse_session_->active_index());
-    if (tab == nullptr) {
-        return;
-    }
-    load_tab_state(*tab);
-}
-
-void FileManagerWindow::reopen_recently_closed_tab()
-{
-    if (!browse_session_.has_value()) {
-        return;
-    }
-
-    sync_active_tab_state();
-    const std::optional<std::size_t> reopened =
-        browse_session_->reopen_closed(true);
-    if (!reopened.has_value()) {
-        return;
-    }
-
-    const BrowseTabState *tab = browse_session_->tab(*reopened);
-    if (tab == nullptr) {
-        return;
-    }
-    load_tab_state(*tab);
-}
-
-void FileManagerWindow::duplicate_active_tab()
-{
-    if (!browse_session_.has_value() ||
-        !browse_session_->active_index().has_value()) {
-        return;
-    }
-
-    sync_active_tab_state();
-    const std::optional<std::size_t> duplicated =
-        browse_session_->duplicate(*browse_session_->active_index(), true);
-    if (!duplicated.has_value()) {
-        return;
-    }
-
-    const BrowseTabState *tab = browse_session_->tab(*duplicated);
-    if (tab == nullptr) {
-        return;
-    }
-    load_tab_state(*tab);
-}
-
-void FileManagerWindow::reorder_active_tab(const int direction)
-{
-    if (!browse_session_.has_value() ||
-        !browse_session_->active_index().has_value() || direction == 0) {
-        return;
-    }
-
-    const std::size_t from = *browse_session_->active_index();
-    if ((direction < 0 && from == 0U) ||
-        (direction > 0 && from + 1U >= browse_session_->tabs().size())) {
-        return;
-    }
-
-    sync_active_tab_state();
-    const std::size_t to =
-        direction < 0 ? from - 1U : from + 1U;
-    if (browse_session_->reorder(from, to)) {
-        rebuild_tab_strip();
-    }
-}
-
-void FileManagerWindow::move_active_tab_to_new_window()
-{
-    if (!browse_session_.has_value() ||
-        !browse_session_->active_index().has_value()) {
-        return;
-    }
-
-    GtkApplication *application =
-        gtk_window_get_application(GTK_WINDOW(window_));
-    if (application == nullptr) {
-        return;
-    }
-
-    sync_active_tab_state();
-    const std::size_t index = *browse_session_->active_index();
-    std::optional<BrowseTabState> moved = browse_session_->take(index);
-    if (!moved.has_value()) {
-        return;
-    }
-
-    GFile *location =
-        g_file_new_for_uri(moved->current_location().uri.c_str());
-    FileManagerWindow *destination =
-        FileManagerWindow::open(application, location);
-    g_object_unref(location);
-    destination->adopt_transferred_tab(std::move(*moved));
-
-    if (!browse_session_->active_index().has_value()) {
-        gtk_window_close(GTK_WINDOW(window_));
-        return;
-    }
-
-    const BrowseTabState *survivor =
-        browse_session_->tab(*browse_session_->active_index());
-    if (survivor == nullptr) {
-        return;
-    }
-    load_tab_state(*survivor);
-}
-
-void FileManagerWindow::adopt_transferred_tab(BrowseTabState state)
-{
-    const Location location = state.current_location();
-    browse_session_.emplace(location);
-    BrowseTabState *tab = browse_session_->tab(0U);
-    if (tab == nullptr) {
-        return;
-    }
-    *tab = std::move(state);
-    load_tab_state(*tab);
-}
-
-void FileManagerWindow::activate_tab(const std::size_t index)
-{
-    if (!browse_session_.has_value() ||
-        browse_session_->active_index() == index) {
-        return;
-    }
-
-    sync_active_tab_state();
-    if (!browse_session_->activate(index)) {
-        return;
-    }
-    const BrowseTabState *tab = browse_session_->tab(index);
-    if (tab == nullptr) {
-        return;
-    }
-
-    load_tab_state(*tab);
-}
-
-void FileManagerWindow::load_tab_state(const BrowseTabState &tab)
-{
-    history_ = tab.history;
-    history_index_ = tab.history_index;
-    ++tab_load_generation_;
-    pending_tab_context_restore_ = true;
-    pending_tab_context_uri_ = tab.current_location().uri;
-    if (tab_context_restore_source_id_ != 0U) {
-        g_source_remove(tab_context_restore_source_id_);
-        tab_context_restore_source_id_ = 0U;
-    }
-    const std::optional<MountedPlace> unavailable_source =
-        tab.unavailable_mounted_place;
-    GFile *file = g_file_new_for_uri(tab.current_location().uri.c_str());
-    navigate_to(file, false);
-    g_object_unref(file);
-    if (unavailable_source.has_value()) {
-        mark_current_location_unavailable(*unavailable_source);
-    }
-
-    if (!gtk_directory_list_is_loading(directory_list_)) {
-        schedule_tab_context_restore();
-    }
-}
-
-void FileManagerWindow::schedule_tab_context_restore()
-{
-    if (!pending_tab_context_restore_ ||
-        tab_context_restore_source_id_ != 0U) {
-        return;
-    }
-
-    auto *dispatch = new TabContextRestoreDispatch{};
-    g_weak_ref_init(&dispatch->window, G_OBJECT(window_));
-    dispatch->generation = tab_load_generation_;
-    tab_context_restore_source_id_ = g_idle_add_full(
-        G_PRIORITY_DEFAULT_IDLE,
-        &FileManagerWindow::on_tab_context_restore_idle,
-        dispatch,
-        &FileManagerWindow::free_tab_context_restore_dispatch);
-}
-
-bool FileManagerWindow::restore_tab_context_if_current(
-    const std::uint64_t generation)
-{
-    if (!pending_tab_context_restore_ || generation != tab_load_generation_ ||
-        gtk_directory_list_is_loading(directory_list_) ||
-        !browse_session_.has_value() ||
-        !browse_session_->active_index().has_value()) {
-        return false;
-    }
-
-    const BrowseTabState *tab =
-        browse_session_->tab(*browse_session_->active_index());
-    GFile *loaded_file = gtk_directory_list_get_file(directory_list_);
-    char *loaded_uri = loaded_file == nullptr ? nullptr : g_file_get_uri(loaded_file);
-    const bool location_matches =
-        tab != nullptr && loaded_uri != nullptr &&
-        tab->current_location().uri == pending_tab_context_uri_ &&
-        pending_tab_context_uri_ == loaded_uri;
-    g_free(loaded_uri);
-    if (!location_matches) {
-        return false;
-    }
-
-    restore_active_tab_context();
-    pending_tab_context_restore_ = false;
-    pending_tab_context_uri_.clear();
-    return true;
-}
-
-GtkAdjustment *FileManagerWindow::active_scroll_adjustment() const
-{
-    if (content_stack_ == nullptr) {
-        return nullptr;
-    }
-    GtkWidget *visible = gtk_stack_get_visible_child(GTK_STACK(content_stack_));
-    return visible != nullptr && GTK_IS_SCROLLED_WINDOW(visible)
-               ? gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(visible))
-               : nullptr;
-}
-
-void FileManagerWindow::restore_active_tab_context()
-{
-    if (!browse_session_.has_value() ||
-        !browse_session_->active_index().has_value() ||
-        selection_ == nullptr || primary_selection_ == nullptr) {
-        return;
-    }
-    const BrowseTabState *tab =
-        browse_session_->tab(*browse_session_->active_index());
-    if (tab == nullptr) {
-        return;
-    }
-
-    selection_syncing_ = true;
-    gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection_));
-    gtk_single_selection_set_selected(primary_selection_,
-                                      GTK_INVALID_LIST_POSITION);
-
-    GListModel *presentation = gtk_multi_selection_get_model(selection_);
-    const guint presentation_count =
-        presentation == nullptr ? 0U : g_list_model_get_n_items(presentation);
-    for (guint index = 0; index < presentation_count; ++index) {
-        GFileInfo *info =
-            G_FILE_INFO(g_list_model_get_item(presentation, index));
-        const char *name = info == nullptr ? nullptr : g_file_info_get_name(info);
-        if (name != nullptr &&
-            std::find(tab->selected_names.begin(), tab->selected_names.end(),
-                      name) != tab->selected_names.end()) {
-            gtk_selection_model_select_item(GTK_SELECTION_MODEL(selection_),
-                                            index, false);
-        }
-        if (info != nullptr) {
-            g_object_unref(info);
-        }
-    }
-
-    if (tab->primary_selection.has_value()) {
-        GListModel *directory = G_LIST_MODEL(directory_list_);
-        const guint count = g_list_model_get_n_items(directory);
-        for (guint index = 0; index < count; ++index) {
-            GFileInfo *info =
-                G_FILE_INFO(g_list_model_get_item(directory, index));
-            const char *name =
-                info == nullptr ? nullptr : g_file_info_get_name(info);
-            const bool matches =
-                name != nullptr && name == *tab->primary_selection;
-            if (info != nullptr) {
-                g_object_unref(info);
-            }
-            if (matches) {
-                gtk_single_selection_set_selected(primary_selection_, index);
-                break;
-            }
-        }
-    }
-
-    if (GtkAdjustment *adjustment = active_scroll_adjustment();
-        adjustment != nullptr) {
-        gtk_adjustment_set_value(adjustment, tab->scroll_position);
-    }
-    selection_syncing_ = false;
-}
-
-void FileManagerWindow::sync_active_tab_state()
-{
-    if (!browse_session_.has_value() ||
-        !browse_session_->active_index().has_value()) {
-        return;
-    }
-    BrowseTabState *tab =
-        browse_session_->tab(*browse_session_->active_index());
-    if (tab == nullptr || history_.empty() ||
-        history_index_ >= history_.size()) {
-        return;
-    }
-    tab->history = history_;
-    tab->history_index = history_index_;
-    tab->unavailable_mounted_place = unavailable_mounted_place_;
-    tab->selected_names.clear();
-    tab->primary_selection.reset();
-
-    if (selection_ != nullptr) {
-        GListModel *presentation = gtk_multi_selection_get_model(selection_);
-        const guint count =
-            presentation == nullptr ? 0U : g_list_model_get_n_items(presentation);
-        for (guint index = 0; index < count; ++index) {
-            if (!gtk_selection_model_is_selected(GTK_SELECTION_MODEL(selection_),
-                                                 index)) {
-                continue;
-            }
-            GFileInfo *info =
-                G_FILE_INFO(g_list_model_get_item(presentation, index));
-            const char *name =
-                info == nullptr ? nullptr : g_file_info_get_name(info);
-            if (name != nullptr) {
-                tab->selected_names.emplace_back(name);
-            }
-            if (info != nullptr) {
-                g_object_unref(info);
-            }
-        }
-    }
-
-    if (primary_selection_ != nullptr) {
-        GFileInfo *primary = G_FILE_INFO(
-            gtk_single_selection_get_selected_item(primary_selection_));
-        const char *name =
-            primary == nullptr ? nullptr : g_file_info_get_name(primary);
-        if (name != nullptr) {
-            tab->primary_selection = name;
-        }
-    }
-
-    if (GtkAdjustment *adjustment = active_scroll_adjustment();
-        adjustment != nullptr) {
-        tab->scroll_position = gtk_adjustment_get_value(adjustment);
-    }
-}
-
-void FileManagerWindow::rebuild_tab_strip()
-{
-    if (tab_strip_ == nullptr || !browse_session_.has_value()) {
-        return;
-    }
-
-    while (GtkWidget *child = gtk_widget_get_first_child(tab_strip_)) {
-        gtk_box_remove(GTK_BOX(tab_strip_), child);
-    }
-
-    const std::optional<std::size_t> active =
-        browse_session_->active_index();
-    const auto &tabs = browse_session_->tabs();
-    GtkToggleButton *group = nullptr;
-    for (std::size_t index = 0; index < tabs.size(); ++index) {
-        const Location &location = tabs[index].current_location();
-        const std::string label =
-            location.display_name.empty() ? "Tab" : location.display_name;
-        GtkWidget *button = gtk_toggle_button_new_with_label(label.c_str());
-        if (group == nullptr) {
-            group = GTK_TOGGLE_BUTTON(button);
-        } else {
-            gtk_toggle_button_set_group(GTK_TOGGLE_BUTTON(button), group);
-        }
-        GtkWidget *label_widget = gtk_button_get_child(GTK_BUTTON(button));
-        if (GTK_IS_LABEL(label_widget)) {
-            gtk_label_set_single_line_mode(GTK_LABEL(label_widget), TRUE);
-            gtk_label_set_ellipsize(GTK_LABEL(label_widget), PANGO_ELLIPSIZE_END);
-            gtk_label_set_max_width_chars(GTK_LABEL(label_widget), 24);
-        }
-        gtk_widget_add_css_class(button, "ifm-tab");
-        gtk_widget_set_tooltip_text(button, location.uri.c_str());
-        g_object_set_data(G_OBJECT(button), "ifm-tab-index",
-                          GUINT_TO_POINTER(static_cast<guint>(index + 1U)));
-        const bool selected = active.has_value() && *active == index;
-        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(button), selected);
-        if (selected) {
-            gtk_widget_add_css_class(button, "selected");
-        }
-        const std::string accessible_label =
-            "Location tab " + std::to_string(index + 1U) + " of " +
-            std::to_string(tabs.size()) + ": " + label +
-            (selected ? ", active" : "");
-        gtk_accessible_update_property(
-            GTK_ACCESSIBLE(button), GTK_ACCESSIBLE_PROPERTY_LABEL,
-            accessible_label.c_str(), -1);
-        g_signal_connect(button, "clicked", G_CALLBACK(on_tab_clicked), this);
-        gtk_box_append(GTK_BOX(tab_strip_), button);
-    }
-    gtk_widget_set_visible(tab_strip_, tabs.size() > 1U);
-}
-
-void FileManagerWindow::on_new_window_action(GSimpleAction *action,
-                                             GVariant *parameter,
-                                             gpointer user_data)
-{
-    (void)action;
-    (void)parameter;
-    static_cast<FileManagerWindow *>(user_data)
-        ->open_current_location_in_new_window();
-}
-
-void FileManagerWindow::on_new_tab_action(GSimpleAction *action,
-                                          GVariant *parameter,
-                                          gpointer user_data)
-{
-    (void)action;
-    (void)parameter;
-    static_cast<FileManagerWindow *>(user_data)
-        ->open_current_location_in_new_tab();
-}
-
-void FileManagerWindow::on_close_tab_action(GSimpleAction *action,
-                                            GVariant *parameter,
-                                            gpointer user_data)
-{
-    (void)action;
-    (void)parameter;
-    static_cast<FileManagerWindow *>(user_data)->close_active_tab();
-}
-
-void FileManagerWindow::on_reopen_closed_tab_action(GSimpleAction *action,
-                                                    GVariant *parameter,
-                                                    gpointer user_data)
-{
-    (void)action;
-    (void)parameter;
-    static_cast<FileManagerWindow *>(user_data)->reopen_recently_closed_tab();
-}
-
-void FileManagerWindow::on_duplicate_tab_action(GSimpleAction *action,
-                                                GVariant *parameter,
-                                                gpointer user_data)
-{
-    (void)action;
-    (void)parameter;
-    static_cast<FileManagerWindow *>(user_data)->duplicate_active_tab();
-}
-
-void FileManagerWindow::on_move_tab_left_action(GSimpleAction *action,
-                                                GVariant *parameter,
-                                                gpointer user_data)
-{
-    (void)action;
-    (void)parameter;
-    static_cast<FileManagerWindow *>(user_data)->reorder_active_tab(-1);
-}
-
-void FileManagerWindow::on_move_tab_right_action(GSimpleAction *action,
-                                                 GVariant *parameter,
-                                                 gpointer user_data)
-{
-    (void)action;
-    (void)parameter;
-    static_cast<FileManagerWindow *>(user_data)->reorder_active_tab(1);
-}
-
-void FileManagerWindow::on_move_tab_new_window_action(GSimpleAction *action,
-                                                      GVariant *parameter,
-                                                      gpointer user_data)
-{
-    (void)action;
-    (void)parameter;
-    static_cast<FileManagerWindow *>(user_data)
-        ->move_active_tab_to_new_window();
-}
-
-void FileManagerWindow::on_tab_clicked(GtkButton *button, gpointer user_data)
-{
-    const guint encoded = GPOINTER_TO_UINT(
-        g_object_get_data(G_OBJECT(button), "ifm-tab-index"));
-    if (encoded == 0U) {
-        return;
-    }
-    static_cast<FileManagerWindow *>(user_data)
-        ->activate_tab(static_cast<std::size_t>(encoded - 1U));
 }
 
 void FileManagerWindow::on_back_clicked(GtkButton *button, gpointer user_data)
@@ -2040,37 +1307,7 @@ void FileManagerWindow::on_loading_changed(GObject *object, GParamSpec *pspec, g
 {
     (void)object;
     (void)pspec;
-    auto *self = static_cast<FileManagerWindow *>(user_data);
-    self->update_status();
-    if (self->pending_tab_context_restore_ &&
-        !gtk_directory_list_is_loading(self->directory_list_)) {
-        self->schedule_tab_context_restore();
-    }
-}
-
-gboolean FileManagerWindow::on_tab_context_restore_idle(gpointer user_data)
-{
-    auto *dispatch = static_cast<TabContextRestoreDispatch *>(user_data);
-    auto *window = static_cast<GObject *>(g_weak_ref_get(&dispatch->window));
-    if (window == nullptr) {
-        return G_SOURCE_REMOVE;
-    }
-
-    auto *self = static_cast<FileManagerWindow *>(
-        g_object_get_data(window, "ifm-window-owner"));
-    if (self != nullptr) {
-        self->tab_context_restore_source_id_ = 0U;
-        (void)self->restore_tab_context_if_current(dispatch->generation);
-    }
-    g_object_unref(window);
-    return G_SOURCE_REMOVE;
-}
-
-void FileManagerWindow::free_tab_context_restore_dispatch(gpointer user_data)
-{
-    auto *dispatch = static_cast<TabContextRestoreDispatch *>(user_data);
-    g_weak_ref_clear(&dispatch->window);
-    delete dispatch;
+    static_cast<FileManagerWindow *>(user_data)->update_status();
 }
 
 void FileManagerWindow::on_launch_finished(GObject *source, GAsyncResult *result, gpointer user_data)

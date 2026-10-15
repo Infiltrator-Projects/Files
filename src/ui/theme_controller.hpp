@@ -6,7 +6,6 @@
 #include <gtk/gtk.h>
 
 #include <array>
-#include <vector>
 
 namespace infiltrator::files {
 
@@ -19,8 +18,6 @@ public:
     ThemeController &operator=(const ThemeController &) = delete;
 
 private:
-    friend struct ThemeControllerTestAccess;
-
     static void on_window_finalized(gpointer user_data, GObject *where_object_was);
     static void on_theme_toggled(GtkCheckButton *button, gpointer user_data);
     static void on_system_theme_changed(GObject *object, GParamSpec *pspec, gpointer user_data);
@@ -33,7 +30,6 @@ private:
 
     [[nodiscard]] static InfiltratrThemeMode load_mode();
     static void save_mode(InfiltratrThemeMode mode);
-    static void apply_mode_to_all(InfiltratrThemeMode mode);
     [[nodiscard]] static const char *mode_label(InfiltratrThemeMode mode) noexcept;
 
     GtkWindow *window_{nullptr};
@@ -45,9 +41,6 @@ private:
     gulong theme_name_handler_{0};
     gulong prefer_dark_handler_{0};
     InfiltratrThemeMode mode_{INFILTRATR_THEME_SYSTEM};
-
-    static std::vector<ThemeController *> controllers_;
-    static bool synchronizing_;
 };
 
 } // namespace infiltrator::files

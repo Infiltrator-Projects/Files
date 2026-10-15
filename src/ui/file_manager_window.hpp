@@ -4,7 +4,6 @@
 #include "../core/location.hpp"
 #include "../core/mounted_places.hpp"
 #include "batch_item_operation_controller.hpp"
-#include "browse_session.hpp"
 #include "create_folder_controller.hpp"
 #include "destructive_operation_controller.hpp"
 #include "item_operation_controller.hpp"
@@ -24,11 +23,8 @@ namespace infiltrator::files {
 
 class FileManagerWindow final {
 public:
-    explicit FileManagerWindow(GtkApplication *application, GFile *initial_location = nullptr);
+    explicit FileManagerWindow(GtkApplication *application);
     ~FileManagerWindow();
-
-    static FileManagerWindow *open(GtkApplication *application,
-                                   GFile *initial_location = nullptr);
 
     FileManagerWindow(const FileManagerWindow &) = delete;
     FileManagerWindow &operator=(const FileManagerWindow &) = delete;
@@ -62,31 +58,6 @@ private:
     };
 
     static void on_window_finalized(gpointer user_data, GObject *where_object_was);
-    static void on_new_window_action(GSimpleAction *action,
-                                     GVariant *parameter,
-                                     gpointer user_data);
-    static void on_new_tab_action(GSimpleAction *action,
-                                  GVariant *parameter,
-                                  gpointer user_data);
-    static void on_close_tab_action(GSimpleAction *action,
-                                    GVariant *parameter,
-                                    gpointer user_data);
-    static void on_reopen_closed_tab_action(GSimpleAction *action,
-                                            GVariant *parameter,
-                                            gpointer user_data);
-    static void on_duplicate_tab_action(GSimpleAction *action,
-                                        GVariant *parameter,
-                                        gpointer user_data);
-    static void on_move_tab_left_action(GSimpleAction *action,
-                                        GVariant *parameter,
-                                        gpointer user_data);
-    static void on_move_tab_right_action(GSimpleAction *action,
-                                         GVariant *parameter,
-                                         gpointer user_data);
-    static void on_move_tab_new_window_action(GSimpleAction *action,
-                                              GVariant *parameter,
-                                              gpointer user_data);
-    static void on_tab_clicked(GtkButton *button, gpointer user_data);
     static void on_back_clicked(GtkButton *button, gpointer user_data);
     static void on_forward_clicked(GtkButton *button, gpointer user_data);
     static void on_up_clicked(GtkButton *button, gpointer user_data);
@@ -110,8 +81,6 @@ private:
                                          GtkListItem *item,
                                          gpointer user_data);
     static void on_loading_changed(GObject *object, GParamSpec *pspec, gpointer user_data);
-    static gboolean on_tab_context_restore_idle(gpointer user_data);
-    static void free_tab_context_restore_dispatch(gpointer user_data);
     static void on_launch_finished(GObject *source, GAsyncResult *result, gpointer user_data);
     static void on_multi_selection_changed(GtkSelectionModel *model,
                                            guint position,
@@ -129,22 +98,6 @@ private:
                                            GObject *where_object_was);
 
     void build_ui(GtkApplication *application);
-    void open_current_location_in_new_window();
-    void open_current_location_in_new_tab();
-    void close_active_tab();
-    void reopen_recently_closed_tab();
-    void duplicate_active_tab();
-    void reorder_active_tab(int direction);
-    void move_active_tab_to_new_window();
-    void adopt_transferred_tab(BrowseTabState state);
-    void activate_tab(std::size_t index);
-    void load_tab_state(const BrowseTabState &tab);
-    void sync_active_tab_state();
-    void restore_active_tab_context();
-    void schedule_tab_context_restore();
-    [[nodiscard]] bool restore_tab_context_if_current(std::uint64_t generation);
-    [[nodiscard]] GtkAdjustment *active_scroll_adjustment() const;
-    void rebuild_tab_strip();
     void apply_theme();
     void add_sidebar_location(const char *title, const char *icon_name, const char *target);
     void refresh_mounted_places();
@@ -171,7 +124,6 @@ private:
     GtkWidget *location_entry_{nullptr};
     GtkWidget *sidebar_{nullptr};
     GtkWidget *content_stack_{nullptr};
-    GtkWidget *tab_strip_{nullptr};
     GtkWidget *list_view_button_{nullptr};
     GtkWidget *icon_view_button_{nullptr};
     GtkWidget *compact_view_button_{nullptr};
@@ -189,15 +141,10 @@ private:
     GFileMonitor *temporal_policy_monitor_{nullptr};
     std::unordered_set<GtkWidget *> modified_cells_;
     std::vector<Location> history_;
-    std::optional<BrowseSessionState> browse_session_;
     std::size_t history_index_{0};
     ViewMode view_mode_{ViewMode::List};
     bool operation_surface_installed_{false};
     bool selection_syncing_{false};
-    bool pending_tab_context_restore_{false};
-    guint tab_context_restore_source_id_{0};
-    std::uint64_t tab_load_generation_{0};
-    std::string pending_tab_context_uri_;
     bool current_location_available_{true};
     bool temporal_policy_monitoring_parent_{false};
     std::string temporal_policy_watch_name_;
