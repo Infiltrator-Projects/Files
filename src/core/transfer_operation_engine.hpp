@@ -40,6 +40,7 @@ public:
     }
 
     [[nodiscard]] TransferProgress progress() const noexcept;
+    [[nodiscard]] bool has_batch_totals() const noexcept;
 
     // Progress-reporting contract used by the transfer implementation.
     void begin_batch(std::uintmax_t bytes, std::uintmax_t items) noexcept;

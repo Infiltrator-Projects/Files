@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "batch_transfer_engine.hpp"
 
+#include "aggregate_arithmetic.hpp"
 #include "operation_journal.hpp"
 #include "recovery_operation_engine.hpp"
 
-#include <limits>
 #include <string>
 #include <utility>
 
@@ -26,7 +26,7 @@ OperationResult failure(const OperationStatus status,
                         std::string message,
                         const bool changed = false)
 {
-    return OperationResult{status, phase, destination, std::move(message), changed};
+    return OperationResult{status, phase, destination, std::move(message), changed, {}};
 }
 
 bool path_present(const std::filesystem::path &path, std::error_code &error)
@@ -38,15 +38,6 @@ bool path_present(const std::filesystem::path &path, std::error_code &error)
         return false;
     }
     return !error && status.type() != std::filesystem::file_type::not_found;
-}
-
-bool checked_add(const std::uintmax_t value, std::uintmax_t &total) noexcept
-{
-    if (value > std::numeric_limits<std::uintmax_t>::max() - total) {
-        return false;
-    }
-    total += value;
-    return true;
 }
 
 bool measure_item(const std::filesystem::path &source,
@@ -63,7 +54,7 @@ bool measure_item(const std::filesystem::path &source,
         return false;
     }
 
-    if (!checked_add(1U, items)) {
+    if (!checked_add_uintmax(1U, items)) {
         error = std::make_error_code(std::errc::value_too_large);
         return false;
     }
@@ -82,7 +73,7 @@ bool measure_item(const std::filesystem::path &source,
     for (std::filesystem::recursive_directory_iterator iterator(source, error), end;
          !error && iterator != end;
          iterator.increment(error)) {
-        if (!checked_add(1U, items)) {
+        if (!checked_add_uintmax(1U, items)) {
             error = std::make_error_code(std::errc::value_too_large);
             return false;
         }
@@ -95,7 +86,7 @@ bool measure_item(const std::filesystem::path &source,
             if (error) {
                 return false;
             }
-            if (!checked_add(size, bytes)) {
+            if (!checked_add_uintmax(size, bytes)) {
                 error = std::make_error_code(std::errc::value_too_large);
                 return false;
             }
@@ -182,8 +173,8 @@ OperationResult BatchTransferEngine::execute(
                                ? "A selected item is too large to represent safely."
                                : "A selected item could not be measured safely.");
         }
-        if (!checked_add(item.bytes, total_bytes) ||
-            !checked_add(item.items, total_items)) {
+        if (!checked_add_uintmax(item.bytes, total_bytes) ||
+            !checked_add_uintmax(item.items, total_items)) {
             return failure(OperationStatus::ExecutionFailure,
                            OperationPhase::Preflight,
                            item.destination,
@@ -310,7 +301,8 @@ OperationResult BatchTransferEngine::execute(
                            OperationPhase::Complete,
                            {},
                            std::move(message),
-                           changed_count != 0U};
+                           changed_count != 0U,
+                           {}};
 }
 
 } // namespace infiltrator::files

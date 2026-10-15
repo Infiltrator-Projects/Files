@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "transfer_operation_engine.hpp"
+#include "aggregate_arithmetic.hpp"
 #include "destination_ownership.hpp"
 
 #include <array>
@@ -121,7 +122,10 @@ bool equivalent_copy_shape(const std::filesystem::path &source,
     for (std::filesystem::recursive_directory_iterator iterator(source, error), end;
          !error && iterator != end;
          iterator.increment(error)) {
-        ++source_entries;
+        if (!checked_add_uintmax(1U, source_entries)) {
+            error = std::make_error_code(std::errc::value_too_large);
+            return false;
+        }
         const std::filesystem::path relative =
             iterator->path().lexically_relative(source);
         if (relative.empty()) {
@@ -170,7 +174,10 @@ bool equivalent_copy_shape(const std::filesystem::path &source,
     for (std::filesystem::recursive_directory_iterator iterator(destination, error), end;
          !error && iterator != end;
          iterator.increment(error)) {
-        ++destination_entries;
+        if (!checked_add_uintmax(1U, destination_entries)) {
+            error = std::make_error_code(std::errc::value_too_large);
+            return false;
+        }
     }
     return !error && source_entries == destination_entries;
 }
@@ -208,7 +215,12 @@ OperationResult preflight_parent(const std::filesystem::path &source,
                        "The destination is not a folder.");
     }
 
-    return OperationResult{OperationStatus::Success, OperationPhase::Preflight, {}, {}, false};
+    return OperationResult{OperationStatus::Success,
+                           OperationPhase::Preflight,
+                           {},
+                           {},
+                           false,
+                           {}};
 }
 
 bool scan_totals(const std::filesystem::path &source,
@@ -224,7 +236,10 @@ bool scan_totals(const std::filesystem::path &source,
         return false;
     }
 
-    ++items;
+    if (!checked_add_uintmax(1U, items)) {
+        error = std::make_error_code(std::errc::value_too_large);
+        return false;
+    }
     if (std::filesystem::is_regular_file(status)) {
         bytes = std::filesystem::file_size(source, error);
         return !error;
@@ -240,14 +255,21 @@ bool scan_totals(const std::filesystem::path &source,
     for (std::filesystem::recursive_directory_iterator iterator(source, error), end;
          !error && iterator != end;
          iterator.increment(error)) {
-        ++items;
+        if (!checked_add_uintmax(1U, items)) {
+            error = std::make_error_code(std::errc::value_too_large);
+            return false;
+        }
         const auto entry_status = iterator->symlink_status(error);
         if (error) {
             return false;
         }
         if (std::filesystem::is_regular_file(entry_status)) {
-            bytes += iterator->file_size(error);
+            const std::uintmax_t size = iterator->file_size(error);
             if (error) {
+                return false;
+            }
+            if (!checked_add_uintmax(size, bytes)) {
+                error = std::make_error_code(std::errc::value_too_large);
                 return false;
             }
         }
@@ -412,19 +434,21 @@ OperationResult copy_exact(const std::filesystem::path &source,
                            destination_ownership::OwnedOutputs *completed_outputs = nullptr)
 {
     std::error_code error;
-    std::uintmax_t bytes = 0;
-    std::uintmax_t items = 0;
-    if (!scan_totals(source, bytes, items, error)) {
-        return failure(OperationEngine::status_for_error(error),
-                       OperationPhase::Preflight,
-                       destination,
-                       "The selected item could not be measured safely.");
-    }
-    if (control != nullptr) {
-        control->set_total(bytes, items);
-        if (control->cancelled()) {
-            return cancelled_result(destination);
+    if (control != nullptr && !control->has_batch_totals()) {
+        std::uintmax_t bytes = 0;
+        std::uintmax_t items = 0;
+        if (!scan_totals(source, bytes, items, error)) {
+            return failure(OperationEngine::status_for_error(error),
+                           OperationPhase::Preflight,
+                           destination,
+                           error == std::errc::value_too_large
+                               ? "The selected item is too large to represent safely."
+                               : "The selected item could not be measured safely.");
         }
+        control->set_total(bytes, items);
+    }
+    if (control != nullptr && control->cancelled()) {
+        return cancelled_result(destination);
     }
 
     const auto source_status = std::filesystem::symlink_status(source, error);
@@ -692,7 +716,8 @@ OperationResult copy_exact(const std::filesystem::path &source,
                            OperationPhase::Complete,
                            destination,
                            "Transferred " + quoted_name(destination) + ".",
-                           true};
+                           true,
+                           {}};
 }
 
 struct DestinationDecision {
@@ -752,6 +777,12 @@ TransferProgress TransferControl::progress() const noexcept
 {
     std::lock_guard<std::mutex> lock(progress_mutex_);
     return progress_;
+}
+
+bool TransferControl::has_batch_totals() const noexcept
+{
+    std::lock_guard<std::mutex> lock(progress_mutex_);
+    return batch_mode_;
 }
 
 void TransferControl::begin_batch(const std::uintmax_t bytes, const std::uintmax_t items) noexcept
@@ -876,7 +907,8 @@ OperationResult TransferOperationEngine::copy_item(const std::filesystem::path &
                                OperationPhase::Complete,
                                decision.destination,
                                "Skipped " + quoted_name(source) + ".",
-                               false};
+                               false,
+                               {}};
     }
 
     OperationResult result = copy_exact(source, decision.destination, control, hooks_);
@@ -903,7 +935,8 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
                                OperationPhase::Complete,
                                source,
                                "The item is already in that folder.",
-                               false};
+                               false,
+                               {}};
     }
 
     std::error_code error;
@@ -937,7 +970,8 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
                                OperationPhase::Complete,
                                decision.destination,
                                "Skipped " + quoted_name(source) + ".",
-                               false};
+                               false,
+                               {}};
     }
 
     std::uintmax_t bytes = 0;
@@ -985,7 +1019,8 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
                                OperationPhase::Complete,
                                decision.destination,
                                "Moved " + quoted_name(decision.destination) + ".",
-                               true};
+                               true,
+                               {}};
     }
 
     if (error != std::errc::cross_device_link) {
@@ -1198,7 +1233,8 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
                            OperationPhase::Complete,
                            decision.destination,
                            "Moved " + quoted_name(decision.destination) + ".",
-                           true};
+                           true,
+                           {}};
 }
 
 } // namespace infiltrator::files
