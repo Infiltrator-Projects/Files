@@ -33,7 +33,7 @@ if(NOT INFILTRATR_COMMON_VERSION STREQUAL INFILTRATR_COMMON_EXPECTED_VERSION)
         "found ${INFILTRATR_COMMON_VERSION}")
 endif()
 
-# The gitlink is the single authority for the exact Common commit.  Git is only
+# The gitlink is the single authority for the exact Common commit. Git is only
 # a build dependency for a live checkout; exported source can qualify the
 # pinned dependency through Common's version contract without a .git database.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
@@ -45,8 +45,15 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
         OUTPUT_VARIABLE INFILTRATR_COMMON_GITLINK
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET)
-    string(REGEX MATCH "[0-9a-fA-F]{40}"
-           INFILTRATR_COMMON_EXPECTED_COMMIT "${INFILTRATR_COMMON_GITLINK}")
+
+    # CMake's regular-expression dialect does not implement {N} repetition.
+    # Parse the complete gitlink record, then validate the extracted SHA length.
+    string(REGEX MATCH "160000[ \t]+commit[ \t]+[0-9a-fA-F]+"
+           INFILTRATR_COMMON_GITLINK_RECORD "${INFILTRATR_COMMON_GITLINK}")
+    string(REGEX REPLACE "^160000[ \t]+commit[ \t]+" ""
+           INFILTRATR_COMMON_EXPECTED_COMMIT "${INFILTRATR_COMMON_GITLINK_RECORD}")
+    string(LENGTH "${INFILTRATR_COMMON_EXPECTED_COMMIT}"
+           INFILTRATR_COMMON_EXPECTED_COMMIT_LENGTH)
 
     execute_process(
         COMMAND "${GIT_EXECUTABLE}" -C "${INFILTRATR_COMMON_DIR}" rev-parse HEAD
@@ -56,7 +63,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
         ERROR_QUIET)
 
     if(NOT INFILTRATR_COMMON_GITLINK_RESULT EQUAL 0 OR
-       INFILTRATR_COMMON_EXPECTED_COMMIT STREQUAL "" OR
+       NOT INFILTRATR_COMMON_EXPECTED_COMMIT_LENGTH EQUAL 40 OR
        NOT INFILTRATR_COMMON_GIT_RESULT EQUAL 0 OR
        NOT INFILTRATR_COMMON_COMMIT STREQUAL INFILTRATR_COMMON_EXPECTED_COMMIT)
         message(FATAL_ERROR
@@ -96,7 +103,7 @@ target_link_libraries(infiltrator-files-core PUBLIC
     PkgConfig::GIO)
 infiltrator_enable_warnings(infiltrator-files-core)
 
-# Compile the GTK implementation once.  The application and hosted UI tests
+# Compile the GTK implementation once. The application and hosted UI tests
 # consume this target instead of maintaining duplicate source-file inventories.
 add_library(infiltrator-files-ui STATIC
     src/ui/batch_item_operation_controller.cpp

@@ -87,7 +87,7 @@ int main()
     }
 
     // Model a complete START record from an earlier application session,
-    // followed by an incomplete crash tail.  The scan must expose only the
+    // followed by an incomplete crash tail. The scan must expose only the
     // complete earlier record, and the next journal append must discard the
     // damaged tail before writing a new framed record.
     {
@@ -148,7 +148,7 @@ int main()
         return 9;
     }
 
-    OperationJournal unavailable({});
+    OperationJournal unavailable(fs::path{});
     if (!unavailable.begin("rename", "/tmp/a", "/tmp/b").empty()) {
         fs::remove_all(root, cleanup_error);
         return 10;
