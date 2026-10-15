@@ -113,6 +113,7 @@ add_library(infiltrator-files-ui STATIC
     src/ui/file_manager_window.cpp
     src/ui/item_operation_controller.cpp
     src/ui/journal_recovery_controller.cpp
+    src/ui/operation_surface_install.cpp
     src/ui/theme_controller.cpp)
 target_include_directories(infiltrator-files-ui PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src")
