@@ -30,11 +30,15 @@ Single-item copy formerly scanned the complete source tree for totals even when 
 
 Appearance preference persistence formerly used GLib file publication while the project already requires Common's durable POSIX state machinery for Files-owned state. It now resolves the XDG configuration root and reads/writes the preference through pinned Common, including durable atomic private-file publication.
 
-### Release authority
+### Release authority and publication timing
 
-The build/release path now has a clearer single chain of custody: one build/test/package job produces and validates the Debian package; a release job receives that exact artifact; `ci/release.sh` verifies commit identity, package identity, tag identity, exact release assets and their SHA-256 digests; public catalogue and beta APT visibility must then be observed successfully before the workflow is green.
+The build/release path now has one clear chain of custody: one build/test/package job produces and validates the Debian package; a release job receives that exact artifact; `ci/release.sh` verifies commit identity, package identity, tag identity, exact release assets and their SHA-256 digests; public catalogue and beta APT visibility must then be observed successfully before the workflow is green.
 
 The package architecture is explicitly checked as `amd64`, matching the central repository's current File Manager publication contract, and the release script uses one architecture constant instead of repeating the value in independent release checks.
+
+The live 0.1.29 qualification exposed a timing mismatch: the File Manager verifier originally allowed five minutes for public propagation while the central repository itself has a five-minute scheduled recovery publisher. Equal windows leave no allowance for normal GitHub scheduler delay. The verifier now has a bounded fifteen-minute observation window and the publish job a twenty-five-minute ceiling, so at least one delayed recovery cycle can complete without converting normal scheduling jitter into a false release failure.
+
+Workflow concurrency is also now fail-safe for superseded commits. A newer run on the same ref cancels the older verification run, preventing an earlier release-intent commit from reaching publication after a corrective commit has become the authoritative branch head.
 
 ## Build and dependency assessment
 
@@ -46,11 +50,13 @@ Compiler warnings are deliberately enabled at a useful level. GTK 4.14 reports t
 
 The hosted gate covers ten regression executables spanning location modelling, detail metadata, mounted places, GTK window state/lifetime, ordinary operations, destination ownership, recovery, transfer, batch transfer and the operation journal. The GTK regression executes headlessly under Xvfb/DBus in CI. Packaging is built only after the tests pass and is then inspected for package name, version, architecture, GTK dependency, executable and desktop entry before checksums are generated.
 
-The review itself exercised the gate as intended: the first 0.1.28 candidate built but failed `operation-engine`; publication was therefore skipped. The failing edge case was corrected, and subsequent commits passed all ten tests plus Debian package validation before the final release version was cut. This is evidence that the gate is preventing publication rather than merely decorating it.
+The review exercised the gate rather than merely inspecting it. The first 0.1.28 candidate built but failed `operation-engine`; publication was skipped. The edge case was corrected, and subsequent commits passed all ten tests plus Debian package validation. Version 0.1.29 then passed source/build/test/package and exact GitHub release verification but failed the required public-publication observation, which revealed the equal-window timing defect described above. The corrected release machinery was subsequently qualified on `main` before 0.1.30 was cut.
 
 ## Repository and release hygiene
 
-The intended steady state is one branch, `main`; no open pull requests or temporary review branches; an exact release tag on the qualified release commit; exactly the expected Debian package and checksum assets; and the same version visible in the central catalogue and beta APT repository. The release workflow now treats the last two publication observations as required evidence.
+The steady state is one branch, `main`; no open pull requests or temporary review branches; an exact release tag on the qualified release commit; exactly the expected Debian package and checksum assets; and the same version visible in the central catalogue and beta APT repository. The release workflow treats the last two publication observations as required evidence rather than assuming that a GitHub Release alone means the product is publicly installable.
+
+Historical merged pull requests and earlier releases remain as provenance; they are not live branch or PR debris and are not rewritten or deleted merely to make the repository appear smaller.
 
 ## Deliberate complexity retained
 
@@ -67,4 +73,4 @@ Each exists because it owns a materially different failure or concurrency bounda
 
 ## Result
 
-After the changes above, the principal maintenance risks found by this review no longer depend on competing authorities or silent assumptions. Core filesystem safety remains fail-closed, progress accounting is overflow-aware, unnecessary traversal has been reduced, Files-owned theme state uses the shared durable substrate, and release success now means the tested package has actually propagated through the public Infiltrator publication path.
+After the changes above, the principal maintenance risks found by this review no longer depend on competing authorities or silent assumptions. Core filesystem safety remains fail-closed, progress accounting is overflow-aware, unnecessary traversal has been reduced, Files-owned theme state uses the shared durable substrate, superseded verification cannot race the current branch state, and release success means the exact tested package has actually propagated through the public Infiltrator publication path.
