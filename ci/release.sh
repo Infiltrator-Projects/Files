@@ -8,6 +8,8 @@ set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 VERSION_FILE="$ROOT/VERSION"
 readonly RELEASE_ARCHITECTURE='amd64'
+readonly APT_POLL_ATTEMPTS=60
+readonly APT_POLL_INTERVAL_SECONDS=15
 
 fail() {
     printf 'release: %s\n' "$*" >&2
@@ -157,7 +159,11 @@ wait_for_apt() {
     local packages="https://infiltrator-projects.github.io/Infiltrator-Repository/dists/beta/main/binary-${RELEASE_ARCHITECTURE}/Packages.gz"
     local attempt cache_key catalogue_version apt_match
 
-    for attempt in $(seq 1 20); do
+    # The central repository has a five-minute scheduled recovery publisher.
+    # Verification therefore needs a materially larger observation window than
+    # one scheduler period; otherwise normal GitHub scheduling jitter can turn
+    # a successful release into a false-red File Manager workflow.
+    for attempt in $(seq 1 "$APT_POLL_ATTEMPTS"); do
         cache_key="${GITHUB_RUN_ID:-manual}-${attempt}"
         catalogue_version=$(curl -fsSL --retry 2 --retry-delay 1 \
             -H 'Cache-Control: no-cache' "${catalogue}?release=${cache_key}" 2>/dev/null \
@@ -188,12 +194,12 @@ wait_for_apt() {
             return 0
         fi
 
-        printf 'APT propagation pending (%d/20): catalogue=%s package=%s\n' \
-            "$attempt" "${catalogue_version:-missing}" "$apt_match"
-        sleep 15
+        printf 'APT propagation pending (%d/%d): catalogue=%s package=%s\n' \
+            "$attempt" "$APT_POLL_ATTEMPTS" "${catalogue_version:-missing}" "$apt_match"
+        sleep "$APT_POLL_INTERVAL_SECONDS"
     done
 
-    fail "APT propagation has not completed yet; the verified GitHub release remains valid"
+    fail "APT propagation has not completed within the publication observation window; the verified GitHub release remains valid"
 }
 
 usage() {
