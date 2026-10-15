@@ -10,7 +10,7 @@
 - Missing/invalid persistent state roots fail closed instead of silently moving recovery state into `/tmp`.
 - Journal read/update failure is exposed in the recovery surface rather than silently appearing as an empty recovery set.
 - GTK implementation sources now have one CMake target consumed by the application and hosted tests, removing duplicated source inventories.
-- The exact Infiltratr Common commit is derived from the repository gitlink; CMake no longer carries a second hard-coded commit SHA.
+- The exact Infiltratr Common commit is derived from the repository gitlink; CMake no longer carries a second hard-coded commit SHA, and live checkouts must still prove the checked-out submodule matches that gitlink exactly.
 - Generated Python bytecode and obsolete dated swarm snapshots are removed from repository state and ignored going forward.
 
 ## Build and release changes
