@@ -1,3 +1,7 @@
 /build/
 /build-*/
 /dist/
+
+# Python coordinator/test by-products are never repository state.
+__pycache__/
+*.py[cod]

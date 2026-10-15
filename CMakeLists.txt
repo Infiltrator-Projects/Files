@@ -8,7 +8,6 @@ project(InfiltratorFileManager VERSION "${INFILTRATOR_FILE_MANAGER_VERSION}" LAN
 include(CTest)
 include(GNUInstallDirs)
 find_package(PkgConfig REQUIRED)
-find_package(Git REQUIRED)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -18,7 +17,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(INFILTRATR_COMMON_EXPECTED_VERSION "1.19.41")
-set(INFILTRATR_COMMON_EXPECTED_COMMIT "b0387b7ab5d71cda60748e2506b85cdc0e6b5e8b")
 set(INFILTRATR_COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/infiltratr-common")
 
 if(NOT EXISTS "${INFILTRATR_COMMON_DIR}/VERSION")
@@ -35,18 +33,42 @@ if(NOT INFILTRATR_COMMON_VERSION STREQUAL INFILTRATR_COMMON_EXPECTED_VERSION)
         "found ${INFILTRATR_COMMON_VERSION}")
 endif()
 
+# The gitlink is the single authority for the exact Common commit. Git is only
+# a build dependency for a live checkout; exported source can qualify the
+# pinned dependency through Common's version contract without a .git database.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
+    find_package(Git REQUIRED)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_CURRENT_SOURCE_DIR}"
+                ls-tree HEAD -- src/infiltratr-common
+        RESULT_VARIABLE INFILTRATR_COMMON_GITLINK_RESULT
+        OUTPUT_VARIABLE INFILTRATR_COMMON_GITLINK
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+
+    # CMake's regular-expression dialect does not implement {N} repetition.
+    # Parse the complete gitlink record, then validate the extracted SHA length.
+    string(REGEX MATCH "160000[ \t]+commit[ \t]+[0-9a-fA-F]+"
+           INFILTRATR_COMMON_GITLINK_RECORD "${INFILTRATR_COMMON_GITLINK}")
+    string(REGEX REPLACE "^160000[ \t]+commit[ \t]+" ""
+           INFILTRATR_COMMON_EXPECTED_COMMIT "${INFILTRATR_COMMON_GITLINK_RECORD}")
+    string(LENGTH "${INFILTRATR_COMMON_EXPECTED_COMMIT}"
+           INFILTRATR_COMMON_EXPECTED_COMMIT_LENGTH)
+
     execute_process(
         COMMAND "${GIT_EXECUTABLE}" -C "${INFILTRATR_COMMON_DIR}" rev-parse HEAD
         RESULT_VARIABLE INFILTRATR_COMMON_GIT_RESULT
         OUTPUT_VARIABLE INFILTRATR_COMMON_COMMIT
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET)
-    if(NOT INFILTRATR_COMMON_GIT_RESULT EQUAL 0 OR
+
+    if(NOT INFILTRATR_COMMON_GITLINK_RESULT EQUAL 0 OR
+       NOT INFILTRATR_COMMON_EXPECTED_COMMIT_LENGTH EQUAL 40 OR
+       NOT INFILTRATR_COMMON_GIT_RESULT EQUAL 0 OR
        NOT INFILTRATR_COMMON_COMMIT STREQUAL INFILTRATR_COMMON_EXPECTED_COMMIT)
         message(FATAL_ERROR
-            "Infiltrator File Manager requires Common commit "
-            "${INFILTRATR_COMMON_EXPECTED_COMMIT}; found ${INFILTRATR_COMMON_COMMIT}")
+            "Infiltrator File Manager requires the Common commit recorded by its gitlink "
+            "(${INFILTRATR_COMMON_EXPECTED_COMMIT}); found ${INFILTRATR_COMMON_COMMIT}")
     endif()
 endif()
 
@@ -57,6 +79,13 @@ add_subdirectory("${INFILTRATR_COMMON_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/infiltr
 
 pkg_check_modules(GTK4 REQUIRED IMPORTED_TARGET gtk4>=4.10)
 pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0)
+
+function(infiltrator_enable_warnings target)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+        target_compile_options(${target} PRIVATE
+            -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion)
+    endif()
+endfunction()
 
 add_library(infiltrator-files-core STATIC
     src/core/batch_transfer_engine.cpp
@@ -72,9 +101,11 @@ target_compile_features(infiltrator-files-core PUBLIC cxx_std_20)
 target_link_libraries(infiltrator-files-core PUBLIC
     InfiltratrCommon::Common
     PkgConfig::GIO)
+infiltrator_enable_warnings(infiltrator-files-core)
 
-add_executable(infiltrator-file-manager
-    src/main.cpp
+# Compile the GTK implementation once. The application and hosted UI tests
+# consume this target instead of maintaining duplicate source-file inventories.
+add_library(infiltrator-files-ui STATIC
     src/ui/batch_item_operation_controller.cpp
     src/ui/create_folder_controller.cpp
     src/ui/destructive_operation_controller.cpp
@@ -82,44 +113,45 @@ add_executable(infiltrator-file-manager
     src/ui/file_manager_window.cpp
     src/ui/item_operation_controller.cpp
     src/ui/journal_recovery_controller.cpp
+    src/ui/operation_surface_install.cpp
     src/ui/theme_controller.cpp)
-target_include_directories(infiltrator-file-manager PRIVATE
+target_include_directories(infiltrator-files-ui PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(infiltrator-file-manager PRIVATE
+target_compile_features(infiltrator-files-ui PUBLIC cxx_std_20)
+target_link_libraries(infiltrator-files-ui PUBLIC
     infiltrator-files-core
     PkgConfig::GTK4)
+infiltrator_enable_warnings(infiltrator-files-ui)
 
-foreach(target infiltrator-files-core infiltrator-file-manager)
-    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
-        target_compile_options(${target} PRIVATE
-            -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion)
-    endif()
-endforeach()
+add_executable(infiltrator-file-manager src/main.cpp)
+target_link_libraries(infiltrator-file-manager PRIVATE infiltrator-files-ui)
+infiltrator_enable_warnings(infiltrator-file-manager)
+
+function(infiltrator_add_core_test target source test_name)
+    add_executable(${target} ${source})
+    target_link_libraries(${target} PRIVATE infiltrator-files-core)
+    infiltrator_enable_warnings(${target})
+    add_test(NAME ${test_name} COMMAND ${target})
+endfunction()
 
 if(BUILD_TESTING)
-    add_executable(location-model-test tests/location_model_test.cpp)
-    target_link_libraries(location-model-test PRIVATE infiltrator-files-core)
-    add_test(NAME location-model COMMAND location-model-test)
+    infiltrator_add_core_test(location-model-test tests/location_model_test.cpp location-model)
 
-    add_executable(detail-metadata-test
-        tests/detail_metadata_test.cpp
-        src/ui/detail_metadata.cpp)
     add_library(calendar-date-test-fixture MODULE tests/calendar_date_fixture.c)
+
+    add_executable(detail-metadata-test tests/detail_metadata_test.cpp)
     target_compile_definitions(detail-metadata-test PRIVATE
         CALENDAR_DATE_FIXTURE_PATH="$<TARGET_FILE:calendar-date-test-fixture>")
     add_dependencies(detail-metadata-test calendar-date-test-fixture)
-    target_link_libraries(detail-metadata-test PRIVATE infiltrator-files-core)
+    target_link_libraries(detail-metadata-test PRIVATE infiltrator-files-ui)
+    infiltrator_enable_warnings(detail-metadata-test)
     add_test(NAME detail-metadata COMMAND detail-metadata-test)
 
-    add_executable(mounted-places-test tests/mounted_places_test.cpp)
-    target_link_libraries(mounted-places-test PRIVATE infiltrator-files-core)
-    add_test(NAME mounted-places COMMAND mounted-places-test)
+    infiltrator_add_core_test(mounted-places-test tests/mounted_places_test.cpp mounted-places)
 
-    add_executable(window-state-test
-        tests/window_state_test.cpp
-        src/ui/file_manager_window.cpp
-        src/ui/detail_metadata.cpp)
-    target_link_libraries(window-state-test PRIVATE infiltrator-files-core PkgConfig::GTK4)
+    add_executable(window-state-test tests/window_state_test.cpp)
+    target_link_libraries(window-state-test PRIVATE infiltrator-files-ui)
+    infiltrator_enable_warnings(window-state-test)
     find_program(XVFB_RUN_EXECUTABLE xvfb-run)
     find_program(DBUS_RUN_SESSION_EXECUTABLE dbus-run-session)
     if(XVFB_RUN_EXECUTABLE AND DBUS_RUN_SESSION_EXECUTABLE)
@@ -132,29 +164,12 @@ if(BUILD_TESTING)
         message(STATUS "Headless window-state test requires xvfb-run and dbus-run-session")
     endif()
 
-    add_executable(operation-engine-test tests/operation_engine_test.cpp)
-    target_link_libraries(operation-engine-test PRIVATE infiltrator-files-core)
-    add_test(NAME operation-engine COMMAND operation-engine-test)
-
-    add_executable(destination-ownership-test tests/destination_ownership_test.cpp)
-    target_link_libraries(destination-ownership-test PRIVATE infiltrator-files-core)
-    add_test(NAME destination-ownership COMMAND destination-ownership-test)
-
-    add_executable(recovery-operation-engine-test tests/recovery_operation_engine_test.cpp)
-    target_link_libraries(recovery-operation-engine-test PRIVATE infiltrator-files-core)
-    add_test(NAME recovery-operation-engine COMMAND recovery-operation-engine-test)
-
-    add_executable(transfer-operation-engine-test tests/transfer_operation_engine_test.cpp)
-    target_link_libraries(transfer-operation-engine-test PRIVATE infiltrator-files-core)
-    add_test(NAME transfer-operation-engine COMMAND transfer-operation-engine-test)
-
-    add_executable(batch-transfer-engine-test tests/batch_transfer_engine_test.cpp)
-    target_link_libraries(batch-transfer-engine-test PRIVATE infiltrator-files-core)
-    add_test(NAME batch-transfer-engine COMMAND batch-transfer-engine-test)
-
-    add_executable(operation-journal-test tests/operation_journal_test.cpp)
-    target_link_libraries(operation-journal-test PRIVATE infiltrator-files-core)
-    add_test(NAME operation-journal COMMAND operation-journal-test)
+    infiltrator_add_core_test(operation-engine-test tests/operation_engine_test.cpp operation-engine)
+    infiltrator_add_core_test(destination-ownership-test tests/destination_ownership_test.cpp destination-ownership)
+    infiltrator_add_core_test(recovery-operation-engine-test tests/recovery_operation_engine_test.cpp recovery-operation-engine)
+    infiltrator_add_core_test(transfer-operation-engine-test tests/transfer_operation_engine_test.cpp transfer-operation-engine)
+    infiltrator_add_core_test(batch-transfer-engine-test tests/batch_transfer_engine_test.cpp batch-transfer-engine)
+    infiltrator_add_core_test(operation-journal-test tests/operation_journal_test.cpp operation-journal)
 endif()
 
 install(TARGETS infiltrator-file-manager

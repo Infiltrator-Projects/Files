@@ -3,11 +3,6 @@
 
 #include "../core/location.hpp"
 #include "../core/mounted_places.hpp"
-#include "batch_item_operation_controller.hpp"
-#include "create_folder_controller.hpp"
-#include "destructive_operation_controller.hpp"
-#include "item_operation_controller.hpp"
-#include "journal_recovery_controller.hpp"
 
 #include <gtk/gtk.h>
 
@@ -30,18 +25,7 @@ public:
     FileManagerWindow &operator=(const FileManagerWindow &) = delete;
 
     void present();
-    void install_operation_surface()
-    {
-        if (operation_surface_installed_) {
-            return;
-        }
-        new CreateFolderController(GTK_WINDOW(window_), directory_list_, primary_selection_, status_label_);
-        new ItemOperationController(GTK_WINDOW(window_), directory_list_, primary_selection_, status_label_);
-        new DestructiveOperationController(GTK_WINDOW(window_), directory_list_, primary_selection_, status_label_);
-        new BatchItemOperationController(GTK_WINDOW(window_), directory_list_, selection_, status_label_);
-        new JournalRecoveryController(GTK_WINDOW(window_), status_label_);
-        operation_surface_installed_ = true;
-    }
+    void install_operation_surface();
     [[nodiscard]] GtkWindow *native_window() const noexcept { return GTK_WINDOW(window_); }
 
 private:
