@@ -16,8 +16,11 @@ permissions:
   contents: read
 
 concurrency:
+  # A newer state of a ref supersedes an older candidate. In particular, main
+  # must never let an earlier release-intent run race a corrective commit to
+  # publication after that earlier commit has ceased to be the branch head.
   group: verify-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   build-test-package:
