@@ -91,6 +91,9 @@ jobs:
             )
             [[ "$merged_count" -eq 0 ]] && continue
 
-            git push origin --delete "$branch"
+            branch_sha=$(gh api "repos/$repo/git/ref/heads/$branch" --jq .object.sha)
+            merged_heads=$(gh api -X GET "repos/$repo/pulls" -f state=closed -f head="${owner}:${branch}" -F per_page=100 --jq '.[] | select(.merged_at != null) | .head.sha')
+            grep -Fxq "$branch_sha" <<<"$merged_heads" || continue
+            git push --force-with-lease="refs/heads/$branch:$branch_sha" origin ":refs/heads/$branch"
             printf 'Pruned merged branch %s.\n' "$branch"
           done

@@ -39,7 +39,6 @@ jobs:
       - name: Read VERSION and release intent
         id: release
         env:
-          BEFORE_SHA: ${{ github.event.before }}
           MANUAL_RELEASE: ${{ inputs.release || false }}
         shell: bash
         run: |
@@ -49,20 +48,12 @@ jobs:
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
 
           release_intent=false
-          if [[ "$GITHUB_EVENT_NAME" == 'push' && "$GITHUB_REF" == 'refs/heads/main' ]]; then
-            zero=0000000000000000000000000000000000000000
-            previous_version=''
-            if [[ -n "${BEFORE_SHA:-}" && "$BEFORE_SHA" != "$zero" ]] &&
-               git cat-file -e "${BEFORE_SHA}:VERSION" 2>/dev/null; then
-              previous_version=$(git show "${BEFORE_SHA}:VERSION" | tr -d '[:space:]')
-            fi
-            if [[ "$version" != "$previous_version" ]]; then
+          if [[ "$GITHUB_REF" == refs/heads/main &&
+                ( "$GITHUB_EVENT_NAME" == push || "$MANUAL_RELEASE" == true ) ]]; then
+            tagged_sha=$(git rev-parse -q --verify "refs/tags/v$version^{commit}" 2>/dev/null || true)
+            if [[ -z "$tagged_sha" || "$tagged_sha" == "$GITHUB_SHA" ]]; then
               release_intent=true
             fi
-          elif [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' &&
-                  "$GITHUB_REF" == 'refs/heads/main' &&
-                  "$MANUAL_RELEASE" == 'true' ]]; then
-            release_intent=true
           fi
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -171,11 +162,30 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends dpkg-dev jq curl gzip
 
+      - name: Recheck current main before publication
+        run: |
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$GITHUB_SHA"
+
       - name: Publish or resume exact tested VERSION
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_SHA: ${{ github.sha }}
         run: ./ci/release.sh publish "$EXPECTED_SHA" dist
 
-      - name: Verify central catalogue and beta APT publication
-        run: ./ci/release.sh wait-apt dist
+      - name: Retire empty obsolete draft metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(tr -d '\r\n' < VERSION)
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select(.draft and (.assets | length == 0)) | [.id,.tag_name] | @tsv' |
+          while IFS=\t' read -r id tag; do
+            [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+            older="${tag#v}"
+            [[ "$older" != "$version" &&
+               "$(printf '%s\n%s\n' "$older" "$version" | sort -V | head -n1)" == "$older" ]] || continue
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+          done

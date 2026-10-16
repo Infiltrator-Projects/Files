@@ -3,7 +3,7 @@
 Infiltrator File Manager is a clean-sheet file-management project for InfiltratorOS.
 
 **Current source version:** authoritative in [`VERSION`](VERSION)\
-**Shared foundation:** exact Infiltratr Common 1.19.41 gitlink, linked through the full Common target on InfiltratorOS/POSIX\
+**Shared foundation:** exact Infiltratr Common gitlink, linked through the full Common target on InfiltratorOS/POSIX\
 **Desktop implementation:** C++20 + GTK 4/GIO\
 **Status:** early implementation; deterministic browsing and mutation foundation with multi-selection batch transfer, interruption inspection and verified metadata preservation
 
@@ -145,9 +145,13 @@ ctest --test-dir build --output-on-failure
 ./build/infiltrator-file-manager
 ```
 
-The build rejects a missing, wrong-version or wrong-commit Infiltratr Common checkout. The current build pins Common 1.19.41 at commit `b0387b7ab5d71cda60748e2506b85cdc0e6b5e8b`.
+The build rejects a missing or incompatible Common dependency and verifies its exact Git commit against the recorded gitlink. CMake declares the minimum API version; the gitlink owns the selected revision.
 
 ## Design documents
+
+- [Validation](docs/VALIDATION.md) — current test, packaging and release contracts.
+- [Philosophy](PHILOSOPHY.md) — canonical engineering standard.
+
 
 - [`docs/FEATURES.md`](docs/FEATURES.md) — complete intended feature catalogue and release sequencing.
 - [`docs/PRODUCT-QUALITY.md`](docs/PRODUCT-QUALITY.md) — golden user journeys and the acceptance discipline for proving that a tranche improves the product.

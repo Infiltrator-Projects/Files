@@ -62,6 +62,7 @@ publish_release() {
     : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
     need_command git
     need_command gh
+    need_command jq
 
     [[ "$(git -C "$ROOT" rev-parse HEAD)" == "$expected_sha" ]] ||
         fail "publish attempted from a different commit than the tested release"
@@ -70,81 +71,50 @@ publish_release() {
     local tag="v${RELEASE_VERSION}"
     local deb="$RELEASE_DIRECTORY/$RELEASE_DEB"
     local sums="$RELEASE_DIRECTORY/$RELEASE_SUMS"
-    local expected_assets existing_assets published_assets name asset
-
+    local expected_assets published_assets
     expected_assets=$(printf '%s\n%s\n' "$RELEASE_SUMS" "$RELEASE_DEB" | sort)
-    git -C "$ROOT" fetch origin --tags --force
-
-    local tag_exists=false
-    if git -C "$ROOT" rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
-        tag_exists=true
-        local tag_commit
-        tag_commit=$(git -C "$ROOT" rev-list -n 1 "$tag")
-        [[ "$tag_commit" == "$expected_sha" ]] ||
-            fail "$tag belongs to $tag_commit, not tested release commit $expected_sha"
+    git -C "$ROOT" fetch origin --tags
+    if git -C "$ROOT" rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null; then
+        [[ "$(git -C "$ROOT" rev-parse "$tag^{commit}")" == "$expected_sha" ]] ||
+            fail "$tag does not identify the qualified source"
     fi
-
-    if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-        [[ "$tag_exists" == true ]] ||
-            fail "release $tag exists without its git tag; refusing ambiguous recovery"
-        [[ "$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')" == false ]] ||
-            fail "release $tag is still a draft"
-        [[ "$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq '.isPrerelease')" == false ]] ||
-            fail "release $tag is a prerelease"
-
-        existing_assets=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
-        while IFS= read -r name; do
-            [[ -z "$name" ]] && continue
-            case "$name" in
-                "$RELEASE_SUMS"|"$RELEASE_DEB") ;;
-                *) fail "release $tag has unexpected asset $name" ;;
-            esac
-        done <<<"$existing_assets"
-
-        for asset in "$deb" "$sums"; do
-            name=$(basename "$asset")
-            if ! grep -Fxq "$name" <<<"$existing_assets"; then
-                gh release upload "$tag" "$asset" --repo "$GITHUB_REPOSITORY"
-            fi
-        done
-    elif [[ "$tag_exists" == true ]]; then
-        gh release create "$tag" "$deb" "$sums" \
-            --repo "$GITHUB_REPOSITORY" \
-            --verify-tag \
-            --latest \
-            --title "Infiltrator File Manager ${RELEASE_VERSION}" \
-            --notes "Infiltrator File Manager ${RELEASE_VERSION}. See the repository README for the current implementation surface and release status."
-    else
-        gh release create "$tag" "$deb" "$sums" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$expected_sha" \
-            --latest \
-            --title "Infiltrator File Manager ${RELEASE_VERSION}" \
-            --notes "Infiltrator File Manager ${RELEASE_VERSION}. See the repository README for the current implementation surface and release status."
+    local state draft
+    state=$(mktemp)
+    if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
+        --json isDraft,isPrerelease,targetCommitish > "$state"; then
+        gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft \
+            --target "$expected_sha" --title "Infiltrator File Manager ${RELEASE_VERSION}" \
+            --notes "See the maintained architecture and validation contracts."
+        gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
+            --json isDraft,isPrerelease,targetCommitish > "$state"
     fi
-
-    gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --latest
-    git -C "$ROOT" fetch origin --tags --force
+    [[ "$(jq -r .isPrerelease "$state")" == false ]] || fail "unexpected prerelease"
+    [[ "$(jq -r .targetCommitish "$state")" == "$expected_sha" ]] || fail "different draft source"
+    draft=$(jq -r .isDraft "$state")
+    rm -f "$state"
+    if [[ "$draft" == true ]]; then
+        gh release upload "$tag" "$deb" "$sums" --repo "$GITHUB_REPOSITORY" --clobber
+    fi
+    verify_remote() {
+        local destination
+        destination=$(mktemp -d)
+        gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$destination"
+        published_assets=$(find "$destination" -maxdepth 1 -type f -printf '%f\n' | sort)
+        [[ "$published_assets" == "$expected_assets" ]] || fail "unexpected release asset set"
+        cmp "$deb" "$destination/$RELEASE_DEB"
+        cmp "$sums" "$destination/$RELEASE_SUMS"
+        rm -rf "$destination"
+    }
+    verify_remote
+    if [[ "$draft" == true ]]; then
+        gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+    fi
+    verify_remote
+    git -C "$ROOT" fetch origin --tags
     [[ "$(git -C "$ROOT" rev-list -n 1 "$tag")" == "$expected_sha" ]] ||
-        fail "published tag no longer identifies the tested release commit"
-
-    published_assets=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | sort)
-    [[ "$published_assets" == "$expected_assets" ]] ||
-        fail "published release $tag does not contain exactly the expected assets"
-
-    # GitHub exposes SHA-256 digests for release assets. Compare those against
-    # the exact tested files rather than assuming a matching asset name is enough.
-    for asset in "$deb" "$sums"; do
-        name=$(basename "$asset")
-        local expected_digest published_digest
-        expected_digest="sha256:$(sha256sum "$asset" | awk '{print $1}')"
-        published_digest=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
-            --json assets --jq ".assets[] | select(.name == \"${name}\") | .digest")
-        [[ "$published_digest" == "$expected_digest" ]] ||
-            fail "published asset $name digest does not match the tested artifact"
-    done
-
+        fail "published tag does not identify the tested source"
     printf 'release %s published and verified at %s\n' "$tag" "$expected_sha"
+
 }
 
 wait_for_apt() {

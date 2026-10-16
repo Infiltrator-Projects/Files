@@ -16,7 +16,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(INFILTRATR_COMMON_EXPECTED_VERSION "1.19.41")
+set(INFILTRATR_COMMON_MINIMUM_VERSION "1.19.41")
 set(INFILTRATR_COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/infiltratr-common")
 
 if(NOT EXISTS "${INFILTRATR_COMMON_DIR}/VERSION")
@@ -27,15 +27,15 @@ endif()
 
 file(READ "${INFILTRATR_COMMON_DIR}/VERSION" INFILTRATR_COMMON_VERSION)
 string(STRIP "${INFILTRATR_COMMON_VERSION}" INFILTRATR_COMMON_VERSION)
-if(NOT INFILTRATR_COMMON_VERSION STREQUAL INFILTRATR_COMMON_EXPECTED_VERSION)
+if(INFILTRATR_COMMON_VERSION VERSION_LESS INFILTRATR_COMMON_MINIMUM_VERSION)
     message(FATAL_ERROR
-        "Infiltrator File Manager requires Common ${INFILTRATR_COMMON_EXPECTED_VERSION}; "
+        "Infiltrator File Manager requires Common ${INFILTRATR_COMMON_MINIMUM_VERSION} or newer; "
         "found ${INFILTRATR_COMMON_VERSION}")
 endif()
 
 # The gitlink is the single authority for the exact Common commit. Git is only
 # a build dependency for a live checkout; exported source can qualify the
-# pinned dependency through Common's version contract without a .git database.
+# compatible dependency through Common's minimum API version without a .git database.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
     find_package(Git REQUIRED)
     execute_process(
