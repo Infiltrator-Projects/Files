@@ -150,7 +150,7 @@ The build rejects a missing or incompatible Common dependency and verifies its e
 ## Design documents
 
 - [Validation](docs/VALIDATION.md) — current test, packaging and release contracts.
-- [Philosophy](PHILOSOPHY.md) — canonical engineering standard.
+- [Philosophy](docs/PHILOSOPHY.md) — canonical engineering standard.
 
 
 - [`docs/FEATURES.md`](docs/FEATURES.md) — complete intended feature catalogue and release sequencing.
