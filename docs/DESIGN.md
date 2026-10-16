@@ -1,8 +1,8 @@
-# Infiltrator File Manager — Design Philosophy
+# Files — Design Philosophy
 
 ## First-principles position
 
-Infiltrator File Manager is a clean-sheet user-facing file-management project for InfiltratorOS. It starts with the behaviour the product must own, studies standards, current research and mature implementations as evidence, and then chooses the strongest justified design.
+Files is a clean-sheet user-facing file-management project for InfiltratorOS. It starts with the behaviour the product must own, studies standards, current research and mature implementations as evidence, and then chooses the strongest justified design.
 
 The project does not copy another file manager's interaction model merely because it is established, and it does not reject proven mechanisms merely because they are old. Newness, popularity, implementation convenience, toolkit fashion and feature-count parity are not architecture criteria. A design is preferred when it is stronger in correctness, recoverability, responsiveness, clarity, capability, maintainability or user confidence.
 
@@ -10,7 +10,7 @@ The project should feel simple because the engineering is complete, not because 
 
 ## Relationship with InfiltratorFS
 
-Infiltrator File Manager is intended to complement InfiltratorFS, but it is not an InfiltratorFS-only browser.
+Files is intended to complement InfiltratorFS, but it is not an InfiltratorFS-only browser.
 
 The governing rule is the same one already recorded by InfiltratorFS ecosystem design:
 
@@ -168,11 +168,11 @@ This brief supersedes implementation-convenience interpretations such as treatin
 
 The application model should not be defined by GTK widgets, Linux path strings or one desktop environment. The initial InfiltratorOS implementation can use the strongest practical Linux desktop interfaces while preserving toolkit-neutral concepts for location, object, capability, operation, history and search.
 
-C and C++ are equal first-class choices. Platform frameworks and libraries are accepted when their documented contract is stronger than reimplementation. Reusable product-neutral mechanisms should converge on Infiltratr Common only when Common is at least as strong as the best local implementation.
+C and C++ are equal first-class choices. Platform frameworks and libraries are accepted when their documented contract is stronger than reimplementation. Reusable product-neutral mechanisms should converge on Libraries only when Common is at least as strong as the best local implementation.
 
 ## Non-goals
 
-Infiltrator File Manager is not intended to:
+Files is not intended to:
 
 - replace InfiltratorFS Manager or Defragmenter;
 - require InfiltratorFS for ordinary operation;

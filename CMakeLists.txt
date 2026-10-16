@@ -21,7 +21,7 @@ set(INFILTRATR_COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/infiltratr-common")
 
 if(NOT EXISTS "${INFILTRATR_COMMON_DIR}/VERSION")
     message(FATAL_ERROR
-        "Infiltrator File Manager requires the pinned Common submodule. "
+        "Files requires the pinned Common submodule. "
         "Clone with --recurse-submodules or run git submodule update --init --recursive.")
 endif()
 
@@ -29,7 +29,7 @@ file(READ "${INFILTRATR_COMMON_DIR}/VERSION" INFILTRATR_COMMON_VERSION)
 string(STRIP "${INFILTRATR_COMMON_VERSION}" INFILTRATR_COMMON_VERSION)
 if(INFILTRATR_COMMON_VERSION VERSION_LESS INFILTRATR_COMMON_MINIMUM_VERSION)
     message(FATAL_ERROR
-        "Infiltrator File Manager requires Common ${INFILTRATR_COMMON_MINIMUM_VERSION} or newer; "
+        "Files requires Common ${INFILTRATR_COMMON_MINIMUM_VERSION} or newer; "
         "found ${INFILTRATR_COMMON_VERSION}")
 endif()
 
@@ -67,7 +67,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
        NOT INFILTRATR_COMMON_GIT_RESULT EQUAL 0 OR
        NOT INFILTRATR_COMMON_COMMIT STREQUAL INFILTRATR_COMMON_EXPECTED_COMMIT)
         message(FATAL_ERROR
-            "Infiltrator File Manager requires the Common commit recorded by its gitlink "
+            "Files requires the Common commit recorded by its gitlink "
             "(${INFILTRATR_COMMON_EXPECTED_COMMIT}); found ${INFILTRATR_COMMON_COMMIT}")
     endif()
 endif()
@@ -177,7 +177,10 @@ install(TARGETS infiltrator-file-manager
 install(FILES data/infiltrator-file-manager.desktop
     DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
 
-set(CPACK_PACKAGE_NAME "infiltrator-file-manager")
+set(CPACK_PACKAGE_NAME "files")
+set(CPACK_DEBIAN_PACKAGE_PROVIDES "infiltrator-file-manager (= ${PROJECT_VERSION})")
+set(CPACK_DEBIAN_PACKAGE_BREAKS "infiltrator-file-manager (<< ${PROJECT_VERSION})")
+set(CPACK_DEBIAN_PACKAGE_REPLACES "infiltrator-file-manager (<< ${PROJECT_VERSION})")
 set(CPACK_PACKAGE_VENDOR "Infiltrator Projects")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "InfiltratorOS file manager")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")

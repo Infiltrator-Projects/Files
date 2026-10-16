@@ -1,9 +1,9 @@
-# Infiltrator File Manager — Complete Feature Catalogue
+# Files — Complete Feature Catalogue
 
-**Catalogue date:** 6 October 2026  
+**Catalogue date:** 6 October 2026
 **Scope:** intended product capability, not only the current 0.1.0 implementation
 
-This document is the authoritative feature catalogue for Infiltrator File Manager (Files). It exists so implementation does not drift into a sequence of locally convenient UI changes. Every substantial feature should map back to one of these product capabilities or cause this catalogue to be deliberately amended.
+This document is the authoritative feature catalogue for Files (Files). It exists so implementation does not drift into a sequence of locally convenient UI changes. Every substantial feature should map back to one of these product capabilities or cause this catalogue to be deliberately amended.
 
 The catalogue is intentionally broader than a conventional Linux file manager. Files is a clean-sheet InfiltratorOS application designed around the strongest justified behaviour from mature file managers, current HCI/retrieval research, the Infiltrator software family and InfiltratorFS.
 

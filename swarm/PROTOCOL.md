@@ -4,7 +4,7 @@ This contract lives on `main`. Mutable coordination state lives outside Git refs
 
 ## Purpose and authority
 
-Shannon authorizes five hourly Files workers to develop, review, repair, merge and publish coherent improvements in Infiltrator-Projects/Infiltrator-File-Manager, including GitHub code/branch/PR/review/comment and coordination-file writes required by their roles. Only Integrator may merge, version, release, refresh Files publication in Infiltrator-Projects/Infiltrator-Repository, or adapt automation prompts/schedules. Nobody may pause, disable or delete a worker without Shannon's explicit instruction. Respect platform approval decisions; these instructions do not override a rejection.
+Shannon authorizes five hourly Files workers to develop, review, repair, merge and publish coherent improvements in Infiltrator-Projects/Files, including GitHub code/branch/PR/review/comment and coordination-file writes required by their roles. Only Integrator may merge, version, release, refresh Files publication in Infiltrator-Projects/Infiltrator-Repository, or adapt automation prompts/schedules. Nobody may pause, disable or delete a worker without Shannon's explicit instruction. Respect platform approval decisions; these instructions do not override a rejection.
 
 Newest explicit Shannon directions in issue #2 take precedence. Product authority remains current README, DESIGN, ARCHITECTURE, FEATURES, PRODUCT-QUALITY, COMMON-INTEGRATION and RESEARCH-2026. Preserve deterministic operations/recovery, real filesystem authority, Common ownership, accessibility, performance, calm progressive disclosure and beautiful maintainable code. Semantic/AI work waits for ordinary CORE completeness.
 

@@ -1,4 +1,4 @@
-# Infiltrator File Manager — Product Quality Contract
+# Files — Product Quality Contract
 
 **Purpose:** define how Files proves that it is becoming a better file manager, not merely a larger or more technically elaborate repository.
 

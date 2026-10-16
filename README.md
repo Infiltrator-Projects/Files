@@ -1,9 +1,9 @@
-# Infiltrator File Manager
+# Files
 
-Infiltrator File Manager is a clean-sheet file-management project for InfiltratorOS.
+Files is a clean-sheet file-management project for InfiltratorOS.
 
 **Current source version:** authoritative in [`VERSION`](VERSION)\
-**Shared foundation:** exact Infiltratr Common gitlink, linked through the full Common target on InfiltratorOS/POSIX\
+**Shared foundation:** exact Libraries gitlink, linked through the full Common target on InfiltratorOS/POSIX\
 **Desktop implementation:** C++20 + GTK 4/GIO\
 **Status:** early implementation; deterministic browsing and mutation foundation with multi-selection batch transfer, interruption inspection and verified metadata preservation
 
@@ -13,7 +13,7 @@ The implementation has now started, but the architecture remains deliberately ca
 
 ## Design position
 
-Infiltrator File Manager is intended to complement InfiltratorFS while remaining a general-purpose file manager on other filesystems.
+Files is intended to complement InfiltratorFS while remaining a general-purpose file manager on other filesystems.
 
 The key boundary is:
 
@@ -137,7 +137,7 @@ Semantic/context indexing and InfiltratorFS-specific capability providers are al
 On a Debian-family development system with GTK 4 development files installed. Install `xvfb`, `xauth` and `dbus-x11` to run the headless GTK regression test as CI does:
 
 ```bash
-git clone --recurse-submodules https://github.com/Infiltrator-Projects/Infiltrator-File-Manager.git
+git clone --recurse-submodules https://github.com/Infiltrator-Projects/Files.git
 cd Infiltrator-File-Manager
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel

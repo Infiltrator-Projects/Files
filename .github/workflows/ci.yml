@@ -96,8 +96,8 @@ jobs:
           fi
 
           deb=${packages[0]}
-          canonical="dist/infiltrator-file-manager_${VERSION}_amd64.deb"
-          test "$(dpkg-deb -f "$deb" Package)" = 'infiltrator-file-manager'
+          canonical="dist/files_${VERSION}_amd64.deb"
+          test "$(dpkg-deb -f "$deb" Package)" = 'files'
           test "$(dpkg-deb -f "$deb" Version)" = "$VERSION"
           test "$(dpkg-deb -f "$deb" Architecture)" = 'amd64'
 
@@ -116,7 +116,7 @@ jobs:
 
           (
             cd dist
-            sha256sum "infiltrator-file-manager_${VERSION}_amd64.deb" > SHA256SUMS
+            sha256sum "files_${VERSION}_amd64.deb" > SHA256SUMS
           )
           (cd dist && sha256sum -c SHA256SUMS)
 
@@ -126,7 +126,7 @@ jobs:
         with:
           name: release-package-${{ github.sha }}
           path: |
-            dist/infiltrator-file-manager_${{ steps.release.outputs.version }}_amd64.deb
+            dist/files_${{ steps.release.outputs.version }}_amd64.deb
             dist/SHA256SUMS
           if-no-files-found: error
           retention-days: 7

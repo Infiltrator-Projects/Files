@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Release authority for Infiltrator File Manager. GitHub Actions orchestrates
+# Release authority for Files. GitHub Actions orchestrates
 # this script; release identity, immutable asset checks and APT observation live
 # here so they are reviewable and testable outside workflow YAML.
 set -euo pipefail
@@ -39,15 +39,15 @@ load_artifacts() {
 
     RELEASE_VERSION=$(release_version)
     RELEASE_DIRECTORY=$(cd -- "$directory" && pwd)
-    RELEASE_DEB="infiltrator-file-manager_${RELEASE_VERSION}_${RELEASE_ARCHITECTURE}.deb"
+    RELEASE_DEB="files_${RELEASE_VERSION}_${RELEASE_ARCHITECTURE}.deb"
     RELEASE_SUMS='SHA256SUMS'
 
     cd "$RELEASE_DIRECTORY"
     [[ -f "$RELEASE_DEB" ]] || fail "missing release asset: $RELEASE_DEB"
     [[ -f "$RELEASE_SUMS" ]] || fail "missing release asset: $RELEASE_SUMS"
     sha256sum -c "$RELEASE_SUMS"
-    [[ "$(dpkg-deb -f "$RELEASE_DEB" Package)" == 'infiltrator-file-manager' ]] ||
-        fail "Debian package identity is not infiltrator-file-manager"
+    [[ "$(dpkg-deb -f "$RELEASE_DEB" Package)" == 'files' ]] ||
+        fail "Debian package identity is not files"
     [[ "$(dpkg-deb -f "$RELEASE_DEB" Version)" == "$RELEASE_VERSION" ]] ||
         fail "Debian package version does not match VERSION"
     [[ "$(dpkg-deb -f "$RELEASE_DEB" Architecture)" == "$RELEASE_ARCHITECTURE" ]] ||
@@ -83,7 +83,7 @@ publish_release() {
     if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
         --json isDraft,isPrerelease,targetCommitish > "$state"; then
         gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft \
-            --target "$expected_sha" --title "Infiltrator File Manager ${RELEASE_VERSION}" \
+            --target "$expected_sha" --title "Files ${RELEASE_VERSION}" \
             --notes "See the maintained architecture and validation contracts."
         gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
             --json isDraft,isPrerelease,targetCommitish > "$state"
@@ -144,7 +144,7 @@ wait_for_apt() {
         if curl -fsSL --retry 2 --retry-delay 1 \
             -H 'Cache-Control: no-cache' "${packages}?release=${cache_key}" 2>/dev/null \
             | gzip -dc 2>/dev/null \
-            | awk -v package='infiltrator-file-manager' -v version="$RELEASE_VERSION" '
+            | awk -v package='files' -v version="$RELEASE_VERSION" '
                 BEGIN { RS=""; FS="\n"; found=0 }
                 {
                     p=""; v=""

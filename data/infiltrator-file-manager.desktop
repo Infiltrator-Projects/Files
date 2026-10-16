@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Files
-Comment=Browse and manage files with Infiltrator File Manager
+Comment=Browse and manage files with Files
 Exec=infiltrator-file-manager
 Icon=system-file-manager
 Terminal=false

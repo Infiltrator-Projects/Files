@@ -1,10 +1,10 @@
-# Infiltrator File Manager — Initial Architecture
+# Files — Initial Architecture
 
 This document defines the architectural model derived from the project's design philosophy and October 2026 research review. The early C++20/GTK 4 implementation now provides browsing, mounted places, deterministic operation engines and an append-only operation journal. The larger object/capability, retrieval and provider models below remain intended architecture; their presence here does not claim implementation. Performance measurements, prototypes and further research may change details before code architecture is frozen.
 
 ## 1. Architectural boundary
 
-Infiltrator File Manager owns the user-facing model of files, locations, retrieval, operations and recoverability.
+Files owns the user-facing model of files, locations, retrieval, operations and recoverability.
 
 It does **not** own filesystem allocation, persistent on-disk structures, filesystem transaction semantics or specialist disk administration. Those remain responsibilities of the operating system and filesystem.
 

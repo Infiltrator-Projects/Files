@@ -1,10 +1,10 @@
-# Infiltrator File Manager — Common Integration and Ownership Ledger
+# Files — Common Integration and Ownership Ledger
 
 **Date:** 6 October 2026\
 **Pinned Common:** 1.19.41\
 **Pinned commit:** `b0387b7ab5d71cda60748e2506b85cdc0e6b5e8b`
 
-Common is one of Infiltrator File Manager's principal architectural advantages. Files must not treat Common as a token submodule used only for colours. It is the first place to look whenever Files needs a product-neutral mechanism already proven elsewhere in the Infiltrator family.
+Common is one of Files's principal architectural advantages. Files must not treat Common as a token submodule used only for colours. It is the first place to look whenever Files needs a product-neutral mechanism already proven elsewhere in the Infiltrator family.
 
 The rule is not “put everything in Common.” The rule is:
 
@@ -20,7 +20,7 @@ A conventional clean-sheet file manager normally begins by accumulating local he
 
 Files does not need to start there.
 
-Common already provides qualified, tested first-party contracts used by System Monitor, Calendar, Defragger, InfiltratorFS, LINK and other products. Files can therefore start with a consistent Infiltrator foundation and concentrate engineering effort on the genuinely file-manager-specific problems: object/location modelling, directory presentation, operations, recovery, retrieval, capability discovery and user interaction.
+Common already provides qualified, tested first-party contracts used by System Monitor, Calendar, Defragger, InfiltratorFS, Link and other products. Files can therefore start with a consistent Infiltrator foundation and concentrate engineering effort on the genuinely file-manager-specific problems: object/location modelling, directory presentation, operations, recovery, retrieval, capability discovery and user interaction.
 
 Common also gives Files cross-product consistency automatically where consistency is desirable:
 

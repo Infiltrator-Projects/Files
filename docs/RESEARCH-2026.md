@@ -1,8 +1,8 @@
-# Infiltrator File Manager — Research Review 2026
+# Files — Research Review 2026
 
 **Research date:** 6 October 2026
 
-This document records research used to shape the clean-sheet design of Infiltrator File Manager. Research is evidence, not specification. The project retains authority over its own semantics and architecture.
+This document records research used to shape the clean-sheet design of Files. Research is evidence, not specification. The project retains authority over its own semantics and architecture.
 
 The review concentrates on five questions:
 
@@ -18,7 +18,7 @@ The review concentrates on five questions:
 
 A controlled study compared 50 "hyper-searchers" with 50 controls. In the retrieval task, hyper-searchers used search for 67% of retrievals while the control group used it for only 5%. Hyper-searchers also had less organised file collections and a much higher navigation-failure rate (23% versus 6%).
 
-Source: Bergman et al., *File hyper-searching explained*, Human–Computer Interaction, 2024.  
+Source: Bergman et al., *File hyper-searching explained*, Human–Computer Interaction, 2024.
 https://doi.org/10.1080/07370024.2024.2379838
 
 ### Design consequence
@@ -39,14 +39,14 @@ The interface should let users move between these modes without changing the und
 
 LSFS explores semantic file retrieval, summarisation, grouping and rollback using semantic indexes and natural-language interaction. The authors report at least a 15% retrieval-accuracy improvement and 2.1× retrieval speed in their semantic retrieval benchmark compared with their traditional comparison, while also retaining strong keyword retrieval.
 
-Source: Shi et al., ICLR 2025.  
+Source: Shi et al., ICLR 2025.
 https://proceedings.iclr.cc/paper_files/paper/2025/hash/517eb19e99947f60afff0cf93e451825-Abstract-Conference.html
 
 ### Design consequence
 
 Natural-language retrieval and semantic indexing are worth taking seriously, but the research does **not** require the semantic system to become the filesystem authority.
 
-For Infiltrator File Manager the stronger architecture is:
+For Files the stronger architecture is:
 
 ```text
 real filesystem namespace = authoritative
@@ -63,7 +63,7 @@ This preserves ordinary files, interoperability and recoverability while gaining
 
 OmniQuery investigated natural-language questions over personal captured memories. Rather than relying only on isolated items, it augmented memories with contextual relationships across other captured information. In human evaluation it achieved 71.5% accuracy and won or tied against a conventional RAG baseline 74.5% of the time.
 
-Source: Ma et al., *OmniQuery: Contextually Augmenting Captured Multimodal Memories to Enable Personal Question Answering*, CHI 2025.  
+Source: Ma et al., *OmniQuery: Contextually Augmenting Captured Multimodal Memories to Enable Personal Question Answering*, CHI 2025.
 https://doi.org/10.1145/3706598.3713448
 
 ### Design consequence
@@ -88,14 +88,14 @@ Any relationship used to surface a file should be explainable to the user.
 
 This 2026 study frames personal information management across the full scholarly workflow rather than as a single storing/finding task. Its result supports designing systems around evolving information-management needs as work moves through stages.
 
-Source: Xu & Signer, CHI 2026 Extended Abstracts.  
+Source: Xu & Signer, CHI 2026 Extended Abstracts.
 https://doi.org/10.1145/3772363.3798664
 
 ### From Tabs to Structures: Understanding and Supporting Web Page Management (CHI 2026)
 
 A field experiment with 29 knowledge workers examined how people manage evolving collections of web information. The work argues that rigid bookmark-like structures impose management cost and explores support for emerging, dynamic relationships between information items.
 
-Source: CHI 2026.  
+Source: CHI 2026.
 https://doi.org/10.1145/3772318.3791979
 
 ### Design consequence
@@ -119,7 +119,7 @@ These views should be overlays, never replacements for the real namespace.
 
 A survey of 1,423 people across Germany, the UK and the USA found that 46% had experienced at least one data-loss incident. Among people who recovered using backups, more than half reported backups that were outdated or incomplete. Data loss and difficult recovery were associated with substantial stress.
 
-Source: Wunder et al., CHI 2025.  
+Source: Wunder et al., CHI 2025.
 https://doi.org/10.1145/3706598.3714202
 
 ### Design consequence
@@ -143,21 +143,21 @@ InfiltratorFS retained generations and future object-level restore can make this
 
 This work proposes progressive disclosure through layered interfaces as a way to improve learnability by initially presenting a subset of functionality and revealing greater depth as needed.
 
-Source: Forsey et al.  
+Source: Forsey et al.
 https://doi.org/10.1177/10648046241273291
 
 ### Malleable Overview-Detail Interfaces (CHI 2025)
 
 This research argues that a single fixed overview/detail presentation cannot satisfy all users. It identifies content, composition and layout as dimensions that can be made more malleable and reports diverse customisations and usage patterns in a user study.
 
-Source: Min, Chen, Cao & Xia, CHI 2025.  
+Source: Min, Chen, Cao & Xia, CHI 2025.
 https://doi.org/10.1145/3706598.3714164
 
 ### Meridian: A Design Framework for Malleable Overview-Detail Interfaces (UIST 2025)
 
 Meridian extends this direction into a design framework for building overview-detail interfaces that are more adaptable to differing information needs.
 
-Source: Min & Xia, UIST 2025.  
+Source: Min & Xia, UIST 2025.
 https://doi.org/10.1145/3746059.3747654
 
 ### Design consequence
@@ -198,11 +198,11 @@ Mercedes-Benz's 2026 brand material describes the brand around technical excelle
 
 Official sources:
 
-- Mercedes-Benz, *100 years of the Mercedes-Benz brand: Tradition, transformation and technological leadership* (23 June 2026).  
+- Mercedes-Benz, *100 years of the Mercedes-Benz brand: Tradition, transformation and technological leadership* (23 June 2026).
   https://media.mercedes-benz.com/en/article/601b9810-1229-4809-aa6a-de31e93145ff
-- Mercedes-Benz design, *Creating Icons – Realising Dreams* / Sensual Purity design manifesto.  
+- Mercedes-Benz design, *Creating Icons – Realising Dreams* / Sensual Purity design manifesto.
   https://www.mercedes-benz.com/documents/design/concept-cars/vision-iconic/iconic-design-reading-sample.pdf
-- Mercedes-Benz, *MBUX reaches a new level — Zero Layer Concept*.  
+- Mercedes-Benz, *MBUX reaches a new level — Zero Layer Concept*.
   https://group.mercedes-benz.com/technology/digitalisation/connectivity/mbux-interior-assist.html
 
 ### Design consequence
