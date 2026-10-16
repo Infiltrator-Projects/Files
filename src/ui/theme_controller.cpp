@@ -28,7 +28,7 @@ std::filesystem::path theme_directory()
         return {};
     }
     const std::filesystem::path directory =
-        std::filesystem::path(config_home) / "infiltrator-file-manager";
+        std::filesystem::path(config_home) / "files";
     std::free(config_home);
     return directory;
 }

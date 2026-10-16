@@ -204,7 +204,7 @@ std::filesystem::path OperationJournal::default_path()
         state_home != nullptr && state_home[0] != '\0') {
         const std::filesystem::path base(state_home);
         if (base.is_absolute()) {
-            return base / "infiltrator-file-manager" / "operations.log";
+            return base / "files" / "operations.log";
         }
     }
 
@@ -212,7 +212,7 @@ std::filesystem::path OperationJournal::default_path()
         const std::filesystem::path base(home);
         if (base.is_absolute()) {
             return base / ".local" / "state" /
-                   "infiltrator-file-manager" / "operations.log";
+                   "files" / "operations.log";
         }
     }
 

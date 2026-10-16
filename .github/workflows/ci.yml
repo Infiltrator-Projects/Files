@@ -107,8 +107,8 @@ jobs:
           tmp=$(mktemp -d)
           trap 'rm -rf "$tmp"' EXIT
           dpkg-deb -x "$deb" "$tmp/root"
-          test -x "$tmp/root/usr/bin/infiltrator-file-manager"
-          test -f "$tmp/root/usr/share/applications/infiltrator-file-manager.desktop"
+          test -x "$tmp/root/usr/bin/files"
+          test -f "$tmp/root/usr/share/applications/files.desktop"
 
           if [[ "$deb" != "$canonical" ]]; then
             mv "$deb" "$canonical"

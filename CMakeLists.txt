@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 cmake_minimum_required(VERSION 3.20)
 
-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" INFILTRATOR_FILE_MANAGER_VERSION)
-string(STRIP "${INFILTRATOR_FILE_MANAGER_VERSION}" INFILTRATOR_FILE_MANAGER_VERSION)
-project(InfiltratorFileManager VERSION "${INFILTRATOR_FILE_MANAGER_VERSION}" LANGUAGES C CXX)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" FILES_VERSION)
+string(STRIP "${FILES_VERSION}" FILES_VERSION)
+project(Files VERSION "${FILES_VERSION}" LANGUAGES C CXX)
 
 include(CTest)
 include(GNUInstallDirs)
@@ -16,7 +16,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(INFILTRATR_COMMON_MINIMUM_VERSION "1.19.41")
+set(INFILTRATR_COMMON_MINIMUM_VERSION "1.19.46")
 set(INFILTRATR_COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/infiltratr-common")
 
 if(NOT EXISTS "${INFILTRATR_COMMON_DIR}/VERSION")
@@ -123,9 +123,9 @@ target_link_libraries(infiltrator-files-ui PUBLIC
     PkgConfig::GTK4)
 infiltrator_enable_warnings(infiltrator-files-ui)
 
-add_executable(infiltrator-file-manager src/main.cpp)
-target_link_libraries(infiltrator-file-manager PRIVATE infiltrator-files-ui)
-infiltrator_enable_warnings(infiltrator-file-manager)
+add_executable(files src/main.cpp)
+target_link_libraries(files PRIVATE infiltrator-files-ui)
+infiltrator_enable_warnings(files)
 
 function(infiltrator_add_core_test target source test_name)
     add_executable(${target} ${source})
@@ -172,15 +172,12 @@ if(BUILD_TESTING)
     infiltrator_add_core_test(operation-journal-test tests/operation_journal_test.cpp operation-journal)
 endif()
 
-install(TARGETS infiltrator-file-manager
+install(TARGETS files
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-install(FILES data/infiltrator-file-manager.desktop
+install(FILES data/files.desktop
     DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
 
 set(CPACK_PACKAGE_NAME "files")
-set(CPACK_DEBIAN_PACKAGE_PROVIDES "infiltrator-file-manager (= ${PROJECT_VERSION})")
-set(CPACK_DEBIAN_PACKAGE_BREAKS "infiltrator-file-manager (<< ${PROJECT_VERSION})")
-set(CPACK_DEBIAN_PACKAGE_REPLACES "infiltrator-file-manager (<< ${PROJECT_VERSION})")
 set(CPACK_PACKAGE_VENDOR "Infiltrator Projects")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "InfiltratorOS file manager")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")

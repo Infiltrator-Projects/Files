@@ -58,7 +58,7 @@ Product-level acceptance is defined in [`docs/PRODUCT-QUALITY.md`](docs/PRODUCT-
 
 File modification timestamps use one shared temporal policy snapshot for both date and time. Explicit clocks use Common's UI-language-aware renderer: English Chinese-time labels use `Shēn hour` or `Shēn, first half`, Chinese-language labels use native characters, and Roman clocks keep Roman numerals and daylight twelfths with translated wording. Edo clocks use Japanese bell numerals and localized branch wording; explicit 12-hour markers and ordering follow the UI language. Selected non-Gregorian dates use Common's optional bridge to Calendar 1.0.86 or newer for matching UI-language presentation, including native Chinese/Dangi cyclic year names without an added Gregorian year or bare cycle counter; Calendar owns conversion. An unavailable date provider is shown as unavailable rather than silently displaying a Gregorian date. Locale Gregorian dates retain their native platform formatting. Existing live policy monitoring refreshes the visible labels; sorting continues to use raw filesystem timestamps.
 
-The executable is `infiltrator-file-manager`, presented to the user as **Files**.
+The executable is `files`, presented to the user as **Files**.
 
 It currently provides:
 
@@ -142,7 +142,7 @@ cd Infiltrator-File-Manager
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
-./build/infiltrator-file-manager
+./build/files
 ```
 
 The build rejects a missing or incompatible Common dependency and verifies its exact Git commit against the recorded gitlink. CMake declares the minimum API version; the gitlink owns the selected revision.

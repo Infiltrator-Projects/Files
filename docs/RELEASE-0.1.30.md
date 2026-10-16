@@ -1,4 +1,4 @@
-# Infiltrator File Manager 0.1.30
+# Files 0.1.30
 
 Version 0.1.30 is the final qualified result of the 15 October 2026 whole-codebase brittleness and maintainability review.
 

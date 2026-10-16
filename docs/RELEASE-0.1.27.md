@@ -1,4 +1,4 @@
-# Infiltrator File Manager 0.1.27
+# Files 0.1.27
 
 0.1.27 is a maintainability, durability and release-governance hardening release. It deliberately does not integrate the reviewed but unresolved session/tab candidate from PR #15.
 
@@ -11,7 +11,7 @@
 - Journal read/update failure is exposed in the recovery surface rather than silently appearing as an empty recovery set.
 - GTK implementation sources now have one CMake target consumed by the application and hosted tests, removing duplicated source inventories.
 - Operation-controller construction is compiled behind `FileManagerWindow` instead of being inlined in its public header, reducing transitive UI coupling and rebuild surface.
-- The exact Infiltratr Common commit is derived from the repository gitlink; CMake no longer carries a second hard-coded commit SHA, and live checkouts must still prove the checked-out submodule matches that gitlink exactly.
+- The exact Libraries commit is derived from the repository gitlink; CMake no longer carries a second hard-coded commit SHA, and live checkouts must still prove the checked-out submodule matches that gitlink exactly.
 - Generated Python bytecode and obsolete dated swarm snapshots are removed from repository state and ignored going forward.
 
 ## Build and release changes

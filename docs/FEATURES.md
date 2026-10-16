@@ -431,7 +431,7 @@ Required capabilities:
 - **CORE** Device removal during active operation produces explicit recoverable failure state.
 - **ADVANCED** Safely disconnect workflow waits for Files-owned operations and relevant flush completion before signalling success.
 - **DELEGATED** Formatting, partitioning and filesystem creation belong to the disk/filesystem-management product, not Files.
-- **DELEGATED** Defragmentation belongs to Infiltrator Defragmenter.
+- **DELEGATED** Defragmentation belongs to Defragmenter.
 - **DELEGATED** Deep filesystem repair/scrub administration belongs to the filesystem/maintenance product even if Files links to it contextually.
 
 ---

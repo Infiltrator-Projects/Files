@@ -1,4 +1,4 @@
-# Infiltrator File Manager 0.1.29
+# Files 0.1.29
 
 Version 0.1.29 is the qualified result of the 15 October 2026 whole-codebase brittleness and maintainability review. The earlier 0.1.28 candidate was rejected by CI before publication after an operation-engine regression test exposed a staging-cleanup edge case; the correction and the remaining review changes were requalified before this release.
 

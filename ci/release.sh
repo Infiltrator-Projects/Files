@@ -137,7 +137,7 @@ wait_for_apt() {
         cache_key="${GITHUB_RUN_ID:-manual}-${attempt}"
         catalogue_version=$(curl -fsSL --retry 2 --retry-delay 1 \
             -H 'Cache-Control: no-cache' "${catalogue}?release=${cache_key}" 2>/dev/null \
-            | jq -r '.[] | select(.id == "infiltrator-file-manager") | (.version // empty)' \
+            | jq -r '.[] | select(.id == "files") | (.version // empty)' \
             | head -n1 || true)
 
         apt_match=false
