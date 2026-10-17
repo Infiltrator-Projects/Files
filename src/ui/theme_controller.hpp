@@ -6,6 +6,7 @@
 #include <gtk/gtk.h>
 
 #include <array>
+#include <string>
 
 namespace infiltrator::files {
 
@@ -18,6 +19,7 @@ public:
     ThemeController &operator=(const ThemeController &) = delete;
 
 private:
+    friend struct ThemeControllerTestAccess;
     static void on_window_finalized(gpointer user_data, GObject *where_object_was);
     static void on_theme_toggled(GtkCheckButton *button, gpointer user_data);
     static void on_system_theme_changed(GObject *object, GParamSpec *pspec, gpointer user_data);
@@ -37,6 +39,7 @@ private:
     GdkDisplay *display_{nullptr};
     GtkCssProvider *provider_{nullptr};
     GtkWidget *menu_button_{nullptr};
+    std::string scope_class_;
     std::array<GtkWidget *, 3> mode_buttons_{};
     gulong theme_name_handler_{0};
     gulong prefer_dark_handler_{0};

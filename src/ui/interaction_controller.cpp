@@ -1043,6 +1043,9 @@ void InteractionController::rebuild_breadcrumbs()
     const auto append_crumb = [this](GFile *file, const char *label) {
         GtkWidget *button = gtk_button_new_with_label(label);
         gtk_widget_add_css_class(button, "flat");
+        gtk_widget_add_css_class(button, "ifm-breadcrumb");
+        if (g_file_equal(file, current))
+            gtk_widget_add_css_class(button, "ifm-breadcrumb-current");
         gtk_widget_set_halign(button, GTK_ALIGN_START);
         char *uri = g_file_get_uri(file);
         g_object_set_data_full(G_OBJECT(button), "ifm-breadcrumb-target",

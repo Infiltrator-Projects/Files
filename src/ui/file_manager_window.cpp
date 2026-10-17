@@ -4,11 +4,9 @@
 #include "item_operation_controller.hpp"
 #include "theme_controller.hpp"
 
-#include <infiltratr/design.h>
 #include <infiltratr/temporal_posix.h>
 
 #include <algorithm>
-#include <cstdio>
 #include <sstream>
 #include <string>
 
@@ -42,13 +40,6 @@ struct DetailSortContext {
     DetailField field{DetailField::Name};
 };
 
-std::string colour_hex(const std::uint32_t rgb)
-{
-    char buffer[8]{};
-    std::snprintf(buffer, sizeof(buffer), "#%06X", rgb & 0x00FFFFFFU);
-    return buffer;
-}
-
 GtkWidget *make_sidebar_content(const char *title, const char *icon_name)
 {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
@@ -74,6 +65,7 @@ GtkWidget *make_scroller(GtkWidget *child)
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
                                    GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), child);
+    gtk_widget_add_css_class(scroll, "ifm-browser-scroll");
     return scroll;
 }
 
@@ -139,7 +131,6 @@ FileManagerWindow::FileManagerWindow(GtkApplication *application)
     build_ui(application);
     thumbnails_ = std::make_unique<ThumbnailCache>();
     g_object_set_data(G_OBJECT(window_), "ifm-window-controller", this);
-    apply_theme();
     arm_temporal_policy_monitor();
     load_bookmarks();
     load_preferences();
@@ -149,9 +140,11 @@ FileManagerWindow::FileManagerWindow(GtkApplication *application)
 
     g_object_weak_ref(G_OBJECT(window_), &FileManagerWindow::on_window_finalized, this);
 
-    GFile *home = g_file_new_for_path(g_get_home_dir());
-    navigate_to(home, true);
-    g_object_unref(home);
+    // The application opens at the filesystem root, not the login home folder.
+    // Home remains one click away in Places and Alt+Home.
+    GFile *root = g_file_new_for_path("/");
+    navigate_to(root, true);
+    g_object_unref(root);
 }
 
 FileManagerWindow::~FileManagerWindow()
@@ -207,12 +200,24 @@ void FileManagerWindow::build_ui(GtkApplication *application)
 {
     window_ = gtk_application_window_new(application);
     gtk_window_set_title(GTK_WINDOW(window_), "Files");
-    gtk_window_set_default_size(GTK_WINDOW(window_), 1120, 760);
+    gtk_window_set_default_size(GTK_WINDOW(window_), 1180, 780);
 
     GtkWidget *header = gtk_header_bar_new();
     gtk_window_set_titlebar(GTK_WINDOW(window_), header);
 
-    GtkWidget *nav_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+    GtkWidget *brand = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_add_css_class(brand, "ifm-brand");
+    GtkWidget *brand_icon = gtk_image_new_from_icon_name("folder-symbolic");
+    gtk_image_set_pixel_size(GTK_IMAGE(brand_icon), 19);
+    gtk_widget_add_css_class(brand_icon, "ifm-brand-mark");
+    GtkWidget *brand_title = gtk_label_new("Files");
+    gtk_widget_add_css_class(brand_title, "ifm-brand-title");
+    gtk_box_append(GTK_BOX(brand), brand_icon);
+    gtk_box_append(GTK_BOX(brand), brand_title);
+    gtk_header_bar_pack_start(GTK_HEADER_BAR(header), brand);
+
+    GtkWidget *nav_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 3);
+    gtk_widget_add_css_class(nav_box, "ifm-nav-actions");
     back_button_ = gtk_button_new_from_icon_name("go-previous-symbolic");
     forward_button_ = gtk_button_new_from_icon_name("go-next-symbolic");
     up_button_ = gtk_button_new_from_icon_name("go-up-symbolic");
@@ -282,8 +287,8 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     gtk_window_set_child(GTK_WINDOW(window_), root);
 
     GtkWidget *tab_line = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    gtk_widget_set_margin_start(tab_line, 8);
-    gtk_widget_set_margin_end(tab_line, 8);
+    gtk_widget_set_margin_start(tab_line, 0);
+    gtk_widget_set_margin_end(tab_line, 0);
     gtk_widget_add_css_class(tab_line, "ifm-tab-line");
     gtk_box_append(GTK_BOX(root), tab_line);
     GtkWidget *tab_scroll = gtk_scrolled_window_new();
@@ -291,7 +296,7 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(tab_scroll),
                                    GTK_POLICY_AUTOMATIC, GTK_POLICY_NEVER);
     tab_strip_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 3);
-    gtk_widget_set_margin_start(tab_strip_, 0);
+    gtk_widget_set_margin_start(tab_strip_, 12);
     gtk_widget_set_margin_top(tab_strip_, 3);
     gtk_widget_set_margin_bottom(tab_strip_, 3);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(tab_scroll), tab_strip_);
@@ -306,6 +311,7 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     gtk_widget_set_tooltip_text(bookmark_button_, "Pin or unpin current folder");
     g_signal_connect(bookmark_button_, "clicked", G_CALLBACK(on_bookmark_toggle), this);
     gtk_box_append(GTK_BOX(tab_line), bookmark_button_);
+    gtk_widget_set_margin_end(bookmark_button_, 12);
     GtkEventController *tab_keys = gtk_event_controller_key_new();
     g_signal_connect(tab_keys, "key-pressed", G_CALLBACK(on_tab_key_pressed), this);
     gtk_widget_add_controller(window_, tab_keys);
@@ -316,7 +322,7 @@ void FileManagerWindow::build_ui(GtkApplication *application)
 
     sidebar_ = gtk_list_box_new();
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(sidebar_), GTK_SELECTION_NONE);
-    gtk_widget_set_size_request(sidebar_, 220, -1);
+    gtk_widget_set_size_request(sidebar_, 228, -1);
     gtk_widget_add_css_class(sidebar_, "ifm-sidebar");
 
     GtkWidget *sidebar_scroll = gtk_scrolled_window_new();
@@ -325,7 +331,7 @@ void FileManagerWindow::build_ui(GtkApplication *application)
                                    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(sidebar_scroll), sidebar_);
     gtk_paned_set_start_child(GTK_PANED(paned), sidebar_scroll);
-    gtk_paned_set_position(GTK_PANED(paned), 220);
+    gtk_paned_set_position(GTK_PANED(paned), 228);
     gtk_paned_set_resize_start_child(GTK_PANED(paned), FALSE);
     gtk_paned_set_shrink_start_child(GTK_PANED(paned), FALSE);
 
@@ -475,6 +481,7 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     g_signal_connect(compact, "activate", G_CALLBACK(on_grid_activate), this);
 
     content_stack_ = gtk_stack_new();
+    gtk_widget_add_css_class(content_stack_, "ifm-content-stack");
     gtk_stack_set_transition_type(GTK_STACK(content_stack_), GTK_STACK_TRANSITION_TYPE_NONE);
     gtk_stack_add_named(GTK_STACK(content_stack_), make_scroller(list), "list");
     gtk_stack_add_named(GTK_STACK(content_stack_), make_scroller(icons), "icons");
@@ -505,21 +512,24 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(list_view_button_), TRUE);
 
     GtkWidget *status = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_widget_set_margin_start(status, 12);
-    gtk_widget_set_margin_end(status, 12);
-    gtk_widget_set_margin_top(status, 5);
-    gtk_widget_set_margin_bottom(status, 5);
+    gtk_widget_set_margin_start(status, 0);
+    gtk_widget_set_margin_end(status, 0);
+    gtk_widget_set_margin_top(status, 0);
+    gtk_widget_set_margin_bottom(status, 0);
     gtk_widget_add_css_class(status, "ifm-status");
 
     spinner_ = gtk_spinner_new();
     gtk_widget_set_visible(spinner_, FALSE);
     gtk_box_append(GTK_BOX(status), spinner_);
+    gtk_widget_set_margin_start(spinner_, 14);
 
     status_label_ = gtk_label_new("");
     gtk_widget_add_css_class(status_label_, "ifm-status-text");
     gtk_label_set_xalign(GTK_LABEL(status_label_), 0.0F);
+    gtk_widget_set_margin_start(status_label_, 16);
     gtk_widget_set_hexpand(status_label_, TRUE);
     gtk_box_append(GTK_BOX(status), status_label_);
+    gtk_widget_set_margin_end(view_switcher, 12);
     gtk_box_append(GTK_BOX(status), view_switcher);
     gtk_box_append(GTK_BOX(root), status);
 }
@@ -709,93 +719,24 @@ void FileManagerWindow::move_active_tab(int delta)
     update_tab_buttons();
 }
 
-void FileManagerWindow::apply_theme()
+void FileManagerWindow::update_sidebar_current_state()
 {
-    GtkSettings *settings = gtk_settings_get_default();
-    gboolean system_dark = FALSE;
-    if (settings != nullptr) {
-        g_object_get(settings, "gtk-application-prefer-dark-theme", &system_dark, nullptr);
+    if (sidebar_ == nullptr || current_location_ == nullptr) return;
+    for (GtkWidget *row = gtk_widget_get_first_child(sidebar_);
+         row != nullptr; row = gtk_widget_get_next_sibling(row)) {
+        const char *target = static_cast<const char *>(
+            g_object_get_data(G_OBJECT(row), "ifm-target"));
+        bool current = false;
+        if (target != nullptr) {
+            GFile *file = file_from_location_text(target);
+            if (file != nullptr) {
+                current = g_file_equal(file, current_location_) != FALSE;
+                g_object_unref(file);
+            }
+        }
+        if (current) gtk_widget_add_css_class(row, "ifm-place-current");
+        else gtk_widget_remove_css_class(row, "ifm-place-current");
     }
-
-    const InfiltratrThemePalette *palette =
-        infiltratr_theme_resolve(INFILTRATR_THEME_SYSTEM, system_dark != FALSE);
-    const InfiltratrDesignMetrics *metrics = infiltratr_design_metrics();
-    const InfiltratrTypography *typography = infiltratr_typography();
-    if (palette == nullptr || metrics == nullptr || typography == nullptr) {
-        return;
-    }
-
-    std::ostringstream css;
-    css << "window { background: " << colour_hex(palette->background_rgb)
-        << "; color: " << colour_hex(palette->text_rgb)
-        << "; font-family: '" << typography->ui_family << "', " << typography->gtk_fallback << "; }\n"
-        << "headerbar { background: " << colour_hex(palette->titlebar_rgb)
-        << "; color: " << colour_hex(palette->title_rgb)
-        << "; border-bottom: 1px solid " << colour_hex(palette->border_rgb) << "; }\n"
-        << ".ifm-sidebar { background: " << colour_hex(palette->panel_rgb)
-        << "; border-right: 1px solid " << colour_hex(palette->border_rgb) << "; }\n"
-        << ".ifm-sidebar row { margin: 2px 6px; border-radius: " << metrics->control_radius << "px; }\n"
-        << ".ifm-sidebar row:hover { background: " << colour_hex(palette->surface_hover_rgb) << "; }\n"
-        << ".ifm-file-list, .ifm-icon-grid { background: " << colour_hex(palette->background_rgb) << "; }\n"
-        << ".ifm-file-list row { border-radius: " << metrics->control_radius << "px; }\n"
-        << ".ifm-file-list row:hover { background: " << colour_hex(palette->surface_hover_rgb) << "; }\n"
-        << ".ifm-file-list row:selected { background: " << colour_hex(palette->selection_background_rgb)
-        << "; color: " << colour_hex(palette->selection_foreground_rgb) << "; }\n"
-        << ".ifm-file-list header, .ifm-file-list header button { background: "
-        << colour_hex(palette->panel_rgb) << "; color: " << colour_hex(palette->muted_rgb)
-        << "; border-color: " << colour_hex(palette->border_rgb) << "; }\n"
-        << ".ifm-icon-tile { margin: 4px; padding: 8px 6px; border-radius: "
-        << metrics->control_radius << "px; }\n"
-        << ".ifm-icon-tile:hover { background: " << colour_hex(palette->surface_hover_rgb) << "; }\n"
-        << ".ifm-compact-tile { margin: 2px; padding: 5px 8px; }\n"
-        << ".ifm-file-name { color: " << colour_hex(palette->text_rgb) << "; }\n"
-        << ".ifm-detail-secondary { color: " << colour_hex(palette->muted_rgb) << "; }\n"
-        << ".ifm-file-list row:selected .ifm-file-name, "
-        << ".ifm-file-list row:selected .ifm-detail-secondary { color: "
-        << colour_hex(palette->selection_foreground_rgb) << "; }\n"
-        << ".ifm-status { background: " << colour_hex(palette->panel_rgb)
-        << "; color: " << colour_hex(palette->muted_rgb)
-        << "; border-top: 1px solid " << colour_hex(palette->border_rgb) << "; }\n"
-        << "entry { background: " << colour_hex(palette->input_rgb)
-        << "; color: " << colour_hex(palette->text_rgb)
-        << "; border-radius: " << metrics->control_radius << "px; }\n";
-
-    css << ".ifm-empty-state { padding: 28px; }\n"
-        << ".ifm-icon-grid child:selected .ifm-icon-tile { background: "
-        << colour_hex(palette->selection_background_rgb) << "; }\n"
-        << ".ifm-icon-grid child:selected .ifm-file-name { color: "
-        << colour_hex(palette->selection_foreground_rgb) << "; }\n"
-        << ".ifm-sidebar row:focus-visible { outline: 2px solid "
-        << colour_hex(palette->selection_background_rgb) << "; outline-offset: 1px; }\n";
-    css << ".ifm-tab-line { background: " << colour_hex(palette->panel_rgb)
-        << "; border-bottom: 1px solid " << colour_hex(palette->border_rgb)
-        << "; min-height: 39px; }\n"
-        << ".ifm-tab-group { border-radius: " << metrics->control_radius
-        << "px; margin: 2px 1px; background: transparent; }\n"
-        << ".ifm-tab-button { min-height: 30px; padding: 2px 12px; border-radius: "
-        << metrics->control_radius << "px; border: 1px solid transparent; }\n"
-        << ".ifm-tab-button:hover { background: " << colour_hex(palette->surface_hover_rgb) << "; }\n"
-        << ".ifm-tab-active { background: " << colour_hex(palette->background_rgb)
-        << "; border: 1px solid " << colour_hex(palette->border_rgb)
-        << "; font-weight: 600; }\n"
-        << ".ifm-tab-close { padding: 1px 2px; min-width: 21px; min-height: 23px; }\n"
-        << ".ifm-view-button { padding: 4px; min-width: 32px; min-height: 32px; }\n"
-        << ".ifm-view-switcher { border-radius: " << metrics->control_radius << "px; }\n"
-        << ".ifm-section-caption { font-size: 0.75em; font-weight: 650; letter-spacing: 0.09em; color: "
-        << colour_hex(palette->muted_rgb) << "; }\n"
-        << ".ifm-sidebar row { min-height: 32px; }\n"
-        << ".ifm-status { min-height: 29px; }\n"
-        << ".ifm-status-text { font-size: 0.91em; }\n"
-        << ".ifm-file-list columnview row { min-height: 31px; }\n"
-        << "button:focus-visible { outline-offset: 2px; }\n";
-
-    GtkCssProvider *provider = gtk_css_provider_new();
-    const std::string stylesheet = css.str();
-    gtk_css_provider_load_from_data(provider, stylesheet.c_str(), static_cast<gssize>(stylesheet.size()));
-    gtk_style_context_add_provider_for_display(gtk_widget_get_display(window_),
-                                               GTK_STYLE_PROVIDER(provider),
-                                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-    g_object_unref(provider);
 }
 
 void FileManagerWindow::add_sidebar_location(const char *title, const char *icon_name, const char *target)
@@ -1025,6 +966,7 @@ void FileManagerWindow::navigate_to(GFile *file, const bool record_history)
     update_status();
     update_tab_buttons();
     update_bookmark_button();
+    update_sidebar_current_state();
 }
 
 void FileManagerWindow::navigate_history(const std::ptrdiff_t delta)
@@ -1681,6 +1623,7 @@ void FileManagerWindow::append_bookmark(const std::string &uri)
     g_object_set_data_full(G_OBJECT(row), "ifm-target", g_strdup(uri.c_str()), g_free);
     gtk_list_box_append(GTK_LIST_BOX(sidebar_), row);
     bookmarks_.push_back(BookmarkRow{uri, row});
+    update_sidebar_current_state();
     g_free(label);
     g_object_unref(file);
 }

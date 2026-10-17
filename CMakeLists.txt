@@ -177,6 +177,17 @@ if(BUILD_TESTING)
             ENVIRONMENT "G_DEBUG=fatal-criticals;GTK_A11Y=none;GSETTINGS_BACKEND=memory"
             TIMEOUT 45)
 
+        # Theme integration checks the real GTK colour cascade under Xvfb,
+        # including per-window Day/Night isolation and root startup.
+        add_executable(theme-presentation-test tests/theme_presentation_test.cpp)
+        target_link_libraries(theme-presentation-test PRIVATE infiltrator-files-ui)
+        infiltrator_enable_warnings(theme-presentation-test)
+        add_test(NAME theme-presentation COMMAND "${DBUS_RUN_SESSION_EXECUTABLE}" --
+            "${XVFB_RUN_EXECUTABLE}" -a $<TARGET_FILE:theme-presentation-test>)
+        set_tests_properties(theme-presentation PROPERTIES
+            ENVIRONMENT "G_DEBUG=fatal-criticals;GTK_A11Y=none;GSETTINGS_BACKEND=memory"
+            TIMEOUT 45)
+
         add_executable(interaction-surface-test tests/interaction_surface_test.cpp)
         target_link_libraries(interaction-surface-test PRIVATE infiltrator-files-ui)
         infiltrator_enable_warnings(interaction-surface-test)

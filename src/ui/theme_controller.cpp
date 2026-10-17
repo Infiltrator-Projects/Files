@@ -3,7 +3,9 @@
 
 #include <infiltratr/posix.h>
 
+#include <atomic>
 #include <cstdint>
+#include <initializer_list>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -64,6 +66,13 @@ ThemeController::ThemeController(GtkWindow *window)
         }
     }
 
+    // A per-window class prevents a Day window's stylesheet from changing a
+    // separate Night window. Unlike the old global frozen provider, it is
+    // removed when this controller/window is destroyed.
+    static std::atomic<unsigned> next_scope{0U};
+    scope_class_ = "ifm-theme-" + std::to_string(++next_scope);
+    gtk_widget_add_css_class(GTK_WIDGET(window_), scope_class_.c_str());
+
     display_ = gtk_widget_get_display(GTK_WIDGET(window_));
     if (display_ != nullptr) {
         g_object_ref(display_);
@@ -91,6 +100,8 @@ ThemeController::~ThemeController()
         settings_ = nullptr;
     }
 
+    if (window_ != nullptr && !scope_class_.empty())
+        gtk_widget_remove_css_class(GTK_WIDGET(window_), scope_class_.c_str());
     if (display_ != nullptr && provider_ != nullptr) {
         gtk_style_context_remove_provider_for_display(
             display_, GTK_STYLE_PROVIDER(provider_));
@@ -192,50 +203,160 @@ void ThemeController::install_picker()
 
 void ThemeController::apply_theme()
 {
-    if (provider_ == nullptr) {
-        return;
-    }
+    if (provider_ == nullptr || scope_class_.empty()) return;
 
+    const bool system_dark = system_prefers_dark();
+    const bool dark = mode_ == INFILTRATR_THEME_NIGHT ||
+        (mode_ == INFILTRATR_THEME_SYSTEM && system_dark);
     const InfiltratrThemePalette *palette =
-        infiltratr_theme_resolve(mode_, system_prefers_dark());
-    if (palette == nullptr) {
-        return;
-    }
+        infiltratr_theme_resolve(mode_, system_dark);
+    const InfiltratrDesignMetrics *metrics = infiltratr_design_metrics();
+    const InfiltratrTypography *typography = infiltratr_typography();
+    if (palette == nullptr || metrics == nullptr || typography == nullptr) return;
+
+    // Common owns the semantic colour/metric/typography contract. Files owns
+    // only the density and placement of accents. No ad-hoc Day/Night RGB values.
+    const std::string background = colour_hex(palette->background_rgb);
+    const std::string panel = colour_hex(palette->panel_rgb);
+    const std::string card = colour_hex(palette->card_rgb);
+    const std::string surface = colour_hex(palette->surface_rgb);
+    const std::string input = colour_hex(palette->input_rgb);
+    const std::string border = colour_hex(palette->border_rgb);
+    const std::string text = colour_hex(palette->text_rgb);
+    const std::string muted = colour_hex(palette->muted_rgb);
+    const std::string titlebar = colour_hex(palette->titlebar_rgb);
+    const std::string title = colour_hex(palette->title_rgb);
+    const std::string hover = colour_hex(palette->surface_hover_rgb);
+    const std::string selected = colour_hex(palette->selection_background_rgb);
+    const std::string selected_text = colour_hex(palette->selection_foreground_rgb);
+    const std::string accent = colour_hex(palette->info_rgb);
+    const std::string radius = std::to_string(metrics->control_radius) + "px";
+    const std::string sidebar_surface = dark ? panel : surface;
 
     std::ostringstream css;
-    css << "window { background: " << colour_hex(palette->background_rgb)
-        << "; color: " << colour_hex(palette->text_rgb) << "; }\n"
-        << "headerbar { background: " << colour_hex(palette->titlebar_rgb)
-        << "; color: " << colour_hex(palette->title_rgb)
-        << "; border-bottom-color: " << colour_hex(palette->border_rgb) << "; }\n"
-        << ".ifm-sidebar { background: " << colour_hex(palette->panel_rgb)
-        << "; border-right-color: " << colour_hex(palette->border_rgb) << "; }\n"
-        << ".ifm-sidebar row:hover { background: "
-        << colour_hex(palette->surface_hover_rgb) << "; }\n"
-        << ".ifm-file-list, .ifm-icon-grid { background: "
-        << colour_hex(palette->background_rgb) << "; }\n"
-        << ".ifm-file-list header, .ifm-file-list header button { background: "
-        << colour_hex(palette->panel_rgb) << "; color: "
-        << colour_hex(palette->muted_rgb) << "; border-color: "
-        << colour_hex(palette->border_rgb) << "; }\n"
-        << ".ifm-file-list row:hover, .ifm-icon-tile:hover { background: "
-        << colour_hex(palette->surface_hover_rgb) << "; }\n"
-        << ".ifm-file-list row:selected { background: "
-        << colour_hex(palette->selection_background_rgb)
-        << "; color: " << colour_hex(palette->selection_foreground_rgb) << "; }\n"
-        << ".ifm-file-name { color: " << colour_hex(palette->text_rgb) << "; }\n"
-        << ".ifm-detail-secondary { color: " << colour_hex(palette->muted_rgb) << "; }\n"
-        << ".ifm-file-list row:selected .ifm-file-name, "
-        << ".ifm-file-list row:selected .ifm-detail-secondary { color: "
-        << colour_hex(palette->selection_foreground_rgb) << "; }\n"
-        << ".ifm-status { background: " << colour_hex(palette->panel_rgb)
-        << "; color: " << colour_hex(palette->muted_rgb)
-        << "; border-top-color: " << colour_hex(palette->border_rgb) << "; }\n"
-        << "entry { background: " << colour_hex(palette->input_rgb)
-        << "; color: " << colour_hex(palette->text_rgb) << "; }\n"
-        << "button, menubutton { color: " << colour_hex(palette->text_rgb) << "; }\n"
-        << "popover { background: " << colour_hex(palette->card_rgb)
-        << "; color: " << colour_hex(palette->text_rgb) << "; }\n";
+    const std::string scope = "." + scope_class_;
+    const auto rule = [&](const char *selector, const std::string &declarations) {
+        css << scope << " " << selector << " { " << declarations << " }\n";
+    };
+    const auto rules = [&](std::initializer_list<const char *> selectors,
+                           const std::string &declarations) {
+        for (const char *selector : selectors) rule(selector, declarations);
+    };
+
+    css << scope << " { background-color: " << background << "; color: " << text
+        << "; font-family: '" << typography->ui_family << "', "
+        << typography->gtk_fallback << "; }\n";
+
+    // Explicitly colour header descendants: native window controls and
+    // breadcrumb text otherwise inherit a low-contrast desktop GTK theme.
+    rule("headerbar", "background-color:" + titlebar + ";color:" + title +
+         ";border-bottom:1px solid " + border + ";min-height:46px;padding:2px 7px");
+    rules({"headerbar button", "headerbar menubutton", "headerbar windowcontrols",
+           "headerbar windowcontrols button", "headerbar image", "headerbar label"},
+          "color:" + title);
+    rule("headerbar button", "background-color:transparent;border-radius:" + radius +
+         ";min-height:30px");
+    rule("headerbar button:hover", "background-color:" + hover + ";color:" + text);
+    rule("headerbar button:disabled", "color:" + muted);
+    rule("headerbar .ifm-brand", "margin-right:12px");
+    rule("headerbar .ifm-brand-title", "color:" + title +
+         ";font-weight:700;font-size:1.05em");
+    rule("headerbar .ifm-brand-mark", "color:" + accent);
+    rule("headerbar .ifm-breadcrumb", "color:" + title +
+         ";padding:3px 9px;min-height:28px");
+    rule("headerbar .ifm-breadcrumb-current", "background-color:" + card +
+         ";border:1px solid " + border + ";font-weight:650");
+    rule("headerbar .ifm-breadcrumb:hover", "background-color:" + hover);
+    rule("headerbar entry", "background-color:" + input + ";color:" + text +
+         ";border:1px solid " + border + ";border-radius:" + radius);
+
+    // GTK4 renders ColumnView through *nested* listview/row/cell CSS nodes.
+    // Target the real nodes, not only a class on the outer ColumnView: this
+    // prevents dark-theme row backgrounds persisting inside the Day UI.
+    const std::string browsing = "background-color:" + background + ";color:" + text;
+    rules({".ifm-content-stack", ".ifm-browser-scroll", ".ifm-browser-scroll viewport",
+           "columnview", "columnview listview", "columnview listview.view",
+           "gridview", "gridview.view", "listview.view"},
+          browsing);
+    rules({"columnview row", "columnview listview row", "gridview child"},
+          "background-color:" + background + ";color:" + text +
+          ";border-radius:0;min-height:34px");
+    rules({"columnview row:hover", "columnview listview row:hover", "gridview child:hover"},
+          "background-color:" + hover + ";color:" + text);
+    rules({"columnview row:selected", "columnview listview row:selected",
+           "gridview child:selected"},
+          "background-color:" + selected + ";color:" + selected_text);
+    rule("columnview cell", "background-color:transparent;border:0");
+    rules({"columnview header", "columnview header button",
+           "columnview header label"},
+          "background-color:" + panel + ";color:" + muted +
+          ";border-color:" + border + ";font-weight:600");
+    rule("columnview header button", "min-height:34px;padding:4px 9px");
+    rule("columnview header button:hover", "background-color:" + hover +
+         ";color:" + text);
+    rules({".ifm-file-name", ".ifm-icon-tile .ifm-file-name"},
+          "color:" + text + ";font-weight:500");
+    rule(".ifm-detail-secondary", "color:" + muted);
+    rules({"columnview row:selected .ifm-file-name",
+           "columnview row:selected .ifm-detail-secondary",
+           "gridview child:selected .ifm-file-name"},
+          "color:" + selected_text);
+    rule(".ifm-icon-tile", "padding:8px 7px;margin:3px;border-radius:" + radius);
+    rule(".ifm-compact-tile", "padding:5px 8px;margin:2px");
+    rule(".ifm-empty-state", "color:" + muted + ";padding:28px");
+
+    // One restrained blue/cyan accent, borrowed from Common's info role.
+    // The file content remains neutral and easy to scan; no dashboard cards.
+    rule(".ifm-sidebar", "background-color:" + sidebar_surface + ";color:" + text +
+         ";border-right:1px solid " + border);
+    rule(".ifm-sidebar row", "color:" + text +
+         ";background-color:transparent;margin:2px 7px;border-radius:" + radius +
+         ";min-height:34px");
+    rule(".ifm-sidebar row:hover", "background-color:" + hover);
+    rule(".ifm-sidebar row.ifm-place-current", "background-color:" + card +
+         ";border-left:3px solid " + accent + ";font-weight:650");
+    rule(".ifm-sidebar row label", "color:" + text);
+    rule(".ifm-sidebar row image", "color:" + muted);
+    rule(".ifm-sidebar row.ifm-place-current image", "color:" + accent);
+    rule(".ifm-section-caption", "color:" + muted +
+         ";font-size:0.78em;font-weight:650;letter-spacing:0.08em");
+    rule(".ifm-sidebar row:focus-visible", "outline:2px solid " + accent);
+
+    rule(".ifm-tab-line", "background-color:" + sidebar_surface +
+         ";border-bottom:1px solid " + border + ";min-height:43px");
+    rule(".ifm-tab-group", "margin:3px 2px;border-radius:" + radius);
+    rule(".ifm-tab-button", "color:" + muted +
+         ";background-color:transparent;border:1px solid transparent;"
+         "border-radius:" + radius + ";padding:4px 11px;min-height:29px");
+    rule(".ifm-tab-button:hover", "background-color:" + hover + ";color:" + text);
+    rule(".ifm-tab-active", "background-color:" + card + ";color:" + text +
+         ";border:1px solid " + border + ";border-bottom:2px solid " + accent +
+         ";font-weight:650");
+    rule(".ifm-tab-close", "color:" + muted +
+         ";background-color:transparent;border-radius:" + radius);
+    rule(".ifm-tab-close:hover", "color:" + text + ";background-color:" + hover);
+    rule(".ifm-tab-line button.flat", "color:" + text);
+
+    rule(".ifm-status", "background-color:" + panel + ";color:" + muted +
+         ";border-top:1px solid " + border + ";min-height:39px");
+    rule(".ifm-status-text", "color:" + muted + ";font-size:0.92em");
+    rule(".ifm-view-switcher", "background-color:" + surface +
+         ";border-radius:" + radius);
+    rule(".ifm-view-button", "color:" + muted +
+         ";border:1px solid transparent;min-width:32px;min-height:30px;padding:4px");
+    rule(".ifm-view-button:checked", "color:" + text + ";background-color:" +
+         card + ";border-color:" + accent);
+    rule(".ifm-view-button:hover", "background-color:" + hover + ";color:" + text);
+
+    rules({"popover", "popover contents"}, "background-color:" + card +
+          ";color:" + text + ";border:1px solid " + border);
+    rule("popover button", "color:" + text + ";border-radius:" + radius);
+    rule("popover button:hover", "background-color:" + hover);
+    rule("popover label", "color:" + text);
+    rule("entry", "background-color:" + input + ";color:" + text +
+         ";border-radius:" + radius);
+    rule("entry selection", "background-color:" + selected +
+         ";color:" + selected_text);
 
     const std::string stylesheet = css.str();
     gtk_css_provider_load_from_data(

@@ -145,7 +145,7 @@ private:
     void remove_bookmark(std::size_t index);
     void reorder_bookmarks();
     void update_bookmark_button();
-    void apply_theme();
+    void update_sidebar_current_state();
     void add_sidebar_location(const char *title, const char *icon_name, const char *target);
     void refresh_mounted_places();
     void apply_mounted_places(const std::vector<MountedPlace> &places);
