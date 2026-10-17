@@ -85,6 +85,8 @@ It currently provides:
 - directory activation and launching files through the platform's registered default application;
 - a toolkit-neutral `Location` model and navigation history beneath the GTK presentation;
 - the canonical Infiltrator Day/Night/System design contract from pinned Common;
+- consistent per-window Day/Night colour styling for the header, breadcrumb, sidebar, tabs, GTK ColumnView rows and status text, with a restrained Common-owned cyan accent;
+- filesystem root (`/`) as the initial location, keeping Home one click away in Places;
 - a persistent **Follow system / Day / Night** appearance control, with live GTK system-theme tracking when Follow system is selected;
 - a real GTK multi-selection model for selecting more than one directory item while preserving the existing single-item action contract when exactly one item is selected;
 - deterministic **New Folder**, available from the header action or `Ctrl+Shift+N` for native locations;
