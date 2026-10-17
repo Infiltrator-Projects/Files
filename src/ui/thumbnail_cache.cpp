@@ -170,7 +170,7 @@ void ThumbnailCache::finished(GObject *, GAsyncResult *result, gpointer)
     auto waiters = state->waiters.find(job->key);
     if (waiters == state->waiters.end()) return;
     for (GWeakRef *ref : waiters->second) {
-        GObject *object = g_weak_ref_get(ref);
+        GObject *object = static_cast<GObject *>(g_weak_ref_get(ref));
         if (object != nullptr) {
             const char *still = static_cast<const char *>(
                 g_object_get_data(object, "ifm-thumb-key"));

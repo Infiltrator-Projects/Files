@@ -1488,7 +1488,7 @@ GtkWidget *FileManagerWindow::make_inline_editor(GtkWidget *cell, GtkWidget *lab
     gtk_stack_add_named(GTK_STACK(stack), label, "name");
     GtkWidget *entry = gtk_entry_new();
     gtk_widget_set_hexpand(entry, TRUE);
-    gtk_entry_set_width_chars(GTK_ENTRY(entry), 10);
+    gtk_widget_set_size_request(entry, 112, -1);
     gtk_stack_add_named(GTK_STACK(stack), entry, "edit");
     gtk_stack_set_visible_child_name(GTK_STACK(stack), "name");
     g_object_set_data(G_OBJECT(cell), "ifm-inline-stack", stack);
