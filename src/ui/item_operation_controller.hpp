@@ -18,6 +18,7 @@ public:
                             GtkSingleSelection *selection,
                             GtkWidget *status_label);
     ~ItemOperationController();
+    void rename_selected_to(const std::string &new_name);
 
     ItemOperationController(const ItemOperationController &) = delete;
     ItemOperationController &operator=(const ItemOperationController &) = delete;

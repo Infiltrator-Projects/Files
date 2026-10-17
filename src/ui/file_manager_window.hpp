@@ -27,7 +27,7 @@ public:
     void present();
     void install_operation_surface();
     [[nodiscard]] bool open_primary_directory_in_new_tab();
-    void begin_inline_rename();
+    [[nodiscard]] bool begin_inline_rename();
     [[nodiscard]] GtkWindow *native_window() const noexcept { return GTK_WINDOW(window_); }
 
 private:
@@ -74,6 +74,12 @@ private:
     static void on_list_activate(GtkColumnView *view, guint position, gpointer user_data);
     static void on_grid_activate(GtkGridView *view, guint position, gpointer user_data);
     static void on_view_mode_toggled(GtkToggleButton *button, gpointer user_data);
+    static void on_inline_entry_activate(GtkEntry *entry, gpointer user_data);
+    static gboolean on_inline_key(GtkEventControllerKey *controller, guint keyval,
+                                   guint keycode, GdkModifierType state, gpointer user_data);
+    static void on_inline_focus_leave(GtkEventControllerFocus *focus, gpointer user_data);
+    static void on_icon_factory_unbind(GtkSignalListItemFactory *factory, GtkListItem *item,
+                                       gpointer user_data);
     static void on_factory_setup(GtkSignalListItemFactory *factory, GtkListItem *item, gpointer user_data);
     static void on_factory_bind(GtkSignalListItemFactory *factory, GtkListItem *item, gpointer user_data);
     static void on_factory_unbind(GtkSignalListItemFactory *factory,
@@ -106,6 +112,9 @@ private:
                                            GObject *where_object_was);
 
     void build_ui(GtkApplication *application);
+    GtkWidget *make_inline_editor(GtkWidget *cell, GtkWidget *label);
+    void cancel_inline_editor(GtkWidget *cell);
+    static GtkWidget *find_editor_for_name(GtkWidget *root, const char *name);
     void add_tab(GFile *file);
     void activate_tab(std::size_t index);
     void close_tab(std::size_t index);

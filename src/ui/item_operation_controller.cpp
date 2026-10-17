@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "item_operation_controller.hpp"
+#include "file_manager_window.hpp"
 
 #include "../core/operation_engine.hpp"
 #include "../core/operation_journal.hpp"
@@ -61,6 +62,7 @@ ItemOperationController::ItemOperationController(GtkWindow *window,
 
     g_object_ref(directory_list_);
     g_object_ref(selection_);
+    g_object_set_data(G_OBJECT(window_), "ifm-item-controller", this);
 
     GtkWidget *titlebar = gtk_window_get_titlebar(window_);
     if (GTK_IS_HEADER_BAR(titlebar)) {
@@ -126,6 +128,7 @@ ItemOperationController::ItemOperationController(GtkWindow *window,
 
 ItemOperationController::~ItemOperationController()
 {
+    if (window_ != nullptr) g_object_set_data(G_OBJECT(window_), "ifm-item-controller", nullptr);
     if (progress_source_id_ != 0U) {
         g_source_remove(progress_source_id_);
         progress_source_id_ = 0U;
@@ -324,6 +327,9 @@ void ItemOperationController::show_rename_dialog()
         gtk_window_present(GTK_WINDOW(rename_dialog_));
         return;
     }
+    auto *manager = static_cast<FileManagerWindow *>(
+        g_object_get_data(G_OBJECT(window_), "ifm-window-controller"));
+    if (manager != nullptr && manager->begin_inline_rename()) return;
 
     std::string source_path;
     std::string current_name;
@@ -400,6 +406,19 @@ void ItemOperationController::submit_rename()
     const std::string source_path = rename_source_path_;
     gtk_window_destroy(GTK_WINDOW(rename_dialog_));
     start_operation(Kind::Rename, source_path, {}, new_name);
+}
+
+void ItemOperationController::rename_selected_to(const std::string &new_name)
+{
+    if (busy_ || chooser_busy_) return;
+    std::string path, current_name;
+    if (!selected_source(path, current_name) || new_name == current_name) return;
+    std::string error;
+    if (!OperationEngine::validate_item_name(new_name, &error)) {
+        show_alert("Rename", error);
+        return;
+    }
+    start_operation(Kind::Rename, path, {}, new_name);
 }
 
 void ItemOperationController::choose_destination(const Kind kind)

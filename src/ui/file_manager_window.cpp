@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "file_manager_window.hpp"
 #include "detail_metadata.hpp"
+#include "item_operation_controller.hpp"
 
 #include <infiltratr/design.h>
 #include <infiltratr/temporal_posix.h>
@@ -390,6 +391,7 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     g_object_set_data(G_OBJECT(icon_factory), "ifm-tile-width", GINT_TO_POINTER(132));
     g_signal_connect(icon_factory, "setup", G_CALLBACK(on_icon_factory_setup), this);
     g_signal_connect(icon_factory, "bind", G_CALLBACK(on_icon_factory_bind), this);
+    g_signal_connect(icon_factory, "unbind", G_CALLBACK(on_icon_factory_unbind), this);
 
     // Each view consumes its own reference. The window retains the original
     // selection reference so callback teardown never depends on view disposal order.
@@ -403,6 +405,7 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     GtkListItemFactory *compact_factory = gtk_signal_list_item_factory_new();
     g_signal_connect(compact_factory, "setup", G_CALLBACK(on_compact_factory_setup), this);
     g_signal_connect(compact_factory, "bind", G_CALLBACK(on_icon_factory_bind), this);
+    g_signal_connect(compact_factory, "unbind", G_CALLBACK(on_icon_factory_unbind), this);
 
     GtkWidget *compact = gtk_grid_view_new(
         GTK_SELECTION_MODEL(g_object_ref(selection_)), compact_factory);
@@ -1474,6 +1477,107 @@ void FileManagerWindow::on_view_mode_toggled(GtkToggleButton *button, gpointer u
     self->set_view_mode(static_cast<ViewMode>(encoded - 1));
 }
 
+
+GtkWidget *FileManagerWindow::make_inline_editor(GtkWidget *cell, GtkWidget *label)
+{
+    GtkWidget *stack = gtk_stack_new();
+    gtk_stack_set_transition_type(GTK_STACK(stack), GTK_STACK_TRANSITION_TYPE_NONE);
+    gtk_widget_set_hexpand(stack, TRUE);
+    gtk_stack_add_named(GTK_STACK(stack), label, "name");
+    GtkWidget *entry = gtk_entry_new();
+    gtk_widget_set_hexpand(entry, TRUE);
+    gtk_entry_set_width_chars(GTK_ENTRY(entry), 10);
+    gtk_stack_add_named(GTK_STACK(stack), entry, "edit");
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "name");
+    g_object_set_data(G_OBJECT(cell), "ifm-inline-stack", stack);
+    g_object_set_data(G_OBJECT(cell), "ifm-inline-entry", entry);
+    g_signal_connect(entry, "activate", G_CALLBACK(on_inline_entry_activate), this);
+    GtkEventController *keys = gtk_event_controller_key_new();
+    g_signal_connect(keys, "key-pressed", G_CALLBACK(on_inline_key), this);
+    gtk_widget_add_controller(entry, keys);
+    GtkEventController *focus = gtk_event_controller_focus_new();
+    g_signal_connect(focus, "leave", G_CALLBACK(on_inline_focus_leave), this);
+    gtk_widget_add_controller(entry, focus);
+    return stack;
+}
+void FileManagerWindow::cancel_inline_editor(GtkWidget *cell)
+{
+    auto *stack = GTK_WIDGET(g_object_get_data(G_OBJECT(cell), "ifm-inline-stack"));
+    if (GTK_IS_STACK(stack))
+        gtk_stack_set_visible_child_name(GTK_STACK(stack), "name");
+}
+GtkWidget *FileManagerWindow::find_editor_for_name(GtkWidget *root, const char *name)
+{
+    if (root == nullptr || name == nullptr) return nullptr;
+    const char *stored = static_cast<const char *>(
+        g_object_get_data(G_OBJECT(root), "ifm-source-name"));
+    if (stored != nullptr && g_strcmp0(stored, name) == 0 &&
+        g_object_get_data(G_OBJECT(root), "ifm-inline-entry") != nullptr)
+        return root;
+    for (GtkWidget *child = gtk_widget_get_first_child(root);
+         child != nullptr; child = gtk_widget_get_next_sibling(child)) {
+        if (GtkWidget *found = find_editor_for_name(child, name); found != nullptr)
+            return found;
+    }
+    return nullptr;
+}
+bool FileManagerWindow::begin_inline_rename()
+{
+    if (primary_selection_ == nullptr || content_stack_ == nullptr) return false;
+    auto *info = G_FILE_INFO(gtk_single_selection_get_selected_item(primary_selection_));
+    if (info == nullptr) return false;
+    const char *name = g_file_info_get_name(info);
+    GtkWidget *scroller = gtk_stack_get_visible_child(GTK_STACK(content_stack_));
+    if (!GTK_IS_SCROLLED_WINDOW(scroller)) return false;
+    GtkWidget *view = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scroller));
+    GtkWidget *cell = find_editor_for_name(view, name);
+    if (cell == nullptr) return false;
+    GtkWidget *stack = GTK_WIDGET(g_object_get_data(G_OBJECT(cell), "ifm-inline-stack"));
+    GtkWidget *entry = GTK_WIDGET(g_object_get_data(G_OBJECT(cell), "ifm-inline-entry"));
+    if (!GTK_IS_STACK(stack) || !GTK_IS_ENTRY(entry)) return false;
+    gtk_editable_set_text(GTK_EDITABLE(entry), name);
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "edit");
+    gtk_widget_grab_focus(entry);
+    // Preserve the extension while preselecting the base name.
+    const char *dot = g_strrstr(name, ".");
+    const int length = dot != nullptr && dot != name
+        ? static_cast<int>(dot - name) : -1;
+    gtk_editable_select_region(GTK_EDITABLE(entry), 0, length);
+    return true;
+}
+void FileManagerWindow::on_inline_entry_activate(GtkEntry *entry, gpointer user_data)
+{
+    auto *self = static_cast<FileManagerWindow *>(user_data);
+    GtkWidget *stack = gtk_widget_get_parent(GTK_WIDGET(entry));
+    GtkWidget *cell = stack != nullptr ? gtk_widget_get_parent(stack) : nullptr;
+    if (cell == nullptr || self->current_location_ == nullptr) return;
+    const char *old_name = static_cast<const char *>(
+        g_object_get_data(G_OBJECT(cell), "ifm-source-name"));
+    const char *new_name = gtk_editable_get_text(GTK_EDITABLE(entry));
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "name");
+    auto *selected = G_FILE_INFO(gtk_single_selection_get_selected_item(self->primary_selection_));
+    if (selected == nullptr || old_name == nullptr ||
+        g_strcmp0(old_name, g_file_info_get_name(selected)) != 0 ||
+        new_name == nullptr || g_strcmp0(new_name, old_name) == 0)
+        return;
+    auto *operations = static_cast<ItemOperationController *>(
+        g_object_get_data(G_OBJECT(self->window_), "ifm-item-controller"));
+    if (operations != nullptr) operations->rename_selected_to(new_name);
+}
+gboolean FileManagerWindow::on_inline_key(GtkEventControllerKey *, guint keyval,
+                                          guint, GdkModifierType, gpointer user_data)
+{
+    (void)user_data;
+    if (keyval != GDK_KEY_Escape) return FALSE;
+    return FALSE;
+}
+void FileManagerWindow::on_inline_focus_leave(GtkEventControllerFocus *focus, gpointer)
+{
+    GtkWidget *entry = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(focus));
+    GtkWidget *stack = entry != nullptr ? gtk_widget_get_parent(entry) : nullptr;
+    if (GTK_IS_STACK(stack)) gtk_stack_set_visible_child_name(GTK_STACK(stack), "name");
+}
+
 void FileManagerWindow::on_factory_setup(GtkSignalListItemFactory *factory,
                                          GtkListItem *item,
                                          gpointer user_data)
@@ -1507,7 +1611,7 @@ void FileManagerWindow::on_factory_setup(GtkSignalListItemFactory *factory,
         gtk_widget_set_hexpand(name, TRUE);
         gtk_widget_set_halign(name, GTK_ALIGN_FILL);
         gtk_widget_add_css_class(name, "ifm-file-name");
-        gtk_box_append(GTK_BOX(cell), name);
+        gtk_box_append(GTK_BOX(cell), self->make_inline_editor(cell, name));
 
         g_object_set_data(G_OBJECT(cell), "ifm-icon", icon);
         g_object_set_data(G_OBJECT(cell), "ifm-name", name);
@@ -1552,6 +1656,12 @@ void FileManagerWindow::on_factory_bind(GtkSignalListItemFactory *factory,
         return;
     }
 
+    if (static_cast<DetailField>(encoded) == DetailField::Name) {
+        const char *raw = g_file_info_get_name(info);
+        g_object_set_data_full(G_OBJECT(child), "ifm-source-name", g_strdup(raw != nullptr ? raw : ""), g_free);
+        self->cancel_inline_editor(child);
+    }
+
     switch (static_cast<DetailField>(encoded)) {
     case DetailField::Name: {
         auto *icon = GTK_IMAGE(g_object_get_data(G_OBJECT(child), "ifm-icon"));
@@ -1593,9 +1703,14 @@ void FileManagerWindow::on_factory_unbind(GtkSignalListItemFactory *factory,
     (void)user_data;
     const int encoded = GPOINTER_TO_INT(
         g_object_get_data(G_OBJECT(factory), "ifm-detail-field"));
-    if (encoded != static_cast<int>(DetailField::Modified)) {
+    if (encoded == static_cast<int>(DetailField::Name)) {
+        if (GtkWidget *cell = gtk_list_item_get_child(item); cell != nullptr) {
+            static_cast<FileManagerWindow *>(user_data)->cancel_inline_editor(cell);
+            g_object_set_data_full(G_OBJECT(cell), "ifm-source-name", nullptr, nullptr);
+        }
         return;
     }
+    if (encoded != static_cast<int>(DetailField::Modified)) return;
     if (GtkWidget *child = gtk_list_item_get_child(item); child != nullptr) {
         g_object_set_data_full(
             G_OBJECT(child), "ifm-modified-info", nullptr, nullptr);
@@ -1633,7 +1748,7 @@ void FileManagerWindow::on_icon_factory_setup(GtkSignalListItemFactory *factory,
     gtk_label_set_ellipsize(GTK_LABEL(name), PANGO_ELLIPSIZE_END);
     gtk_label_set_max_width_chars(GTK_LABEL(name), 18);
     gtk_widget_add_css_class(name, "ifm-file-name");
-    gtk_box_append(GTK_BOX(tile), name);
+    gtk_box_append(GTK_BOX(tile), static_cast<FileManagerWindow *>(user_data)->make_inline_editor(tile, name));
 
     g_object_set_data(G_OBJECT(tile), "ifm-icon", icon);
     g_object_set_data(G_OBJECT(tile), "ifm-name", name);
@@ -1668,7 +1783,7 @@ void FileManagerWindow::on_compact_factory_setup(GtkSignalListItemFactory *facto
     gtk_widget_set_hexpand(name, TRUE);
     gtk_widget_set_halign(name, GTK_ALIGN_FILL);
     gtk_widget_add_css_class(name, "ifm-file-name");
-    gtk_box_append(GTK_BOX(tile), name);
+    gtk_box_append(GTK_BOX(tile), static_cast<FileManagerWindow *>(user_data)->make_inline_editor(tile, name));
 
     g_object_set_data(G_OBJECT(tile), "ifm-icon", icon);
     g_object_set_data(G_OBJECT(tile), "ifm-name", name);
@@ -1680,7 +1795,6 @@ void FileManagerWindow::on_icon_factory_bind(GtkSignalListItemFactory *factory,
                                              gpointer user_data)
 {
     (void)factory;
-    (void)user_data;
 
     auto *info = G_FILE_INFO(gtk_list_item_get_item(item));
     GtkWidget *tile = gtk_list_item_get_child(item);
@@ -1697,8 +1811,21 @@ void FileManagerWindow::on_icon_factory_bind(GtkSignalListItemFactory *factory,
         gtk_image_set_from_icon_name(icon, "text-x-generic-symbolic");
     }
 
+    const char *raw_name = g_file_info_get_name(info);
+    g_object_set_data_full(G_OBJECT(tile), "ifm-source-name",
+                           g_strdup(raw_name != nullptr ? raw_name : ""), g_free);
+    static_cast<FileManagerWindow *>(user_data)->cancel_inline_editor(tile);
     const char *display_name = g_file_info_get_display_name(info);
     gtk_label_set_text(name, display_name != nullptr ? display_name : "");
+}
+
+void FileManagerWindow::on_icon_factory_unbind(GtkSignalListItemFactory *, GtkListItem *item, gpointer user_data)
+{
+    GtkWidget *cell = gtk_list_item_get_child(item);
+    if (cell != nullptr) {
+        static_cast<FileManagerWindow *>(user_data)->cancel_inline_editor(cell);
+        g_object_set_data_full(G_OBJECT(cell), "ifm-source-name", nullptr, nullptr);
+    }
 }
 
 void FileManagerWindow::on_loading_changed(GObject *object, GParamSpec *pspec, gpointer user_data)
