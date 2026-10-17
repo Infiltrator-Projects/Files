@@ -1040,7 +1040,7 @@ void InteractionController::rebuild_breadcrumbs()
             ? chain.size() - kMaximumVisibleSegments
             : 0U;
 
-    const auto append_crumb = [this](GFile *file, const char *label) {
+    const auto append_crumb = [this, current](GFile *file, const char *label) {
         GtkWidget *button = gtk_button_new_with_label(label);
         gtk_widget_add_css_class(button, "flat");
         gtk_widget_add_css_class(button, "ifm-breadcrumb");
