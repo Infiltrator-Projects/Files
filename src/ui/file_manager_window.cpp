@@ -389,6 +389,8 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     GtkWidget *list = gtk_column_view_new(GTK_SELECTION_MODEL(g_object_ref(selection_)));
     detail_view_ = GTK_COLUMN_VIEW(list);
     gtk_column_view_set_single_click_activate(GTK_COLUMN_VIEW(list), FALSE);
+    gtk_column_view_set_enable_rubberband(GTK_COLUMN_VIEW(list), TRUE);
+    gtk_column_view_set_reorderable(GTK_COLUMN_VIEW(list), TRUE);
     gtk_widget_add_css_class(list, "ifm-file-list");
     g_signal_connect(list, "activate", G_CALLBACK(on_list_activate), this);
 
@@ -433,6 +435,12 @@ void FileManagerWindow::build_ui(GtkApplication *application)
         gtk_sort_list_model_set_sorter(
             GTK_SORT_LIST_MODEL(presentation_model),
             gtk_column_view_get_sorter(GTK_COLUMN_VIEW(list)));
+        GListModel *columns = gtk_column_view_get_columns(GTK_COLUMN_VIEW(list));
+        auto *name_column = GTK_COLUMN_VIEW_COLUMN(g_list_model_get_item(columns, 0));
+        if (name_column != nullptr) {
+            gtk_column_view_sort_by_column(GTK_COLUMN_VIEW(list), name_column, GTK_SORT_ASCENDING);
+            g_object_unref(name_column);
+        }
     }
 
     GtkListItemFactory *icon_factory = gtk_signal_list_item_factory_new();
@@ -447,6 +455,7 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     GtkWidget *icons = gtk_grid_view_new(
         GTK_SELECTION_MODEL(g_object_ref(selection_)), icon_factory);
     gtk_grid_view_set_single_click_activate(GTK_GRID_VIEW(icons), FALSE);
+    gtk_grid_view_set_enable_rubberband(GTK_GRID_VIEW(icons), TRUE);
     gtk_grid_view_set_max_columns(GTK_GRID_VIEW(icons), 64U);
     gtk_widget_add_css_class(icons, "ifm-icon-grid");
     g_signal_connect(icons, "activate", G_CALLBACK(on_grid_activate), this);
@@ -459,6 +468,7 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     GtkWidget *compact = gtk_grid_view_new(
         GTK_SELECTION_MODEL(g_object_ref(selection_)), compact_factory);
     gtk_grid_view_set_single_click_activate(GTK_GRID_VIEW(compact), FALSE);
+    gtk_grid_view_set_enable_rubberband(GTK_GRID_VIEW(compact), TRUE);
     gtk_grid_view_set_max_columns(GTK_GRID_VIEW(compact), 64U);
     gtk_widget_add_css_class(compact, "ifm-icon-grid");
     gtk_widget_add_css_class(compact, "ifm-compact-grid");
