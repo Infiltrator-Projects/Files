@@ -68,6 +68,13 @@ It currently provides:
 - Back, Forward and Up navigation;
 - breadcrumb navigation with `Ctrl+L` to switch into the editable path/URI field;
 - multiple location tabs with independent Back/Forward history, selection restoration and view-mode choice; `Ctrl+T` creates a tab and `Ctrl+W` closes it;
+- independent windows (`Ctrl+N`), opening a selected folder in a new window, duplicating tabs (`Ctrl+Shift+D`), reopening closed tabs (`Ctrl+Shift+T`), and reordering tabs within a window (`Ctrl+Shift+PageUp/PageDown`);
+- parent navigation that reselects the folder the user just left, plus `Alt+Left/Right/Up/Home` and `Ctrl+1/2/3` navigation/view shortcuts;
+- remembered global view mode and persisted Show Hidden Files (`Ctrl+H`), Folders First and sidebar visibility (`Ctrl+B`) settings, saved only when changed;
+- resizable/reorderable detail columns, predictable name sorting, natural numeric filenames, and GTK rubber-band selection;
+- read-only Properties values for allocated space, POSIX mode and numeric owner/group IDs where the provider exposes them;
+- Copy Path as Text (`Ctrl+Shift+C`) and Copy URI as Text actions, with clipboard ownership checks to prevent stale Cut/Copy operations;
+- a simplified title bar focused on location/navigation, icon-only view switching in the status strip, restrained tabs and sidebar, clear selection/empty-folder states;
 - persistent user bookmarks pinned to the sidebar, with pin/unpin and Move up/Move down/Remove controls, separate from transient mounted devices;
 - asynchronous, monitored directory enumeration through GTK/GIO;
 - a virtualised GTK 4 list presentation rather than one widget per directory entry;
@@ -135,7 +142,7 @@ It currently provides:
 
 Metadata preservation is deliberately honest in the current implementation: permissions and modification timestamps are qualified for ordinary copy/cross-volume transfer paths, while ownership, ACLs, extended attributes, sparse-file preservation and symlink metadata remain future capability work. Multi-selection batch Copy/Move is present; destructive batch Trash/Delete is not yet claimed.
 
-The remaining parity work includes safe drag-move negotiation, tab reordering/reopening, richer bookmark metadata, remote and provider-specific thumbnails, and richer file/object/capability handling; mounted/removable discovery is already part of the browsing foundation rather than a reason to add ad-hoc controls.
+The remaining parity work includes safe drag-move negotiation, moving tabs between windows, richer bookmark metadata, remote and provider-specific thumbnails, search, archives and richer file/object/capability handling; mounted/removable discovery is already part of the browsing foundation rather than a reason to add ad-hoc controls.
 
 Semantic/context indexing and InfiltratorFS-specific capability providers are also deliberately absent from this early executable. Ordinary file-manager correctness comes first.
 

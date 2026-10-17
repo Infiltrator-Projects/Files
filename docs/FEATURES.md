@@ -1,16 +1,26 @@
 # Files — Complete Feature Catalogue
 
+The 0.1.37 tranche adds independently created windows; folder-in-new-window;
+within-window tab duplicate/reorder and recently-closed recovery; parent-child
+selection; remembered view/hidden/sidebar preferences; naturally ordered names,
+folders-first sorting, resizable/reorderable columns, native rubber-band
+selection, allocated-size/permissions/owner-ID Properties, and separate plain-text
+path/URI clipboard actions. It also simplifies the chrome and preserves the
+mutation engines. These are bounded interaction capabilities, not a claim that
+all associated catalogue families (e.g. cross-window tab movement, configurable
+per-folder views, full permission editing) are complete.
+
 The catalogue below defines intended scope rather than claiming every item is
 implemented. The 0.1.36 usability tranche provides inline renaming, local
 copy-only file drag/drop, persistent pinned sidebar places (manual Move up/down),
 local asynchronous image thumbnails, and location tabs with independent histories,
-selection and view mode. Cross-application drag-move deletion, tab reordering,
+selection and view mode. Cross-application drag-move deletion, moving tabs between windows,
 video/PDF thumbnail providers, split view and remote transfers remain subsequent
 qualification work. Durable rename/copy/move continue through the shared operation
 engines and journal; the drag/drop transport does not implement its own mutation.
 
 
-**Catalogue date:** 6 October 2026
+**Catalogue updated:** 18 October 2026
 **Scope:** intended product capability, not only the current 0.1.0 implementation
 
 This document is the authoritative feature catalogue for Files (Files). It exists so implementation does not drift into a sequence of locally convenient UI changes. Every substantial feature should map back to one of these product capabilities or cause this catalogue to be deliberately amended.
