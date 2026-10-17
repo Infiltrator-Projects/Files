@@ -75,6 +75,7 @@ It currently provides:
 - read-only Properties values for allocated space, POSIX mode and numeric owner/group IDs where the provider exposes them;
 - Copy Path as Text (`Ctrl+Shift+C`) and Copy URI as Text actions, with clipboard ownership checks to prevent stale Cut/Copy operations;
 - a simplified title bar focused on location/navigation, icon-only view switching in the status strip, restrained tabs and sidebar, clear selection/empty-folder states;
+- a Common-only visual treatment of Night/Day browse surfaces, cyan active-location and focus cues, denser row and sidebar spacing, legible secondary metadata and MB Corpo brand typography;
 - persistent user bookmarks pinned to the sidebar, with pin/unpin and Move up/Move down/Remove controls, separate from transient mounted devices;
 - asynchronous, monitored directory enumeration through GTK/GIO;
 - a virtualised GTK 4 list presentation rather than one widget per directory entry;
