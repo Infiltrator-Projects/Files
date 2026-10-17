@@ -107,6 +107,36 @@ void select_name(FileManagerWindow &w, const char *name)
     }
     throw std::runtime_error("Test file not visible");
 }
+GtkWidget *find_button(GtkWidget *root, const char *label)
+{
+    if (root == nullptr) return nullptr;
+    if (GTK_IS_BUTTON(root) &&
+        g_strcmp0(gtk_button_get_label(GTK_BUTTON(root)), label) == 0) return root;
+    for (GtkWidget *child = gtk_widget_get_first_child(root);
+         child != nullptr; child = gtk_widget_get_next_sibling(child)) {
+        if (GtkWidget *match = find_button(child, label); match != nullptr) return match;
+    }
+    return nullptr;
+}
+GtkWidget *find_menu(GtkWidget *root)
+{
+    if (root == nullptr) return nullptr;
+    if (GTK_IS_MENU_BUTTON(root) &&
+        g_strcmp0(gtk_widget_get_tooltip_text(root), "File actions") == 0)
+        return root;
+    for (GtkWidget *child = gtk_widget_get_first_child(root);
+         child != nullptr; child = gtk_widget_get_next_sibling(child)) {
+        if (GtkWidget *found = find_menu(child); found != nullptr) return found;
+    }
+    return nullptr;
+}
+GtkWidget *find_clipboard_button(FileManagerWindow &window, const char *label)
+{
+    GtkWidget *menu = find_menu(gtk_window_get_titlebar(window.native_window()));
+    if (menu == nullptr) return nullptr;
+    GtkWidget *popover = GTK_WIDGET(gtk_menu_button_get_popover(GTK_MENU_BUTTON(menu)));
+    return find_button(popover, label);
+}
 bool selected_name(FileManagerWindow &w, const char *name)
 {
     GtkMultiSelection *selection = FileManagerWindowTestAccess::selection(w);
@@ -215,6 +245,26 @@ int main()
                 "Reopening a closed tab must recover its directory");
         window->toggle_show_hidden();
         window->toggle_sidebar();
+        FileManagerWindowTestAccess::navigate(*window, a);
+        await([&] { return !gtk_directory_list_is_loading(
+            FileManagerWindowTestAccess::directory(*window)); });
+        select_name(*window, "renamed.txt");
+        GtkWidget *copy = find_clipboard_button(*window, "Copy");
+        GtkWidget *paste = find_clipboard_button(*window, "Paste");
+        require(copy != nullptr && paste != nullptr,
+                "Clipboard commands must be exposed through File actions");
+        g_signal_emit_by_name(copy, "clicked");
+        GdkClipboard *clipboard = gdk_display_get_clipboard(
+            gtk_widget_get_display(GTK_WIDGET(window->native_window())));
+        require(clipboard != nullptr, "Test requires a display clipboard");
+        gdk_clipboard_set_text(clipboard, "not a file reference");
+        FileManagerWindowTestAccess::navigate(*window, b);
+        g_signal_emit_by_name(paste, "clicked");
+        await([&] { return !gtk_directory_list_is_loading(
+            FileManagerWindowTestAccess::directory(*window)); });
+        while (g_main_context_iteration(nullptr, FALSE)) {}
+        require(!std::filesystem::exists(b / "renamed.txt"),
+                "Paste must not act on an old file after clipboard ownership changes");
         gtk_window_destroy(window->native_window());
         while (g_main_context_iteration(nullptr, FALSE)) {}
         auto *reopened = new FileManagerWindow(application);
