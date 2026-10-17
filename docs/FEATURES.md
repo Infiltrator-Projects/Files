@@ -1,5 +1,15 @@
 # Files — Complete Feature Catalogue
 
+The catalogue below defines intended scope rather than claiming every item is
+implemented. The 0.1.36 usability tranche provides inline renaming, local
+copy-only file drag/drop, persistent pinned sidebar places (manual Move up/down),
+local asynchronous image thumbnails, and location tabs with independent histories,
+selection and view mode. Cross-application drag-move deletion, tab reordering,
+video/PDF thumbnail providers, split view and remote transfers remain subsequent
+qualification work. Durable rename/copy/move continue through the shared operation
+engines and journal; the drag/drop transport does not implement its own mutation.
+
+
 **Catalogue date:** 6 October 2026
 **Scope:** intended product capability, not only the current 0.1.0 implementation
 

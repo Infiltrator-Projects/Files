@@ -66,7 +66,9 @@ It currently provides:
 - live mounted local/removable places discovered through GIO, with shadowed implementation mounts excluded and each place opening at GIO's user-facing default location;
 - mounted-place availability tracking that distinguishes the most-specific supplying mount for nested mounts, reports a neutral unavailable state when that source disappears and only auto-restores the current view when GIO provides matching root-and-UUID evidence;
 - Back, Forward and Up navigation;
-- an editable location field accepting paths and URIs;
+- breadcrumb navigation with `Ctrl+L` to switch into the editable path/URI field;
+- multiple location tabs with independent Back/Forward history, selection restoration and view-mode choice; `Ctrl+T` creates a tab and `Ctrl+W` closes it;
+- persistent user bookmarks pinned to the sidebar, with pin/unpin and Move up/Move down/Remove controls, separate from transient mounted devices;
 - asynchronous, monitored directory enumeration through GTK/GIO;
 - a virtualised GTK 4 list presentation rather than one widget per directory entry;
 - shared-model **Detail/List**, **Visual/Icons** and **Compact** browse presentations with common selection and activation semantics;
@@ -79,7 +81,12 @@ It currently provides:
 - a persistent **Follow system / Day / Night** appearance control, with live GTK system-theme tracking when Follow system is selected;
 - a real GTK multi-selection model for selecting more than one directory item while preserving the existing single-item action contract when exactly one item is selected;
 - deterministic **New Folder**, available from the header action or `Ctrl+Shift+N` for native locations;
-- deterministic **Rename**, available from the selected-item Actions menu or `F2` when exactly one item is selected;
+- deterministic **Rename**, including inline filename editing in List, Icons and Compact views via `F2`, preserving the filename extension when initially selecting text and reusing the journalled rename engine;
+- right-click item actions and one consolidated header overflow menu with the same underlying operation controllers;
+- a read-only Properties surface for selected-item metadata;
+- system clipboard file-reference Copy/Cut/Paste (`Ctrl+C`/`Ctrl+X`/`Ctrl+V`) using the same batch transfer engine and collision decisions;
+- copy-only drag-and-drop of local file selections onto browseable local folders or sidebar destinations, with journalled mutation; the source deliberately does not negotiate external drag-move deletion;
+- bounded asynchronous image thumbnails with a cache shared across view modes, version-aware invalidation and safe fallback to file icons; remote, video and document thumbnail providers are not yet enabled;
 - deterministic single-item **Copy to…** and **Move to…**, using a native folder picker for the destination;
 - isolated multi-item **Copy selected to…** and **Move selected to…** actions rather than expanding the proven single-item controller into a second state machine;
 - full-batch collision preflight before mutation when no batch conflict policy has yet been chosen, so a detected destination conflict does not allow earlier non-conflicting items to be silently transferred first;
@@ -122,13 +129,13 @@ It currently provides:
 - distinct handling for invalid requests, destination conflicts, permission failures, read-only locations, unsupported safe-operation capabilities, cancellation, execution failures and verification failures;
 - asynchronous execution of mutation work so filesystem operations do not block the GTK main loop;
 - monitored refresh and automatic selection of newly created, renamed, copied or moved single items when their result appears in the current view;
-- separate creation, single-item operation, batch operation, destructive/recovery, journal-inspection and theme controllers so interaction policy does not accumulate inside `FileManagerWindow`;
+- separate creation, single-item operation, batch operation, clipboard, drag/drop transport, destructive/recovery, journal-inspection and theme controllers; window-owned navigation, bookmark, rename-presentation and thumbnail bindings remain separate from the durable file mutation engines;
 - the full `InfiltratrCommon::Common` build dependency on InfiltratorOS/POSIX, making Common's POSIX/state/I/O contracts available to the non-UI layers as they are introduced; and
-- a hosted build/test gate on every main-branch update, including headless GTK window lifetime, sorted selection, mount-row identity/focus and fresh-profile policy monitoring, mounted-place identity qualification, batch preflight/policy/progress/cancellation, interrupted-journal recovery and permission/timestamp preservation qualification.
+- a hosted build/test gate on every main-branch update, including headless GTK window lifetime, interaction-surface and workspace/tab/bookmark/inline-rename checks, sorted selection, mount-row identity/focus and fresh-profile policy monitoring, mounted-place identity qualification, batch preflight/policy/progress/cancellation, interrupted-journal recovery and permission/timestamp preservation qualification.
 
 Metadata preservation is deliberately honest in the current implementation: permissions and modification timestamps are qualified for ordinary copy/cross-volume transfer paths, while ownership, ACLs, extended attributes, sparse-file preservation and symlink metadata remain future capability work. Multi-selection batch Copy/Move is present; destructive batch Trash/Delete is not yet claimed.
 
-The next implementation work continues the richer file/object/capability model and remote-location/provider handling; mounted/removable discovery is already part of the browsing foundation rather than a reason to add ad-hoc controls.
+The remaining parity work includes safe drag-move negotiation, tab reordering/reopening, richer bookmark metadata, remote and provider-specific thumbnails, and richer file/object/capability handling; mounted/removable discovery is already part of the browsing foundation rather than a reason to add ad-hoc controls.
 
 Semantic/context indexing and InfiltratorFS-specific capability providers are also deliberately absent from this early executable. Ordinary file-manager correctness comes first.
 
