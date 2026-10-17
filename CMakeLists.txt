@@ -114,6 +114,7 @@ add_library(infiltrator-files-ui STATIC
     src/ui/create_folder_controller.cpp
     src/ui/destructive_operation_controller.cpp
     src/ui/detail_metadata.cpp
+    src/ui/drag_drop_controller.cpp
     src/ui/file_manager_window.cpp
     src/ui/interaction_controller.cpp
     src/ui/item_operation_controller.cpp

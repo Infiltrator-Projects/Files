@@ -70,6 +70,7 @@ ClipboardController::ClipboardController(GtkWindow *window,
 
     g_object_ref(directory_list_);
     g_object_ref(selection_);
+    g_object_set_data(G_OBJECT(window_), "ifm-clipboard-controller", this);
 
     install_menu_actions();
     install_keyboard_shortcuts();
@@ -87,6 +88,8 @@ ClipboardController::ClipboardController(GtkWindow *window,
 
 ClipboardController::~ClipboardController()
 {
+    if (window_ != nullptr)
+        g_object_set_data(G_OBJECT(window_), "ifm-clipboard-controller", nullptr);
     if (selection_ != nullptr) {
         if (selection_handler_ != 0U) {
             g_signal_handler_disconnect(selection_, selection_handler_);
@@ -341,6 +344,15 @@ void ClipboardController::on_clipboard_text_read(GObject *source_object,
 
     self->paste_sources(Mode::Copy, sources, destination, BatchConflictPolicy::Fail);
     g_object_unref(held_window);
+}
+
+bool ClipboardController::transfer_from_drop(const std::vector<std::string> &sources,
+                                             const std::string &destination)
+{
+    if (busy_ || reading_external_clipboard_ || window_ == nullptr ||
+        sources.empty() || destination.empty()) return false;
+    paste_sources(Mode::Copy, sources, destination, BatchConflictPolicy::Fail);
+    return true;
 }
 
 void ClipboardController::paste_sources(const Mode mode,
