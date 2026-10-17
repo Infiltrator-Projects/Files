@@ -185,6 +185,7 @@ private:
     GtkWidget *icon_view_button_{nullptr};
     GtkWidget *compact_view_button_{nullptr};
     GtkWidget *status_label_{nullptr};
+    GtkWidget *empty_state_{nullptr};
     GtkWidget *spinner_{nullptr};
     std::unique_ptr<MountedPlacesMonitor> mounted_places_monitor_;
     std::unique_ptr<ThumbnailCache> thumbnails_;

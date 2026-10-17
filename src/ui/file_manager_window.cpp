@@ -270,7 +270,8 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     gtk_box_append(GTK_BOX(view_switcher), list_view_button_);
     gtk_box_append(GTK_BOX(view_switcher), icon_view_button_);
     gtk_box_append(GTK_BOX(view_switcher), compact_view_button_);
-    gtk_header_bar_pack_end(GTK_HEADER_BAR(header), view_switcher);
+    // View-mode controls belong to the quiet status strip, not the location bar.
+    // The header is reserved for navigation, path and the single action menu.
 
     g_signal_connect(back_button_, "clicked", G_CALLBACK(on_back_clicked), this);
     g_signal_connect(forward_button_, "clicked", G_CALLBACK(on_forward_clicked), this);
@@ -468,7 +469,26 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     gtk_stack_add_named(GTK_STACK(content_stack_), make_scroller(list), "list");
     gtk_stack_add_named(GTK_STACK(content_stack_), make_scroller(icons), "icons");
     gtk_stack_add_named(GTK_STACK(content_stack_), make_scroller(compact), "compact");
-    gtk_paned_set_end_child(GTK_PANED(paned), content_stack_);
+    GtkWidget *content_overlay = gtk_overlay_new();
+    gtk_overlay_set_child(GTK_OVERLAY(content_overlay), content_stack_);
+    empty_state_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_add_css_class(empty_state_, "ifm-empty-state");
+    gtk_widget_set_halign(empty_state_, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(empty_state_, GTK_ALIGN_CENTER);
+    gtk_widget_set_can_target(empty_state_, FALSE);
+    GtkWidget *empty_icon = gtk_image_new_from_icon_name("folder-open-symbolic");
+    gtk_image_set_pixel_size(GTK_IMAGE(empty_icon), 42);
+    gtk_widget_add_css_class(empty_icon, "dim-label");
+    gtk_box_append(GTK_BOX(empty_state_), empty_icon);
+    GtkWidget *empty_title = gtk_label_new("This folder is empty");
+    gtk_widget_add_css_class(empty_title, "title-3");
+    gtk_box_append(GTK_BOX(empty_state_), empty_title);
+    GtkWidget *empty_detail = gtk_label_new("Create a folder or drop files here");
+    gtk_widget_add_css_class(empty_detail, "dim-label");
+    gtk_box_append(GTK_BOX(empty_state_), empty_detail);
+    gtk_widget_set_visible(empty_state_, FALSE);
+    gtk_overlay_add_overlay(GTK_OVERLAY(content_overlay), empty_state_);
+    gtk_paned_set_end_child(GTK_PANED(paned), content_overlay);
     gtk_paned_set_resize_end_child(GTK_PANED(paned), TRUE);
     gtk_paned_set_shrink_end_child(GTK_PANED(paned), FALSE);
 
@@ -490,6 +510,7 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     gtk_label_set_xalign(GTK_LABEL(status_label_), 0.0F);
     gtk_widget_set_hexpand(status_label_, TRUE);
     gtk_box_append(GTK_BOX(status), status_label_);
+    gtk_box_append(GTK_BOX(status), view_switcher);
     gtk_box_append(GTK_BOX(root), status);
 }
 
@@ -729,6 +750,13 @@ void FileManagerWindow::apply_theme()
         << "; color: " << colour_hex(palette->text_rgb)
         << "; border-radius: " << metrics->control_radius << "px; }\n";
 
+    css << ".ifm-empty-state { padding: 28px; }\n"
+        << ".ifm-icon-grid child:selected .ifm-icon-tile { background: "
+        << colour_hex(palette->selection_background_rgb) << "; }\n"
+        << ".ifm-icon-grid child:selected .ifm-file-name { color: "
+        << colour_hex(palette->selection_foreground_rgb) << "; }\n"
+        << ".ifm-sidebar row:focus-visible { outline: 2px solid "
+        << colour_hex(palette->selection_background_rgb) << "; outline-offset: 1px; }\n";
     css << ".ifm-tab-line { background: " << colour_hex(palette->panel_rgb)
         << "; border-bottom: 1px solid " << colour_hex(palette->border_rgb)
         << "; min-height: 39px; }\n"
@@ -1093,6 +1121,7 @@ void FileManagerWindow::update_status()
     }
 
     if (!current_location_available_) {
+        if (empty_state_ != nullptr) gtk_widget_set_visible(empty_state_, FALSE);
         gtk_spinner_stop(GTK_SPINNER(spinner_));
         gtk_widget_set_visible(spinner_, FALSE);
         gtk_label_set_text(GTK_LABEL(status_label_), kLocationUnavailableStatus);
@@ -1100,6 +1129,7 @@ void FileManagerWindow::update_status()
     }
 
     if (gtk_directory_list_is_loading(directory_list_)) {
+        if (empty_state_ != nullptr) gtk_widget_set_visible(empty_state_, FALSE);
         gtk_widget_set_visible(spinner_, TRUE);
         gtk_spinner_start(GTK_SPINNER(spinner_));
         gtk_label_set_text(GTK_LABEL(status_label_), "Loading…");
@@ -1110,6 +1140,7 @@ void FileManagerWindow::update_status()
     gtk_widget_set_visible(spinner_, FALSE);
 
     if (const GError *error = gtk_directory_list_get_error(directory_list_); error != nullptr) {
+        if (empty_state_ != nullptr) gtk_widget_set_visible(empty_state_, FALSE);
         gtk_label_set_text(GTK_LABEL(status_label_), error->message);
         return;
     }
@@ -1117,6 +1148,7 @@ void FileManagerWindow::update_status()
     restore_tab_selection();
     GListModel *visible = gtk_multi_selection_get_model(selection_);
     const guint count = visible != nullptr ? g_list_model_get_n_items(visible) : 0U;
+    if (empty_state_ != nullptr) gtk_widget_set_visible(empty_state_, count == 0U);
     GtkBitset *selected = gtk_selection_model_get_selection(GTK_SELECTION_MODEL(selection_));
     const guint selected_count = static_cast<guint>(gtk_bitset_get_size(selected));
     gtk_bitset_unref(selected);
@@ -1509,8 +1541,19 @@ void FileManagerWindow::on_tab_add_clicked(GtkButton *, gpointer data)
 gboolean FileManagerWindow::on_tab_key_pressed(GtkEventControllerKey *, guint keyval,
                                                 guint, GdkModifierType modifiers, gpointer data)
 {
-    if (!(modifiers & GDK_CONTROL_MASK)) return FALSE;
     auto *self = static_cast<FileManagerWindow *>(data);
+    if (modifiers & GDK_ALT_MASK) {
+        if (keyval == GDK_KEY_Left) { self->navigate_history(-1); return TRUE; }
+        if (keyval == GDK_KEY_Right) { self->navigate_history(1); return TRUE; }
+        if (keyval == GDK_KEY_Up) { on_up_clicked(nullptr, self); return TRUE; }
+        if (keyval == GDK_KEY_Home) {
+            GFile *home = g_file_new_for_path(g_get_home_dir());
+            self->navigate_to(home, true);
+            g_object_unref(home);
+            return TRUE;
+        }
+    }
+    if (!(modifiers & GDK_CONTROL_MASK)) return FALSE;
     if ((keyval == GDK_KEY_t || keyval == GDK_KEY_T) &&
         !(modifiers & GDK_SHIFT_MASK)) {
         if (self->current_location_ != nullptr) self->add_tab(self->current_location_);
