@@ -128,8 +128,12 @@ guint find_item_position(GListModel *model, GFileInfo *needle)
 FileManagerWindow::FileManagerWindow(GtkApplication *application)
 {
     build_ui(application);
+    g_object_set_data(G_OBJECT(window_), "ifm-window-controller", this);
     apply_theme();
     arm_temporal_policy_monitor();
+    load_bookmarks();
+    tabs_.push_back(TabState{});
+    update_tab_buttons();
 
     g_object_weak_ref(G_OBJECT(window_), &FileManagerWindow::on_window_finalized, this);
 
@@ -249,6 +253,31 @@ void FileManagerWindow::build_ui(GtkApplication *application)
 
     GtkWidget *root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_window_set_child(GTK_WINDOW(window_), root);
+
+    GtkWidget *tab_line = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    gtk_widget_add_css_class(tab_line, "ifm-tab-line");
+    gtk_box_append(GTK_BOX(root), tab_line);
+    GtkWidget *tab_scroll = gtk_scrolled_window_new();
+    gtk_widget_set_hexpand(tab_scroll, TRUE);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(tab_scroll),
+                                   GTK_POLICY_AUTOMATIC, GTK_POLICY_NEVER);
+    tab_strip_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 3);
+    gtk_widget_set_margin_start(tab_strip_, 6);
+    gtk_widget_set_margin_top(tab_strip_, 3);
+    gtk_widget_set_margin_bottom(tab_strip_, 3);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(tab_scroll), tab_strip_);
+    gtk_box_append(GTK_BOX(tab_line), tab_scroll);
+    GtkWidget *add_tab_button = gtk_button_new_from_icon_name("list-add-symbolic");
+    gtk_widget_set_tooltip_text(add_tab_button, "New tab (Ctrl+T)");
+    g_signal_connect(add_tab_button, "clicked", G_CALLBACK(on_tab_add_clicked), this);
+    gtk_box_append(GTK_BOX(tab_line), add_tab_button);
+    bookmark_button_ = gtk_button_new_from_icon_name("starred-symbolic");
+    gtk_widget_set_tooltip_text(bookmark_button_, "Pin or unpin current folder");
+    g_signal_connect(bookmark_button_, "clicked", G_CALLBACK(on_bookmark_toggle), this);
+    gtk_box_append(GTK_BOX(tab_line), bookmark_button_);
+    GtkEventController *tab_keys = gtk_event_controller_key_new();
+    g_signal_connect(tab_keys, "key-pressed", G_CALLBACK(on_tab_key_pressed), this);
+    gtk_widget_add_controller(window_, tab_keys);
 
     GtkWidget *paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_widget_set_vexpand(paned, TRUE);
@@ -697,6 +726,8 @@ void FileManagerWindow::navigate_to(GFile *file, const bool record_history)
     g_free(parse_name);
     update_navigation_state();
     update_status();
+    update_tab_buttons();
+    update_bookmark_button();
 }
 
 void FileManagerWindow::navigate_history(const std::ptrdiff_t delta)
@@ -817,6 +848,7 @@ void FileManagerWindow::update_status()
         return;
     }
 
+    restore_tab_selection();
     const guint count = g_list_model_get_n_items(G_LIST_MODEL(directory_list_));
     const std::string text = std::to_string(count) + (count == 1U ? " item" : " items");
     gtk_label_set_text(GTK_LABEL(status_label_), text.c_str());
@@ -999,6 +1031,372 @@ GFile *FileManagerWindow::file_from_location_text(const char *text) const
         return g_file_new_for_uri(value.c_str());
     }
     return g_file_new_for_commandline_arg(value.c_str());
+}
+
+
+bool FileManagerWindow::open_primary_directory_in_new_tab()
+{
+    if (current_location_ == nullptr || primary_selection_ == nullptr) return false;
+    auto *info = G_FILE_INFO(gtk_single_selection_get_selected_item(primary_selection_));
+    if (info == nullptr || g_file_info_get_file_type(info) != G_FILE_TYPE_DIRECTORY) return false;
+    const char *name = g_file_info_get_name(info);
+    if (name == nullptr || *name == '\0') return false;
+    GFile *child = g_file_get_child(current_location_, name);
+    add_tab(child);
+    g_object_unref(child);
+    return true;
+}
+
+void FileManagerWindow::remember_tab()
+{
+    if (active_tab_ >= tabs_.size()) return;
+    TabState &tab = tabs_[active_tab_];
+    tab.history = history_;
+    tab.index = history_index_;
+    tab.view = view_mode_;
+    if (current_location_ != nullptr) {
+        char *uri = g_file_get_uri(current_location_);
+        tab.uri = uri != nullptr ? uri : "";
+        g_free(uri);
+    }
+    tab.selected_names.clear();
+    if (selection_ == nullptr) return;
+    GListModel *model = gtk_multi_selection_get_model(selection_);
+    if (model == nullptr) return;
+    GtkBitset *bitset = gtk_selection_model_get_selection(GTK_SELECTION_MODEL(selection_));
+    GtkBitsetIter iter;
+    guint pos = 0;
+    for (gboolean valid = gtk_bitset_iter_init_first(&iter, bitset, &pos);
+         valid; valid = gtk_bitset_iter_next(&iter, &pos)) {
+        auto *info = G_FILE_INFO(g_list_model_get_item(model, pos));
+        if (info != nullptr) {
+            const char *name = g_file_info_get_name(info);
+            if (name != nullptr) tab.selected_names.emplace_back(name);
+            g_object_unref(info);
+        }
+    }
+    gtk_bitset_unref(bitset);
+}
+
+void FileManagerWindow::restore_tab_selection()
+{
+    if (pending_tab_selection_.empty() || directory_list_ == nullptr ||
+        gtk_directory_list_is_loading(directory_list_)) return;
+    GListModel *model = gtk_multi_selection_get_model(selection_);
+    if (model == nullptr) return;
+    for (guint pos = 0; pos < g_list_model_get_n_items(model); ++pos) {
+        auto *info = G_FILE_INFO(g_list_model_get_item(model, pos));
+        if (info == nullptr) continue;
+        const char *name = g_file_info_get_name(info);
+        if (name != nullptr &&
+            std::find(pending_tab_selection_.begin(), pending_tab_selection_.end(), name) !=
+                pending_tab_selection_.end()) {
+            gtk_selection_model_select_item(GTK_SELECTION_MODEL(selection_), pos, FALSE);
+        }
+        g_object_unref(info);
+    }
+    pending_tab_selection_.clear();
+}
+
+void FileManagerWindow::add_tab(GFile *file)
+{
+    if (file == nullptr) return;
+    GFile *target = G_FILE(g_object_ref(file));
+    remember_tab();
+    tabs_.push_back(TabState{});
+    active_tab_ = tabs_.size() - 1U;
+    history_.clear();
+    history_index_ = 0;
+    pending_tab_selection_.clear();
+    navigate_to(target, true);
+    g_object_unref(target);
+    update_tab_buttons();
+}
+
+void FileManagerWindow::activate_tab(const std::size_t index)
+{
+    if (index >= tabs_.size() || index == active_tab_) return;
+    remember_tab();
+    active_tab_ = index;
+    const TabState &tab = tabs_[index];
+    history_ = tab.history;
+    history_index_ = tab.index;
+    pending_tab_selection_ = tab.selected_names;
+    if (!tab.uri.empty()) {
+        GFile *file = g_file_new_for_uri(tab.uri.c_str());
+        navigate_to(file, false);
+        g_object_unref(file);
+    }
+    set_view_mode(tab.view);
+    update_tab_buttons();
+    restore_tab_selection();
+}
+
+void FileManagerWindow::close_tab(const std::size_t index)
+{
+    if (tabs_.size() < 2U || index >= tabs_.size()) return;
+    const bool current = index == active_tab_;
+    if (current) {
+        // Do not overwrite the tab being removed with an in-flight view snapshot.
+        tabs_.erase(tabs_.begin() + static_cast<std::ptrdiff_t>(index));
+        active_tab_ = tabs_.size();
+        const std::size_t next = std::min(index, tabs_.size() - 1U);
+        active_tab_ = next;
+        const TabState tab = tabs_[next];
+        history_ = tab.history;
+        history_index_ = tab.index;
+        pending_tab_selection_ = tab.selected_names;
+        if (!tab.uri.empty()) {
+            GFile *file = g_file_new_for_uri(tab.uri.c_str());
+            navigate_to(file, false);
+            g_object_unref(file);
+        }
+        set_view_mode(tab.view);
+        restore_tab_selection();
+    } else {
+        tabs_.erase(tabs_.begin() + static_cast<std::ptrdiff_t>(index));
+        if (index < active_tab_) --active_tab_;
+    }
+    update_tab_buttons();
+}
+
+void FileManagerWindow::update_tab_buttons()
+{
+    if (tab_strip_ == nullptr) return;
+    // Rebuild is confined to tab controls; the file views and their GTK models
+    // retain identity and operation-controller connections across tab changes.
+    while (GtkWidget *child = gtk_widget_get_first_child(tab_strip_)) {
+        gtk_box_remove(GTK_BOX(tab_strip_), child);
+    }
+    for (std::size_t index = 0; index < tabs_.size(); ++index) {
+        GtkWidget *group = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+        gtk_widget_add_css_class(group, "linked");
+        GtkWidget *button = gtk_button_new();
+        gtk_widget_set_size_request(button, 92, -1);
+        gtk_widget_set_hexpand(button, FALSE);
+        gtk_widget_add_css_class(button, index == active_tab_ ? "suggested-action" : "flat");
+        std::string text = "Home";
+        std::string uri = tabs_[index].uri;
+        if (index == active_tab_ && current_location_ != nullptr) {
+            char *actual = g_file_get_uri(current_location_);
+            if (actual != nullptr) uri = actual;
+            g_free(actual);
+        }
+        if (!uri.empty()) {
+            GFile *file = g_file_new_for_uri(uri.c_str());
+            char *name = g_file_get_basename(file);
+            if (name != nullptr && *name != '\0') text = name;
+            else text = uri;
+            g_free(name);
+            g_object_unref(file);
+        }
+        GtkWidget *label = gtk_label_new(text.c_str());
+        gtk_label_set_max_width_chars(GTK_LABEL(label), 18);
+        gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_MIDDLE);
+        gtk_button_set_child(GTK_BUTTON(button), label);
+        g_object_set_data(G_OBJECT(button), "ifm-tab-index",
+                          GINT_TO_POINTER(static_cast<int>(index + 1U)));
+        g_signal_connect(button, "clicked", G_CALLBACK(on_tab_clicked), this);
+        gtk_box_append(GTK_BOX(group), button);
+        GtkWidget *close = gtk_button_new_from_icon_name("window-close-symbolic");
+        gtk_widget_set_tooltip_text(close, "Close tab (Ctrl+W)");
+        gtk_widget_add_css_class(close, "flat");
+        gtk_widget_set_sensitive(close, tabs_.size() > 1U);
+        g_object_set_data(G_OBJECT(close), "ifm-tab-index",
+                          GINT_TO_POINTER(static_cast<int>(index + 1U)));
+        g_signal_connect(close, "clicked", G_CALLBACK(on_tab_close_clicked), this);
+        gtk_box_append(GTK_BOX(group), close);
+        gtk_box_append(GTK_BOX(tab_strip_), group);
+    }
+}
+
+void FileManagerWindow::on_tab_clicked(GtkButton *button, gpointer data)
+{
+    auto *self = static_cast<FileManagerWindow *>(data);
+    const int encoded = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "ifm-tab-index"));
+    if (encoded > 0) self->activate_tab(static_cast<std::size_t>(encoded - 1));
+}
+void FileManagerWindow::on_tab_close_clicked(GtkButton *button, gpointer data)
+{
+    auto *self = static_cast<FileManagerWindow *>(data);
+    const int encoded = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "ifm-tab-index"));
+    if (encoded > 0) self->close_tab(static_cast<std::size_t>(encoded - 1));
+}
+void FileManagerWindow::on_tab_add_clicked(GtkButton *, gpointer data)
+{
+    auto *self = static_cast<FileManagerWindow *>(data);
+    if (self->current_location_ != nullptr) self->add_tab(self->current_location_);
+}
+gboolean FileManagerWindow::on_tab_key_pressed(GtkEventControllerKey *, guint keyval,
+                                                guint, GdkModifierType modifiers, gpointer data)
+{
+    if (!(modifiers & GDK_CONTROL_MASK)) return FALSE;
+    auto *self = static_cast<FileManagerWindow *>(data);
+    if (keyval == GDK_KEY_t || keyval == GDK_KEY_T) {
+        if (self->current_location_ != nullptr) self->add_tab(self->current_location_);
+        return TRUE;
+    }
+    if (keyval == GDK_KEY_w || keyval == GDK_KEY_W) {
+        if (self->tabs_.size() <= 1U) return FALSE;
+        self->close_tab(self->active_tab_);
+        return TRUE;
+    }
+    if (keyval == GDK_KEY_Page_Down || keyval == GDK_KEY_Page_Up) {
+        if (self->tabs_.size() <= 1U) return FALSE;
+        const std::size_t next = keyval == GDK_KEY_Page_Down
+            ? (self->active_tab_ + 1U) % self->tabs_.size()
+            : (self->active_tab_ + self->tabs_.size() - 1U) % self->tabs_.size();
+        self->activate_tab(next);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+void FileManagerWindow::load_bookmarks()
+{
+    char *path = g_build_filename(g_get_user_config_dir(), "infiltrator", "files",
+                                  "bookmarks", nullptr);
+    gchar *contents = nullptr;
+    gsize bytes = 0;
+    if (g_file_get_contents(path, &contents, &bytes, nullptr) && contents != nullptr) {
+        gchar **lines = g_strsplit(contents, "\n", 129);
+        for (gsize i = 0; lines[i] != nullptr && bookmarks_.size() < 128U; ++i) {
+            std::string uri(lines[i]);
+            char *scheme = g_uri_parse_scheme(uri.c_str());
+            const bool valid = scheme != nullptr;
+            g_free(scheme);
+            if (uri.empty() || !valid) continue;
+            if (std::none_of(bookmarks_.begin(), bookmarks_.end(),
+                             [&](const BookmarkRow &row){ return row.uri == uri; })) {
+                append_bookmark(uri);
+            }
+        }
+        g_strfreev(lines);
+    }
+    g_free(contents);
+    g_free(path);
+}
+void FileManagerWindow::save_bookmarks() const
+{
+    char *folder = g_build_filename(g_get_user_config_dir(), "infiltrator", "files", nullptr);
+    if (g_mkdir_with_parents(folder, 0700) == 0) {
+        char *path = g_build_filename(folder, "bookmarks", nullptr);
+        std::string data;
+        for (const BookmarkRow &row : bookmarks_) data += row.uri + "\n";
+        g_file_set_contents(path, data.c_str(), static_cast<gssize>(data.size()), nullptr);
+        g_free(path);
+    }
+    g_free(folder);
+}
+void FileManagerWindow::append_bookmark(const std::string &uri)
+{
+    GFile *file = g_file_new_for_uri(uri.c_str());
+    char *label = g_file_get_basename(file);
+    GtkWidget *row = gtk_list_box_row_new();
+    GtkWidget *content = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    GtkWidget *symbol = gtk_image_new_from_icon_name("starred-symbolic");
+    gtk_box_append(GTK_BOX(content), symbol);
+    GtkWidget *name = gtk_label_new(label != nullptr ? label : uri.c_str());
+    gtk_label_set_xalign(GTK_LABEL(name), 0.0F);
+    gtk_widget_set_hexpand(name, TRUE);
+    gtk_box_append(GTK_BOX(content), name);
+    GtkWidget *options = gtk_menu_button_new();
+    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(options), "view-more-symbolic");
+    gtk_widget_set_tooltip_text(options, "Bookmark options");
+    GtkWidget *popup = gtk_popover_new();
+    GtkWidget *items = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    for (const char *verb : {"Move up", "Move down", "Remove"}) {
+        GtkWidget *action = gtk_button_new_with_label(verb);
+        gtk_widget_add_css_class(action, "flat");
+        g_object_set_data(G_OBJECT(action), "ifm-bookmark-row", row);
+        g_signal_connect(action, "clicked", G_CALLBACK(on_bookmark_action), this);
+        gtk_box_append(GTK_BOX(items), action);
+    }
+    gtk_popover_set_child(GTK_POPOVER(popup), items);
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(options), popup);
+    gtk_box_append(GTK_BOX(content), options);
+    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), content);
+    g_object_set_data_full(G_OBJECT(row), "ifm-target", g_strdup(uri.c_str()), g_free);
+    gtk_list_box_append(GTK_LIST_BOX(sidebar_), row);
+    bookmarks_.push_back(BookmarkRow{uri, row});
+    g_free(label);
+    g_object_unref(file);
+}
+void FileManagerWindow::reorder_bookmarks()
+{
+    for (std::size_t i = 0; i < bookmarks_.size(); ++i) {
+        GtkWidget *row = bookmarks_[i].row;
+        const int desired = static_cast<int>(static_sidebar_row_count_ +
+                                             mounted_place_rows_.size() + i);
+        if (gtk_list_box_row_get_index(GTK_LIST_BOX_ROW(row)) != desired) {
+            g_object_ref(row);
+            gtk_list_box_remove(GTK_LIST_BOX(sidebar_), row);
+            gtk_list_box_insert(GTK_LIST_BOX(sidebar_), row, desired);
+            g_object_unref(row);
+        }
+    }
+}
+void FileManagerWindow::remove_bookmark(const std::size_t index)
+{
+    if (index >= bookmarks_.size()) return;
+    GtkWidget *row = bookmarks_[index].row;
+    g_object_ref(row);
+    gtk_list_box_remove(GTK_LIST_BOX(sidebar_), row);
+    bookmarks_.erase(bookmarks_.begin() + static_cast<std::ptrdiff_t>(index));
+    g_object_unref(row);
+    reorder_bookmarks();
+    save_bookmarks();
+    update_bookmark_button();
+}
+void FileManagerWindow::update_bookmark_button()
+{
+    if (bookmark_button_ == nullptr || current_location_ == nullptr) return;
+    char *uri = g_file_get_uri(current_location_);
+    const bool pinned = uri != nullptr &&
+        std::any_of(bookmarks_.begin(), bookmarks_.end(),
+                    [uri](const BookmarkRow &bookmark){ return bookmark.uri == uri; });
+    gtk_widget_set_tooltip_text(bookmark_button_,
+                                pinned ? "Unpin current folder" : "Pin current folder");
+    g_free(uri);
+}
+void FileManagerWindow::on_bookmark_toggle(GtkButton *, gpointer data)
+{
+    auto *self = static_cast<FileManagerWindow *>(data);
+    if (self->current_location_ == nullptr) return;
+    char *uri = g_file_get_uri(self->current_location_);
+    if (uri == nullptr) return;
+    const auto it = std::find_if(self->bookmarks_.begin(), self->bookmarks_.end(),
+                                [uri](const BookmarkRow &entry){ return entry.uri == uri; });
+    if (it != self->bookmarks_.end()) {
+        self->remove_bookmark(static_cast<std::size_t>(it - self->bookmarks_.begin()));
+    } else if (self->bookmarks_.size() < 128U) {
+        self->append_bookmark(uri);
+        self->save_bookmarks();
+        self->update_bookmark_button();
+    }
+    g_free(uri);
+}
+void FileManagerWindow::on_bookmark_action(GtkButton *button, gpointer data)
+{
+    auto *self = static_cast<FileManagerWindow *>(data);
+    GtkWidget *row = GTK_WIDGET(g_object_get_data(G_OBJECT(button), "ifm-bookmark-row"));
+    const auto it = std::find_if(self->bookmarks_.begin(), self->bookmarks_.end(),
+                               [row](const BookmarkRow &entry){ return entry.row == row; });
+    if (it == self->bookmarks_.end()) return;
+    const std::size_t index = static_cast<std::size_t>(it - self->bookmarks_.begin());
+    const char *verb = gtk_button_get_label(button);
+    if (g_strcmp0(verb, "Remove") == 0) {
+        self->remove_bookmark(index);
+    } else if (g_strcmp0(verb, "Move up") == 0 && index > 0U) {
+        std::swap(self->bookmarks_[index], self->bookmarks_[index - 1U]);
+        self->reorder_bookmarks();
+        self->save_bookmarks();
+    } else if (g_strcmp0(verb, "Move down") == 0 &&
+               index + 1U < self->bookmarks_.size()) {
+        std::swap(self->bookmarks_[index], self->bookmarks_[index + 1U]);
+        self->reorder_bookmarks();
+        self->save_bookmarks();
+    }
 }
 
 void FileManagerWindow::on_back_clicked(GtkButton *button, gpointer user_data)

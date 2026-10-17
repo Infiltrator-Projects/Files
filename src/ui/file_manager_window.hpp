@@ -26,6 +26,8 @@ public:
 
     void present();
     void install_operation_surface();
+    [[nodiscard]] bool open_primary_directory_in_new_tab();
+    void begin_inline_rename();
     [[nodiscard]] GtkWindow *native_window() const noexcept { return GTK_WINDOW(window_); }
 
 private:
@@ -36,12 +38,34 @@ private:
         Compact,
     };
 
+    struct TabState {
+        std::vector<Location> history;
+        std::size_t index{0};
+        std::string uri;
+        std::vector<std::string> selected_names;
+        ViewMode view{ViewMode::List};
+        GtkWidget *button{nullptr};
+        GtkWidget *label{nullptr};
+    };
+
+    struct BookmarkRow {
+        std::string uri;
+        GtkWidget *row{nullptr};
+    };
+
     struct MountedPlaceRow {
         MountedPlace place;
         GtkWidget *row{nullptr};
     };
 
     static void on_window_finalized(gpointer user_data, GObject *where_object_was);
+    static void on_tab_clicked(GtkButton *button, gpointer user_data);
+    static void on_tab_close_clicked(GtkButton *button, gpointer user_data);
+    static void on_tab_add_clicked(GtkButton *button, gpointer user_data);
+    static gboolean on_tab_key_pressed(GtkEventControllerKey *controller, guint keyval,
+                                       guint keycode, GdkModifierType state, gpointer user_data);
+    static void on_bookmark_toggle(GtkButton *button, gpointer user_data);
+    static void on_bookmark_action(GtkButton *button, gpointer user_data);
     static void on_back_clicked(GtkButton *button, gpointer user_data);
     static void on_forward_clicked(GtkButton *button, gpointer user_data);
     static void on_up_clicked(GtkButton *button, gpointer user_data);
@@ -82,6 +106,18 @@ private:
                                            GObject *where_object_was);
 
     void build_ui(GtkApplication *application);
+    void add_tab(GFile *file);
+    void activate_tab(std::size_t index);
+    void close_tab(std::size_t index);
+    void remember_tab();
+    void update_tab_buttons();
+    void restore_tab_selection();
+    void load_bookmarks();
+    void save_bookmarks() const;
+    void append_bookmark(const std::string &uri);
+    void remove_bookmark(std::size_t index);
+    void reorder_bookmarks();
+    void update_bookmark_button();
     void apply_theme();
     void add_sidebar_location(const char *title, const char *icon_name, const char *target);
     void refresh_mounted_places();
@@ -102,6 +138,12 @@ private:
     [[nodiscard]] GFile *file_from_location_text(const char *text) const;
 
     GtkWidget *window_{nullptr};
+    GtkWidget *tab_strip_{nullptr};
+    GtkWidget *bookmark_button_{nullptr};
+    std::vector<TabState> tabs_;
+    std::size_t active_tab_{0};
+    std::vector<std::string> pending_tab_selection_;
+    std::vector<BookmarkRow> bookmarks_;
     GtkWidget *back_button_{nullptr};
     GtkWidget *forward_button_{nullptr};
     GtkWidget *up_button_{nullptr};

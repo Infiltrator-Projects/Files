@@ -2,6 +2,7 @@
 #include "interaction_controller.hpp"
 
 #include "detail_metadata.hpp"
+#include "file_manager_window.hpp"
 
 #include <algorithm>
 #include <string>
@@ -322,6 +323,18 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
         box, "Open", nullptr, ActionScope::SingleSelection, proxies,
         G_CALLBACK(&InteractionController::on_open_clicked));
 
+    GtkWidget *open_tab = gtk_button_new_with_label("Open folder in new tab");
+    gtk_widget_add_css_class(open_tab, "flat");
+    gtk_box_append(GTK_BOX(box), open_tab);
+    g_signal_connect(open_tab, "clicked", G_CALLBACK(+[](GtkButton *, gpointer data) {
+        auto *self = static_cast<InteractionController *>(data);
+        if (self->window_ != nullptr) {
+            auto *window = static_cast<FileManagerWindow *>(
+                g_object_get_data(G_OBJECT(self->window_), "ifm-window-controller"));
+            if (window != nullptr) window->open_primary_directory_in_new_tab();
+        }
+        self->close_popovers();
+    }), this);
     create_action_button(box, "New Folder", new_folder_target_,
                          ActionScope::Always, proxies);
     add_separator(box);
