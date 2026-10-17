@@ -3,6 +3,7 @@
 
 #include <infiltratr/format.h>
 #include <infiltratr/temporal.h>
+#include <infiltratr/temporal_clock_resource.h>
 #include <infiltratr/temporal_posix.h>
 
 #include <cstdint>
@@ -329,13 +330,40 @@ std::string locale_time_text(GDateTime *local, const bool show_seconds)
     return result;
 }
 
+InfiltratrTemporalClockPresentation *clock_presentation_for_mode(
+    const char *clock_id)
+{
+    using Presentation = std::unique_ptr<InfiltratrTemporalClockPresentation,
+        decltype(&infiltratr_temporal_clock_presentation_free)>;
+    // Detail formatting is a GTK main-thread operation. Reuse one validated
+    // module across rows and repaints, changing it only when policy selects
+    // a different mode. A missing resource is never replaced by old maths.
+    static Presentation presentation(nullptr,
+        &infiltratr_temporal_clock_presentation_free);
+    static std::string current_id;
+    static bool selected = false;
+
+    if (clock_id == nullptr) {
+        return nullptr;
+    }
+    if (!selected || current_id != clock_id) {
+        presentation.reset();
+        current_id = clock_id;
+        selected = true;
+        presentation.reset(infiltratr_temporal_clock_presentation_new(
+            current_id.c_str()));
+    }
+    return presentation.get();
+}
+
 std::string policy_time_text(GDateTime *local, const guint64 seconds,
                              const InfiltratrTemporalPolicyV3 &policy)
 {
     // "standard" deliberately belongs to the platform locale, but the
     // Common-owned show-seconds setting still applies to that presentation.
     // Explicit modes (including standard-12/standard-24) are rendered by
-    // Common so Files cannot silently substitute its own clock convention.
+    // Common's shared clock presenter. Migrated clocks require their system
+    // modules; Files must not silently substitute an old compiled algorithm.
     if (std::strcmp(policy.clock_mode, "standard") == 0) {
         return locale_time_text(local, policy.show_seconds);
     }
@@ -353,20 +381,19 @@ std::string policy_time_text(GDateTime *local, const guint64 seconds,
         return "—";
     }
 
+    InfiltratrTemporalClockPresentation *presentation =
+        clock_presentation_for_mode(policy.clock_mode);
+    if (presentation == nullptr) {
+        return "clock resource unavailable";
+    }
     char buffer[128]{};
     std::size_t length = 0U;
-    const bool formatted = infiltratr_temporal_format_clock_mode_localized(
-        g_get_language_names()[0], policy.clock_mode,
+    const bool formatted = infiltratr_temporal_clock_presentation_format(
+        presentation, g_get_language_names()[0],
         static_cast<gint64>(seconds * kMicrosecondsPerSecond),
         static_cast<std::int32_t>(offset_seconds),
-        policy.show_seconds,
-        false,
-        policy.location_configured,
-        policy.latitude,
-        policy.longitude,
-        buffer,
-        sizeof(buffer),
-        &length);
+        policy.show_seconds, false, policy.location_configured,
+        policy.latitude, policy.longitude, buffer, sizeof(buffer), &length);
     if (!formatted || length == 0U || buffer[0] == '\0') {
         return "—";
     }

@@ -1,8 +1,8 @@
 # Files — Common Integration and Ownership Ledger
 
-**Date:** 6 October 2026\
-**Pinned Common:** 1.19.41\
-**Pinned commit:** `b0387b7ab5d71cda60748e2506b85cdc0e6b5e8b`
+**Date:** 18 October 2026\
+**Pinned Common:** 1.19.54\
+**Pinned commit:** `18d542b63ba7878c72f5ed465ea7af1bb98071ed`
 
 Common is one of Files's principal architectural advantages. Files must not treat Common as a token submodule used only for colours. It is the first place to look whenever Files needs a product-neutral mechanism already proven elsewhere in the Infiltrator family.
 
@@ -47,8 +47,8 @@ Files pins an exact reviewed Common release and commit. It must not silently flo
 Current requirement:
 
 ```text
-Common version: 1.19.41
-Commit:         b0387b7ab5d71cda60748e2506b85cdc0e6b5e8b
+Common version: 1.19.54
+Commit:         18d542b63ba7878c72f5ed465ea7af1bb98071ed
 ```
 
 A Common update is an explicit Files change with build/test qualification. A same-version but different Common commit must not build in a normal Git checkout.
@@ -390,8 +390,8 @@ Common already carries the shared system-wide temporal presentation authority us
 - clock/calendar catalogues;
 - seconds policy;
 - location-dependent clock policy;
-- explicit non-standard clock formatting;
-- optional bounded POSIX date-renderer discovery and validation, delegating chronology to Calendar.
+- executable system Clock Resources discovery/validation and shared presentation;
+- optional bounded POSIX Calendar Resources discovery and validation without an application dependency.
 
 **Files uses it for:**
 
@@ -408,7 +408,7 @@ Common already carries the shared system-wide temporal presentation authority us
 
 Rule: Files should not invent another clock/calendar configuration system.
 
-Status: **ACTIVE**. One policy snapshot supplies the date and clock for each displayed timestamp. Non-Gregorian dates use Calendar 1.0.86 or newer through Common for matching UI-language presentation and native historical year conventions; a missing/incompatible provider is shown as unavailable. Gregorian locale presentation stays with the platform adapter. Live policy refresh and raw timestamp sorting share the existing row-formatting seam. A fresh profile watches the nearest existing configuration ancestor until the shared policy directory appears. Native locale time patterns are converted to UTF-8 before GTK formatting.
+Status: **ACTIVE**. One policy snapshot supplies the date and clock for each displayed timestamp. Five migrated clock systems execute only from independent system resource modules (never a duplicate built-in formatter); a missing resource is explicit. Non-Gregorian dates use the Common-owned Calendar Resources ABI for matching UI-language presentation and native historical year conventions; a missing/incompatible provider is shown as unavailable. Gregorian locale presentation stays with the platform adapter. Live policy refresh and raw timestamp sorting share the existing row-formatting seam. A fresh profile watches the nearest existing configuration ancestor until the shared policy directory appears. Native locale time patterns are converted to UTF-8 before GTK formatting.
 
 ---
 

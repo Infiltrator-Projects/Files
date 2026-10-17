@@ -2,6 +2,7 @@
 #include "../src/ui/detail_metadata.hpp"
 
 #include <infiltratr/temporal.h>
+#include <infiltratr/temporal_clock_resource.h>
 #include <infiltratr/temporal_posix.h>
 
 #include <cstring>
@@ -278,6 +279,44 @@ int main()
         g_free(config_home);
         g_object_unref(file);
         return 17;
+    }
+
+    // Migrated modes render exclusively through installed executable system
+    // clock resources; when missing they never use Common's old copy.
+    std::strcpy(policy.calendar, "gregorian");
+    policy.show_seconds = true;
+    policy.location_configured = false;
+    g_file_info_set_attribute_uint64(file, G_FILE_ATTRIBUTE_TIME_MODIFIED, 43200U);
+    for (const char *mode : {"decimal", "internet", "unix", "hexadecimal", "binary"}) {
+        std::strcpy(policy.clock_mode, mode);
+        if (infiltratr_temporal_posix_policy_save(&policy) != 0) {
+            g_free(config_home);
+            g_object_unref(file);
+            return 19;
+        }
+        const std::string visible = detail_modified_text(file);
+        InfiltratrTemporalClockModule *resource =
+            infiltratr_temporal_clock_module_open_id(mode);
+        bool valid = false;
+        if (resource != nullptr) {
+            char expected[128]{};
+            std::size_t length = 0U;
+            valid = infiltratr_temporal_clock_format(
+                        resource, "en_AU", INT64_C(43200000000), 0,
+                        true, false, 0.0, 0.0, expected, sizeof(expected),
+                        &length) &&
+                length != 0U && visible.size() >= length &&
+                visible.compare(visible.size() - length, length, expected) == 0;
+        } else {
+            valid = visible.find("clock resource unavailable") !=
+                std::string::npos;
+        }
+        infiltratr_temporal_clock_module_free(resource);
+        if (!valid) {
+            g_free(config_home);
+            g_object_unref(file);
+            return 19;
+        }
     }
 
     g_free(config_home);
