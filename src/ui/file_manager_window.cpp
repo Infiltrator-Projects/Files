@@ -23,7 +23,7 @@ constexpr const char *kDirectoryAttributes =
 constexpr const char *kLocationUnavailableStatus =
     "Location unavailable. Reopen the location to retry.";
 
-constexpr int kDetailIconSize = 24;
+constexpr int kDetailIconSize = 20;
 constexpr int kDetailTypeWidth = 160;
 constexpr int kDetailSizeWidth = 96;
 constexpr int kDetailModifiedWidth = 190;
@@ -45,8 +45,8 @@ GtkWidget *make_sidebar_content(const char *title, const char *icon_name)
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
     gtk_widget_set_margin_start(box, 10);
     gtk_widget_set_margin_end(box, 10);
-    gtk_widget_set_margin_top(box, 7);
-    gtk_widget_set_margin_bottom(box, 7);
+    gtk_widget_set_margin_top(box, 5);
+    gtk_widget_set_margin_bottom(box, 5);
 
     GtkWidget *icon = gtk_image_new_from_icon_name(icon_name);
     gtk_image_set_pixel_size(GTK_IMAGE(icon), 18);
@@ -297,8 +297,8 @@ void FileManagerWindow::build_ui(GtkApplication *application)
                                    GTK_POLICY_AUTOMATIC, GTK_POLICY_NEVER);
     tab_strip_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 3);
     gtk_widget_set_margin_start(tab_strip_, 12);
-    gtk_widget_set_margin_top(tab_strip_, 3);
-    gtk_widget_set_margin_bottom(tab_strip_, 3);
+    gtk_widget_set_margin_top(tab_strip_, 2);
+    gtk_widget_set_margin_bottom(tab_strip_, 2);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(tab_scroll), tab_strip_);
     gtk_box_append(GTK_BOX(tab_line), tab_scroll);
     GtkWidget *add_tab_button = gtk_button_new_from_icon_name("list-add-symbolic");
@@ -340,8 +340,8 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     GtkWidget *places_label = gtk_label_new("PLACES");
     gtk_widget_add_css_class(places_label, "ifm-section-caption");
     gtk_widget_set_margin_start(places_label, 18);
-    gtk_widget_set_margin_top(places_label, 14);
-    gtk_widget_set_margin_bottom(places_label, 6);
+    gtk_widget_set_margin_top(places_label, 12);
+    gtk_widget_set_margin_bottom(places_label, 5);
     gtk_label_set_xalign(GTK_LABEL(places_label), 0.0F);
     gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(places_header), places_label);
     gtk_list_box_append(GTK_LIST_BOX(sidebar_), places_header);
@@ -1463,7 +1463,7 @@ void FileManagerWindow::update_tab_buttons()
         gtk_widget_set_tooltip_text(close, "Close tab (Ctrl+W)");
         gtk_widget_add_css_class(close, "flat");
         gtk_widget_add_css_class(close, "ifm-tab-close");
-        gtk_widget_set_opacity(close, index == active_tab_ ? 0.82 : 0.36);
+        gtk_widget_set_opacity(close, index == active_tab_ ? 0.95 : 0.68);
         gtk_widget_set_sensitive(close, tabs_.size() > 1U);
         g_object_set_data(G_OBJECT(close), "ifm-tab-index",
                           GINT_TO_POINTER(static_cast<int>(index + 1U)));
@@ -1904,8 +1904,8 @@ void FileManagerWindow::on_factory_setup(GtkSignalListItemFactory *factory,
         GtkWidget *cell = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
         gtk_widget_set_margin_start(cell, 8);
         gtk_widget_set_margin_end(cell, 6);
-        gtk_widget_set_margin_top(cell, 5);
-        gtk_widget_set_margin_bottom(cell, 5);
+        gtk_widget_set_margin_top(cell, 3);
+        gtk_widget_set_margin_bottom(cell, 3);
 
         GtkWidget *icon = gtk_image_new();
         gtk_image_set_pixel_size(GTK_IMAGE(icon), kDetailIconSize);
@@ -1933,8 +1933,8 @@ void FileManagerWindow::on_factory_setup(GtkSignalListItemFactory *factory,
     gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
     gtk_widget_set_margin_start(label, 6);
     gtk_widget_set_margin_end(label, 6);
-    gtk_widget_set_margin_top(label, 5);
-    gtk_widget_set_margin_bottom(label, 5);
+    gtk_widget_set_margin_top(label, 3);
+    gtk_widget_set_margin_bottom(label, 3);
     gtk_widget_set_halign(label, GTK_ALIGN_FILL);
     gtk_widget_add_css_class(label, "ifm-detail-secondary");
     gtk_list_item_set_child(item, label);

@@ -33,6 +33,17 @@ void settle()
         while (g_main_context_iteration(nullptr, FALSE)) {}
 }
 
+GtkWidget *find_css_class(GtkWidget *root, const char *name)
+{
+    if (root == nullptr) return nullptr;
+    if (gtk_widget_has_css_class(root, name)) return root;
+    for (GtkWidget *child = gtk_widget_get_first_child(root); child != nullptr;
+         child = gtk_widget_get_next_sibling(child)) {
+        if (GtkWidget *found = find_css_class(child, name); found != nullptr) return found;
+    }
+    return nullptr;
+}
+
 bool style_matches(GtkWidget *widget, std::uint32_t rgb)
 {
     GdkRGBA foreground{};
@@ -93,6 +104,35 @@ int main()
         require(style_matches(second_header, night_palette->title_rgb),
                 "Night header must use legible Common Night title foreground");
 
+        // These actual widget colours must follow Common semantic roles, rather
+        // than inheriting unreadable desktop theme defaults. Each window's
+        // stylesheet must remain isolated when Day and Night coexist.
+        GtkWidget *day_status = find_css_class(GTK_WIDGET(first->native_window()),
+                                                "ifm-status-text");
+        GtkWidget *night_status = find_css_class(GTK_WIDGET(second->native_window()),
+                                                  "ifm-status-text");
+        GtkWidget *day_sidebar = find_css_class(GTK_WIDGET(first->native_window()),
+                                                 "ifm-sidebar");
+        GtkWidget *night_sidebar = find_css_class(GTK_WIDGET(second->native_window()),
+                                                   "ifm-sidebar");
+        GtkWidget *day_brand = find_css_class(GTK_WIDGET(first->native_window()),
+                                               "ifm-brand-title");
+        GtkWidget *night_brand = find_css_class(GTK_WIDGET(second->native_window()),
+                                                 "ifm-brand-title");
+        require(day_status != nullptr && night_status != nullptr &&
+                day_sidebar != nullptr && night_sidebar != nullptr &&
+                day_brand != nullptr && night_brand != nullptr,
+                "Files styling requires the canonical sidebar, status and brand surfaces");
+        require(style_matches(day_status, day_palette->summary_rgb) &&
+                style_matches(night_status, night_palette->summary_rgb),
+                "Status text must use Common's readable summary text in both themes");
+        require(style_matches(day_sidebar, day_palette->text_rgb) &&
+                style_matches(night_sidebar, night_palette->text_rgb),
+                "Sidebar foreground must use the Common primary text role");
+        require(style_matches(day_brand, day_palette->title_rgb) &&
+                style_matches(night_brand, night_palette->title_rgb),
+                "Brand title must use the Common title role");
+
         ThemeControllerTestAccess::set(*day, INFILTRATR_THEME_NIGHT);
         ThemeControllerTestAccess::set(*night, INFILTRATR_THEME_DAY);
         settle();
@@ -100,6 +140,12 @@ int main()
                 "Changing the first window's palette must repaint its header");
         require(style_matches(second_header, day_palette->title_rgb),
                 "Changing the second window's palette must not leak between windows");
+        require(style_matches(day_status, night_palette->summary_rgb) &&
+                style_matches(night_status, day_palette->summary_rgb),
+                "Status text must change with its own window and never another window");
+        require(style_matches(day_sidebar, night_palette->text_rgb) &&
+                style_matches(night_sidebar, day_palette->text_rgb),
+                "Sidebar text must continue matching its own window theme");
 
         gtk_window_destroy(first->native_window());
         gtk_window_destroy(second->native_window());
