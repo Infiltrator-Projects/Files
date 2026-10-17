@@ -514,7 +514,7 @@ void FileManagerWindow::load_preferences()
     }
     g_key_file_unref(keys);
     g_free(path);
-    preferences_ready_ = true;
+    // Loading settings must not create config directories as a side effect.
 }
 
 void FileManagerWindow::save_preferences() const
@@ -550,6 +550,7 @@ void FileManagerWindow::apply_preferences()
     if (sidebar_scroll_ != nullptr)
         gtk_widget_set_visible(sidebar_scroll_, sidebar_visible_);
     set_view_mode(view_mode_);
+    preferences_ready_ = true;
 }
 
 void FileManagerWindow::notify_sort_changed()
