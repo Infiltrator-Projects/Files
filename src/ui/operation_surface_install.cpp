@@ -2,6 +2,7 @@
 #include "file_manager_window.hpp"
 
 #include "batch_item_operation_controller.hpp"
+#include "clipboard_controller.hpp"
 #include "create_folder_controller.hpp"
 #include "destructive_operation_controller.hpp"
 #include "interaction_controller.hpp"
@@ -25,8 +26,8 @@ void FileManagerWindow::install_operation_surface()
     new BatchItemOperationController(GTK_WINDOW(window_), directory_list_, selection_, status_label_);
     new JournalRecoveryController(GTK_WINDOW(window_), status_label_);
 
-    // Install the shared interaction layer last. It consolidates the controller
-    // actions already proven above instead of reimplementing mutation semantics.
+    // Install the shared interaction layer after the mutation controllers. It
+    // consolidates their already-qualified actions rather than reimplementing them.
     new InteractionController(GTK_WINDOW(window_),
                               directory_list_,
                               selection_,
@@ -34,6 +35,12 @@ void FileManagerWindow::install_operation_surface()
                               location_entry_,
                               content_stack_,
                               status_label_);
+
+    // Clipboard operations deliberately reuse BatchTransferEngine, including its
+    // per-item journalling, collision preflight and deterministic recovery rules.
+    // It is installed last so its Copy/Cut/Paste actions join the consolidated
+    // File actions surface created immediately above.
+    new ClipboardController(GTK_WINDOW(window_), directory_list_, selection_, status_label_);
 
     operation_surface_installed_ = true;
 }

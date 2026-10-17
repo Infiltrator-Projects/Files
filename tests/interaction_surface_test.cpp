@@ -108,6 +108,12 @@ int main()
                 "New Folder must remain available after header consolidation");
         require(find_button(popover, "Properties") != nullptr,
                 "Properties must be available from File actions");
+        require(find_button(popover, "Copy") != nullptr,
+                "Clipboard Copy must be available from File actions");
+        require(find_button(popover, "Cut") != nullptr,
+                "Clipboard Cut must be available from File actions");
+        require(find_button(popover, "Paste") != nullptr,
+                "Clipboard Paste must be available from File actions");
 
         bool finalized = false;
         g_object_weak_ref(G_OBJECT(window->native_window()), [](gpointer data, GObject *) {

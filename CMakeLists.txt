@@ -110,6 +110,7 @@ infiltrator_enable_warnings(infiltrator-files-core)
 # consume this target instead of maintaining duplicate source-file inventories.
 add_library(infiltrator-files-ui STATIC
     src/ui/batch_item_operation_controller.cpp
+    src/ui/clipboard_controller.cpp
     src/ui/create_folder_controller.cpp
     src/ui/destructive_operation_controller.cpp
     src/ui/detail_metadata.cpp
