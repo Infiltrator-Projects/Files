@@ -196,7 +196,8 @@ gboolean ClipboardController::on_key_pressed(GtkEventControllerKey *controller,
     (void)keycode;
     auto *self = static_cast<ClipboardController *>(user_data);
 
-    if ((state & GDK_CONTROL_MASK) == 0 || self->busy_ ||
+    if ((state & GDK_CONTROL_MASK) == 0 || (state & GDK_SHIFT_MASK) != 0 ||
+        self->busy_ ||
         self->reading_external_clipboard_) {
         return FALSE;
     }

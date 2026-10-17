@@ -38,6 +38,7 @@ private:
     static void on_window_finalized(gpointer user_data, GObject *where_object_was);
     static void on_proxy_clicked(GtkButton *button, gpointer user_data);
     static void on_open_clicked(GtkButton *button, gpointer user_data);
+    static void on_workspace_clicked(GtkButton *button, gpointer user_data);
     static void on_properties_clicked(GtkButton *button, gpointer user_data);
     static void on_edit_location_clicked(GtkButton *button, gpointer user_data);
     static void on_breadcrumb_clicked(GtkButton *button, gpointer user_data);
@@ -78,6 +79,8 @@ private:
                                     ActionScope scope,
                                     std::vector<ProxyAction> &proxies,
                                     GCallback callback = nullptr);
+    GtkWidget *add_command(GtkWidget *box, const char *label, const char *command,
+                           ActionScope scope, std::vector<ProxyAction> &proxies);
     GtkWidget *build_action_box(std::vector<ProxyAction> &proxies,
                                 GtkWidget **open_button,
                                 GtkWidget **properties_button);
@@ -115,6 +118,10 @@ private:
     GtkWidget *delete_target_{nullptr};
 
     std::vector<GtkWidget *> open_in_tab_actions_;
+    std::vector<GtkWidget *> open_in_window_actions_;
+    std::vector<GtkWidget *> hidden_actions_;
+    std::vector<GtkWidget *> folder_sort_actions_;
+    std::vector<GtkWidget *> sidebar_actions_;
     std::vector<ProxyAction> overflow_proxies_;
     std::vector<ProxyAction> context_proxies_;
 

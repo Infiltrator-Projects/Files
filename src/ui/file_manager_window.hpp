@@ -28,6 +28,17 @@ public:
     void present();
     void install_operation_surface();
     [[nodiscard]] bool open_primary_directory_in_new_tab();
+    [[nodiscard]] bool open_primary_directory_in_new_window();
+    void open_new_window(bool selected_folder = false);
+    void duplicate_active_tab();
+    void reopen_closed_tab();
+    void move_active_tab(int delta);
+    void toggle_show_hidden();
+    void toggle_folders_first();
+    void toggle_sidebar();
+    [[nodiscard]] bool show_hidden() const noexcept { return show_hidden_; }
+    [[nodiscard]] bool folders_first() const noexcept { return folders_first_; }
+    [[nodiscard]] bool sidebar_visible() const noexcept { return sidebar_visible_; }
     [[nodiscard]] bool begin_inline_rename();
     [[nodiscard]] GtkWindow *native_window() const noexcept { return GTK_WINDOW(window_); }
 
@@ -65,6 +76,7 @@ private:
     static void on_tab_add_clicked(GtkButton *button, gpointer user_data);
     static gboolean on_tab_key_pressed(GtkEventControllerKey *controller, guint keyval,
                                        guint keycode, GdkModifierType state, gpointer user_data);
+    static gboolean filter_visible(gpointer item, gpointer user_data);
     static void on_bookmark_toggle(GtkButton *button, gpointer user_data);
     static void on_bookmark_action(GtkButton *button, gpointer user_data);
     static void on_back_clicked(GtkButton *button, gpointer user_data);
@@ -117,6 +129,10 @@ private:
     void cancel_inline_editor(GtkWidget *cell);
     static GtkWidget *find_editor_for_name(GtkWidget *root, const char *name);
     void add_tab(GFile *file);
+    void load_preferences();
+    void save_preferences() const;
+    void apply_preferences();
+    void notify_sort_changed();
     void activate_tab(std::size_t index);
     void close_tab(std::size_t index);
     void remember_tab();
@@ -151,6 +167,7 @@ private:
     GtkWidget *tab_strip_{nullptr};
     GtkWidget *bookmark_button_{nullptr};
     std::vector<TabState> tabs_;
+    std::vector<TabState> recently_closed_tabs_;
     std::size_t active_tab_{0};
     std::vector<std::string> pending_tab_selection_;
     std::vector<BookmarkRow> bookmarks_;
@@ -159,6 +176,9 @@ private:
     GtkWidget *up_button_{nullptr};
     GtkWidget *location_entry_{nullptr};
     GtkWidget *sidebar_{nullptr};
+    GtkWidget *sidebar_scroll_{nullptr};
+    GtkWidget *header_view_switcher_{nullptr};
+    GtkColumnView *detail_view_{nullptr};
     GtkWidget *content_stack_{nullptr};
     GtkWidget *list_view_button_{nullptr};
     GtkWidget *icon_view_button_{nullptr};
@@ -173,6 +193,7 @@ private:
     std::size_t static_sidebar_row_count_{0};
     GtkDirectoryList *directory_list_{nullptr};
     GtkMultiSelection *selection_{nullptr};
+    GtkCustomFilter *visibility_filter_{nullptr};
     GtkSingleSelection *primary_selection_{nullptr};
     GFile *current_location_{nullptr};
     GFileMonitor *temporal_policy_monitor_{nullptr};
@@ -180,6 +201,10 @@ private:
     std::vector<Location> history_;
     std::size_t history_index_{0};
     ViewMode view_mode_{ViewMode::List};
+    bool show_hidden_{false};
+    bool folders_first_{true};
+    bool sidebar_visible_{true};
+    bool preferences_ready_{false};
     bool operation_surface_installed_{false};
     bool selection_syncing_{false};
     bool current_location_available_{true};

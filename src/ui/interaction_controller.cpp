@@ -309,6 +309,16 @@ GtkWidget *InteractionController::create_action_button(
     return button;
 }
 
+GtkWidget *InteractionController::add_command(GtkWidget *box, const char *label,
+                                              const char *command, ActionScope scope,
+                                              std::vector<ProxyAction> &proxies)
+{
+    GtkWidget *button = create_action_button(box, label, nullptr, scope, proxies,
+                                             G_CALLBACK(&InteractionController::on_workspace_clicked));
+    g_object_set_data(G_OBJECT(button), "ifm-workspace-command", const_cast<char *>(command));
+    return button;
+}
+
 GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &proxies,
                                                    GtkWidget **open_button,
                                                    GtkWidget **properties_button)
@@ -336,6 +346,14 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
         }
         self->close_popovers();
     }), this);
+    GtkWidget *open_window = add_command(box, "Open folder in new window", "folder-window",
+                                        ActionScope::SingleSelection, proxies);
+    open_in_window_actions_.push_back(open_window);
+    if (&proxies == &overflow_proxies_) {
+        add_command(box, "New Window", "new-window", ActionScope::Always, proxies);
+        add_command(box, "Duplicate Tab", "duplicate-tab", ActionScope::Always, proxies);
+        add_command(box, "Reopen Closed Tab", "reopen-tab", ActionScope::Always, proxies);
+    }
     create_action_button(box, "New Folder", new_folder_target_,
                          ActionScope::Always, proxies);
     add_separator(box);
@@ -361,10 +379,26 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
                          ActionScope::SingleSelection, proxies);
 
     add_separator(box);
+    add_command(box, "Copy Path as Text", "copy-path", ActionScope::SingleSelection, proxies);
+    add_command(box, "Copy URI as Text", "copy-uri", ActionScope::SingleSelection, proxies);
     *properties_button = create_action_button(
         box, "Properties", nullptr, ActionScope::SingleSelection, proxies,
         G_CALLBACK(&InteractionController::on_properties_clicked));
 
+    if (&proxies == &overflow_proxies_) {
+        add_separator(box);
+        GtkWidget *expander = gtk_expander_new("View and layout");
+        gtk_widget_add_css_class(expander, "ifm-layout-section");
+        gtk_box_append(GTK_BOX(box), expander);
+        GtkWidget *layout = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+        gtk_expander_set_child(GTK_EXPANDER(expander), layout);
+        hidden_actions_.push_back(add_command(layout, "Show Hidden Files", "toggle-hidden",
+                                              ActionScope::Always, proxies));
+        folder_sort_actions_.push_back(add_command(layout, "Folders First", "folders-first",
+                                                   ActionScope::Always, proxies));
+        sidebar_actions_.push_back(add_command(layout, "Hide Sidebar", "toggle-sidebar",
+                                               ActionScope::Always, proxies));
+    }
     return box;
 }
 
@@ -436,6 +470,52 @@ void InteractionController::on_proxy_clicked(GtkButton *button, gpointer user_da
     if (target != nullptr && gtk_widget_get_sensitive(target)) {
         g_signal_emit_by_name(target, "clicked");
     }
+    self->close_popovers();
+}
+
+
+void InteractionController::on_workspace_clicked(GtkButton *button, gpointer user_data)
+{
+    auto *self = static_cast<InteractionController *>(user_data);
+    const char *command = static_cast<const char *>(
+        g_object_get_data(G_OBJECT(button), "ifm-workspace-command"));
+    if (command == nullptr || self->window_ == nullptr) return;
+    auto *window = static_cast<FileManagerWindow *>(
+        g_object_get_data(G_OBJECT(self->window_), "ifm-window-controller"));
+    if (window == nullptr) return;
+    if (g_strcmp0(command, "new-window") == 0) window->open_new_window();
+    else if (g_strcmp0(command, "folder-window") == 0) {
+        (void)window->open_primary_directory_in_new_window();
+    }
+    else if (g_strcmp0(command, "duplicate-tab") == 0) window->duplicate_active_tab();
+    else if (g_strcmp0(command, "reopen-tab") == 0) window->reopen_closed_tab();
+    else if (g_strcmp0(command, "toggle-hidden") == 0) window->toggle_show_hidden();
+    else if (g_strcmp0(command, "folders-first") == 0) window->toggle_folders_first();
+    else if (g_strcmp0(command, "toggle-sidebar") == 0) window->toggle_sidebar();
+    else if (g_strcmp0(command, "copy-path") == 0 ||
+             g_strcmp0(command, "copy-uri") == 0) {
+        auto *info = G_FILE_INFO(gtk_single_selection_get_selected_item(self->primary_selection_));
+        GFile *parent = gtk_directory_list_get_file(self->directory_list_);
+        if (info != nullptr && parent != nullptr) {
+            const char *name = g_file_info_get_name(info);
+            if (name != nullptr && *name != '\0') {
+                GFile *child = g_file_get_child(parent, name);
+                const bool uri = g_strcmp0(command, "copy-uri") == 0;
+                char *value = uri ? g_file_get_uri(child) : g_file_get_path(child);
+                if (value != nullptr) {
+                    GdkClipboard *clipboard = gdk_display_get_clipboard(
+                        gtk_widget_get_display(GTK_WIDGET(self->window_)));
+                    if (clipboard != nullptr) gdk_clipboard_set_text(clipboard, value);
+                    if (self->status_label_ != nullptr)
+                        gtk_label_set_text(GTK_LABEL(self->status_label_),
+                                           uri ? "URI copied" : "Path copied");
+                }
+                g_free(value);
+                g_object_unref(child);
+            }
+        }
+    }
+    self->update_action_state();
     self->close_popovers();
 }
 
@@ -534,6 +614,18 @@ gboolean InteractionController::on_key_pressed(GtkEventControllerKey *controller
         return FALSE;
     }
 
+    if (control && shift && (keyval == GDK_KEY_c || keyval == GDK_KEY_C)) {
+        // Text path copy must not replace the normal Ctrl+C file-reference action.
+        GtkWidget *command = nullptr;
+        for (const ProxyAction &action : self->overflow_proxies_) {
+            if (g_strcmp0(static_cast<const char *>(
+                    g_object_get_data(G_OBJECT(action.button), "ifm-workspace-command")),
+                "copy-path") == 0) { command = action.button; break; }
+        }
+        if (command != nullptr && gtk_widget_get_sensitive(command))
+            on_workspace_clicked(GTK_BUTTON(command), self);
+        return TRUE;
+    }
     if (control && shift && (keyval == GDK_KEY_a || keyval == GDK_KEY_A)) {
         gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(self->selection_));
         return TRUE;
@@ -661,6 +753,23 @@ void InteractionController::update_action_state()
     for (GtkWidget *button : open_in_tab_actions_) {
         gtk_widget_set_visible(button, folder);
         gtk_widget_set_sensitive(button, folder);
+    }
+    for (GtkWidget *button : open_in_window_actions_) {
+        gtk_widget_set_visible(button, folder);
+        gtk_widget_set_sensitive(button, folder);
+    }
+    auto *window = static_cast<FileManagerWindow *>(
+        g_object_get_data(G_OBJECT(window_), "ifm-window-controller"));
+    if (window != nullptr) {
+        for (GtkWidget *button : hidden_actions_)
+            gtk_button_set_label(GTK_BUTTON(button), window->show_hidden()
+                                     ? "Hide Hidden Files" : "Show Hidden Files");
+        for (GtkWidget *button : folder_sort_actions_)
+            gtk_button_set_label(GTK_BUTTON(button), window->folders_first()
+                                     ? "Folders First ✓" : "Folders First");
+        for (GtkWidget *button : sidebar_actions_)
+            gtk_button_set_label(GTK_BUTTON(button), window->sidebar_visible()
+                                     ? "Hide Sidebar" : "Show Sidebar");
     }
 
     if (overflow_open_button_ != nullptr) {
@@ -861,6 +970,26 @@ void InteractionController::show_properties()
     if (content_type != nullptr && content_type[0] != '\0') {
         add_property_row(grid, row++, "Content type", content_type);
     }
+    if (g_file_info_has_attribute(info, "unix::blocks")) {
+        const guint64 blocks = g_file_info_get_attribute_uint64(info, "unix::blocks");
+        if (blocks <= G_MAXUINT64 / 512U) {
+            char *size = g_format_size(blocks * 512U);
+            add_property_row(grid, row++, "Allocated", size != nullptr ? size : "Unknown");
+            g_free(size);
+        }
+    }
+    if (g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_UNIX_MODE)) {
+        const guint32 mode = g_file_info_get_attribute_uint32(info, G_FILE_ATTRIBUTE_UNIX_MODE);
+        char *permission = g_strdup_printf("%04o", mode & 07777U);
+        add_property_row(grid, row++, "Permissions", permission != nullptr ? permission : "Unknown");
+        g_free(permission);
+    }
+    if (g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_UNIX_UID))
+        add_property_row(grid, row++, "Owner ID", std::to_string(
+            g_file_info_get_attribute_uint32(info, G_FILE_ATTRIBUTE_UNIX_UID)));
+    if (g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_UNIX_GID))
+        add_property_row(grid, row++, "Group ID", std::to_string(
+            g_file_info_get_attribute_uint32(info, G_FILE_ATTRIBUTE_UNIX_GID)));
     if (g_file_info_get_is_symlink(info)) {
         const char *target = g_file_info_get_symlink_target(info);
         add_property_row(grid, row++, "Link target",

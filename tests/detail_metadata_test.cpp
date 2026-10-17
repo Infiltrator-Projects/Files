@@ -107,6 +107,24 @@ int main()
         return 8;
     }
 
+
+    GFileInfo *number2 = g_file_info_new();
+    GFileInfo *number10 = g_file_info_new();
+    g_file_info_set_name(number2, "file2.txt");
+    g_file_info_set_display_name(number2, "file2.txt");
+    g_file_info_set_name(number10, "file10.txt");
+    g_file_info_set_display_name(number10, "file10.txt");
+    if (detail_compare_name(number2, number10) >= 0 ||
+        detail_compare_name(number10, number2) <= 0) {
+        g_object_unref(number2);
+        g_object_unref(number10);
+        g_free(config_home);
+        g_object_unref(file);
+        return 35;
+    }
+    g_object_unref(number2);
+    g_object_unref(number10);
+
     // Equal primary values must remain equal so GtkColumnViewSorter can consult
     // a secondary sort column. Modified-time ordering also includes subsecond
     // metadata when the filesystem exposes it.

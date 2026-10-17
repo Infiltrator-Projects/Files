@@ -24,6 +24,15 @@ struct FileManagerWindowTestAccess {
     }
     static void activate(FileManagerWindow &w, std::size_t i) { w.activate_tab(i); }
     static std::size_t tabs(const FileManagerWindow &w) { return w.tabs_.size(); }
+    static guint visible_count(FileManagerWindow &w) {
+        GListModel *model = gtk_multi_selection_get_model(w.selection_);
+        return model != nullptr ? g_list_model_get_n_items(model) : 0U;
+    }
+    static void close(FileManagerWindow &w) { w.close_tab(w.active_tab_); }
+    static void duplicate(FileManagerWindow &w) { w.duplicate_active_tab(); }
+    static void reopen(FileManagerWindow &w) { w.reopen_closed_tab(); }
+    static void move_left(FileManagerWindow &w) { w.move_active_tab(-1); }
+    static std::size_t active(FileManagerWindow &w) { return w.active_tab_; }
     static std::size_t history(const FileManagerWindow &w) { return w.history_.size(); }
     static std::size_t bookmarks(const FileManagerWindow &w) { return w.bookmarks_.size(); }
     static void pin(FileManagerWindow &w) { FileManagerWindow::on_bookmark_toggle(nullptr, &w); }
@@ -139,6 +148,7 @@ int main()
         std::filesystem::create_directories(b);
         std::filesystem::create_directories(c);
         std::ofstream(a / "selected.txt") << "Selected";
+        std::ofstream(a / ".hidden.txt") << "Hidden";
         auto *window = new FileManagerWindow(application);
         window->install_operation_surface();
         window->present();
@@ -146,7 +156,15 @@ int main()
         await([&] { return !gtk_directory_list_is_loading(
             FileManagerWindowTestAccess::directory(*window)) &&
             g_list_model_get_n_items(G_LIST_MODEL(
-                FileManagerWindowTestAccess::directory(*window))) == 1; });
+                FileManagerWindowTestAccess::directory(*window))) == 2; });
+        require(FileManagerWindowTestAccess::visible_count(*window) == 1U,
+                "Hidden entries must not be shown without the preference");
+        window->toggle_show_hidden();
+        require(FileManagerWindowTestAccess::visible_count(*window) == 2U,
+                "Showing hidden files must update the presentation model");
+        window->toggle_show_hidden();
+        require(FileManagerWindowTestAccess::visible_count(*window) == 1U,
+                "Hiding hidden files must restore the visible model");
         select_name(*window, "selected.txt");
         FileManagerWindowTestAccess::pin(*window);
         FileManagerWindowTestAccess::set_icons(*window);
@@ -164,7 +182,7 @@ int main()
         await([&] { return !gtk_directory_list_is_loading(
             FileManagerWindowTestAccess::directory(*window)) &&
             g_list_model_get_n_items(G_LIST_MODEL(
-                FileManagerWindowTestAccess::directory(*window))) == 1; });
+                FileManagerWindowTestAccess::directory(*window))) == 2; });
         require(FileManagerWindowTestAccess::uri(*window) == uri(a),
                 "Tab activation must restore its own directory");
         require(selected_name(*window, "selected.txt"),
@@ -181,11 +199,33 @@ int main()
         FileManagerWindowTestAccess::activate(*window, 1);
         require(FileManagerWindowTestAccess::uri(*window) == uri(c),
                 "Second tab must preserve independent navigation");
+        FileManagerWindowTestAccess::duplicate(*window);
+        require(FileManagerWindowTestAccess::tabs(*window) == 3U,
+                "Duplicating a tab must leave the original tabs intact");
+        FileManagerWindowTestAccess::move_left(*window);
+        require(FileManagerWindowTestAccess::active(*window) == 1U &&
+                FileManagerWindowTestAccess::uri(*window) == uri(c),
+                "Tab reorder must preserve the active directory");
+        FileManagerWindowTestAccess::close(*window);
+        require(FileManagerWindowTestAccess::tabs(*window) == 2U,
+                "Closing a tab must remove just that tab");
+        FileManagerWindowTestAccess::reopen(*window);
+        require(FileManagerWindowTestAccess::tabs(*window) == 3U &&
+                FileManagerWindowTestAccess::uri(*window) == uri(c),
+                "Reopening a closed tab must recover its directory");
+        window->toggle_show_hidden();
+        window->toggle_sidebar();
         gtk_window_destroy(window->native_window());
         while (g_main_context_iteration(nullptr, FALSE)) {}
         auto *reopened = new FileManagerWindow(application);
         require(FileManagerWindowTestAccess::bookmarks(*reopened) == 1,
                 "Bookmark must survive a new window and profile read");
+        require(reopened->show_hidden(),
+                "Hidden-files preference must survive application restart");
+        require(!reopened->sidebar_visible(),
+                "Sidebar preference must survive application restart");
+        require(FileManagerWindowTestAccess::icons_active(*reopened),
+                "Default view preference must survive application restart");
         gtk_window_destroy(reopened->native_window());
         while (g_main_context_iteration(nullptr, FALSE)) {}
     } catch (const std::exception &error) {

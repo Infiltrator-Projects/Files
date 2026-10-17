@@ -42,7 +42,15 @@ int compare_text(const char *left, const char *right)
 
 int name_tiebreak(GFileInfo *left, GFileInfo *right)
 {
-    return compare_text(detail_name(left), detail_name(right));
+    // GLib's filename collator handles digit runs naturally (file2 before file10).
+    const char *a = detail_name(left);
+    const char *b = detail_name(right);
+    char *ka = g_utf8_collate_key_for_filename(a, -1);
+    char *kb = g_utf8_collate_key_for_filename(b, -1);
+    const int result = g_strcmp0(ka, kb);
+    g_free(ka);
+    g_free(kb);
+    return result < 0 ? -1 : (result > 0 ? 1 : compare_text(a, b));
 }
 
 bool detail_size_value(GFileInfo *info, guint64 *value)
