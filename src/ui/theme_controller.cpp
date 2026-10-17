@@ -260,7 +260,7 @@ void ThemeController::apply_theme()
     // breadcrumb text otherwise inherit a low-contrast desktop GTK theme.
     rule("headerbar", "background-color:" + titlebar + ";color:" + title +
          ";border-bottom:1px solid " + subtle_border +
-         ";min-height:46px;padding:2px 8px");
+         ";min-height:44px;padding:2px 8px");
     rules({"headerbar button", "headerbar menubutton", "headerbar windowcontrols",
            "headerbar windowcontrols button", "headerbar image", "headerbar label"},
           "color:" + title);
@@ -290,15 +290,24 @@ void ThemeController::apply_theme()
            "columnview", "columnview listview", "columnview listview.view",
            "gridview", "gridview.view", "listview.view"},
           browsing);
-    rules({"columnview row", "columnview listview row", "gridview child"},
+    // GTK themes may add row and cell padding *on top* of our item factory's
+    // padding. The old min-height:31px alone allowed 45px rows in Mint.
+    // Zero the native row/cell insets; the 20px icon plus 2px factory margins
+    // now determines the Details row's useful height (about 32px at 100%).
+    rules({"columnview listview row", "columnview row"},
           "background-color:" + browsing_surface + ";color:" + text +
-          ";border-radius:0;min-height:31px");
+          ";border-radius:0;min-height:30px;padding:0;margin:0");
+    rule("columnview listview row cell",
+         "padding:0;margin:0;min-height:0;border:0");
+    rule("gridview child", "background-color:" + browsing_surface +
+         ";color:" + text + ";border-radius:" + radius);
     rules({"columnview row:hover", "columnview listview row:hover", "gridview child:hover"},
           "background-color:" + hover + ";color:" + text);
     rules({"columnview row:selected", "columnview listview row:selected",
            "gridview child:selected"},
           "background-color:" + selected + ";color:" + selected_text);
-    rule("columnview cell", "background-color:transparent;border:0");
+    rule("columnview cell", "background-color:transparent;border:0;padding:0;margin:0");
+    rule(".ifm-detail-cell", "min-height:24px");
     rule(".ifm-file-list", "border:0");
     rules({"columnview row:selected", "columnview listview row:selected"},
           "box-shadow:inset 3px 0 " + accent);
@@ -308,12 +317,12 @@ void ThemeController::apply_theme()
            "columnview header label"},
           "background-color:" + panel + ";color:" + secondary +
           ";border-color:" + subtle_border + ";font-weight:600");
-    rule("columnview header button", "min-height:32px;padding:3px 10px");
+    rule("columnview header button", "min-height:30px;padding:3px 10px");
     rule("columnview header button:hover", "background-color:" + hover +
          ";color:" + text);
     rules({".ifm-file-name", ".ifm-icon-tile .ifm-file-name"},
-          "color:" + text + ";font-weight:600;font-size:1.01em");
-    rule(".ifm-detail-secondary", "color:" + secondary + ";font-size:0.96em");
+          "color:" + text + ";font-weight:600;font-size:1.05em");
+    rule(".ifm-detail-secondary", "color:" + secondary + ";font-size:1.00em");
     rules({"columnview row:selected .ifm-file-name",
            "columnview row:selected .ifm-detail-secondary",
            "gridview child:selected .ifm-file-name"},
@@ -342,8 +351,10 @@ void ThemeController::apply_theme()
          ";font-size:0.78em;font-weight:650;letter-spacing:0.08em");
     rule(".ifm-sidebar row:focus-visible", "outline:2px solid " + accent);
 
-    rule(".ifm-tab-line", "background-color:" + sidebar_surface +
-         ";border-bottom:1px solid " + subtle_border + ";min-height:40px");
+    // The header and tab rail form one navigation surface, separated by a
+    // fine Common border rather than by mismatched theme-native buttons.
+    rule(".ifm-tab-line", "background-color:" + titlebar +
+         ";border-bottom:1px solid " + subtle_border + ";min-height:38px");
     rule(".ifm-tab-group", "margin:3px 2px;border-radius:" + radius);
     rule(".ifm-tab-button", "color:" + secondary +
          ";background-color:transparent;border:1px solid transparent;"
@@ -360,13 +371,21 @@ void ThemeController::apply_theme()
     rule(".ifm-status", "background-color:" + panel + ";color:" + secondary +
          ";border-top:1px solid " + subtle_border + ";min-height:37px");
     rule(".ifm-status-text", "color:" + secondary + ";font-size:0.93em");
+    // Native GTK linked/toggle button backgrounds were leaking a dark fill
+    // into unselected Day controls. Set the full state, not just its text.
     rule(".ifm-view-switcher", "background-color:" + browsing_surface +
          ";border:1px solid " + subtle_border + ";border-radius:" + radius);
-    rule(".ifm-view-button", "color:" + secondary +
-         ";border:1px solid transparent;min-width:32px;min-height:30px;padding:4px");
-    rule(".ifm-view-button:checked", "color:" + text + ";background-color:" +
-         active_hover + ";border-color:" + accent);
-    rule(".ifm-view-button:hover", "background-color:" + hover + ";color:" + text);
+    rule(".ifm-view-switcher button.ifm-view-button",
+         "background-color:transparent;background-image:none;box-shadow:none;"
+         "color:" + secondary + ";border:1px solid transparent;"
+         "border-radius:" + radius + ";min-width:32px;min-height:30px;padding:4px");
+    rule(".ifm-view-switcher button.ifm-view-button:hover",
+         "background-color:" + hover + ";color:" + text);
+    rule(".ifm-view-switcher button.ifm-view-button:checked",
+         "background-color:" + active_hover + ";color:" + text +
+         ";border:1px solid " + accent);
+    rule(".ifm-view-switcher button.ifm-view-button:checked:hover",
+         "background-color:" + active_hover + ";color:" + text);
 
     rules({"popover", "popover contents"}, "background-color:" + card +
           ";color:" + text + ";border:1px solid " + border);

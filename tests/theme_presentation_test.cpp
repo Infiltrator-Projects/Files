@@ -9,6 +9,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace infiltrator::files {
 struct ThemeControllerTestAccess {
@@ -42,6 +43,25 @@ GtkWidget *find_css_class(GtkWidget *root, const char *name)
         if (GtkWidget *found = find_css_class(child, name); found != nullptr) return found;
     }
     return nullptr;
+}
+
+// Observe the actual GTK4 ColumnView row allocation, not merely its CSS
+// min-height. Native theme row/cell insets previously produced 45px rows.
+std::pair<int, int> row_geometry(GtkWidget *widget)
+{
+    if (widget == nullptr) return {0, 0};
+    if (g_strcmp0(gtk_widget_get_css_name(widget), "row") == 0 &&
+        gtk_widget_get_height(widget) > 0) {
+        return {1, gtk_widget_get_height(widget)};
+    }
+    std::pair<int, int> geometry{0, 0};
+    for (GtkWidget *child = gtk_widget_get_first_child(widget); child != nullptr;
+         child = gtk_widget_get_next_sibling(child)) {
+        const auto next = row_geometry(child);
+        geometry.first += next.first;
+        geometry.second = std::max(geometry.second, next.second);
+    }
+    return geometry;
 }
 
 bool style_matches(GtkWidget *widget, std::uint32_t rgb)
@@ -123,6 +143,22 @@ int main()
                 day_sidebar != nullptr && night_sidebar != nullptr &&
                 day_brand != nullptr && night_brand != nullptr,
                 "Files styling requires the canonical sidebar, status and brand surfaces");
+        GtkWidget *day_list = find_css_class(GTK_WIDGET(first->native_window()),
+                                              "ifm-file-list");
+        GtkWidget *night_list = find_css_class(GTK_WIDGET(second->native_window()),
+                                                "ifm-file-list");
+        require(day_list != nullptr && night_list != nullptr,
+                "The detail list must be materialised in both windows");
+        const auto day_rows = row_geometry(day_list);
+        const auto night_rows = row_geometry(night_list);
+        if (day_rows.first == 0 || night_rows.first == 0 ||
+            day_rows.second > 38 || night_rows.second > 38) {
+            std::cerr << "GTK details row geometry: Day=" << day_rows.first
+                      << " rows, " << day_rows.second << "px; Night="
+                      << night_rows.first << " rows, " << night_rows.second
+                      << "px (target: <=38px at test DPI)\n";
+            throw std::runtime_error("Details row density exceeds the compact layout");
+        }
         require(style_matches(day_status, day_palette->summary_rgb) &&
                 style_matches(night_status, night_palette->summary_rgb),
                 "Status text must use Common's readable summary text in both themes");

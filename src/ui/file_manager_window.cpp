@@ -239,7 +239,8 @@ void FileManagerWindow::build_ui(GtkApplication *application)
 
     GtkWidget *view_switcher = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     header_view_switcher_ = view_switcher;
-    gtk_widget_add_css_class(view_switcher, "linked");
+    // A native GTK linked group paints its own filled button backgrounds on
+    // some Day themes. Files supplies one consistent Common-owned treatment.
     gtk_widget_add_css_class(view_switcher, "ifm-view-switcher");
 
     list_view_button_ = gtk_toggle_button_new();
@@ -253,7 +254,7 @@ void FileManagerWindow::build_ui(GtkApplication *application)
                          gtk_image_new_from_icon_name("view-list-bullet-symbolic"));
     for (GtkWidget *button : {list_view_button_, icon_view_button_, compact_view_button_}) {
         gtk_widget_add_css_class(button, "ifm-view-button");
-        gtk_widget_set_size_request(button, 34, 34);
+        gtk_widget_set_size_request(button, 32, 32);
     }
     gtk_widget_set_tooltip_text(list_view_button_, "Details (Ctrl+1)");
     gtk_widget_set_tooltip_text(icon_view_button_, "Icons (Ctrl+2)");
@@ -1902,10 +1903,11 @@ void FileManagerWindow::on_factory_setup(GtkSignalListItemFactory *factory,
     const auto field = static_cast<DetailField>(encoded);
     if (field == DetailField::Name) {
         GtkWidget *cell = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        gtk_widget_add_css_class(cell, "ifm-detail-cell");
         gtk_widget_set_margin_start(cell, 8);
         gtk_widget_set_margin_end(cell, 6);
-        gtk_widget_set_margin_top(cell, 3);
-        gtk_widget_set_margin_bottom(cell, 3);
+        gtk_widget_set_margin_top(cell, 2);
+        gtk_widget_set_margin_bottom(cell, 2);
 
         GtkWidget *icon = gtk_image_new();
         gtk_image_set_pixel_size(GTK_IMAGE(icon), kDetailIconSize);
@@ -1933,8 +1935,8 @@ void FileManagerWindow::on_factory_setup(GtkSignalListItemFactory *factory,
     gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
     gtk_widget_set_margin_start(label, 6);
     gtk_widget_set_margin_end(label, 6);
-    gtk_widget_set_margin_top(label, 3);
-    gtk_widget_set_margin_bottom(label, 3);
+    gtk_widget_set_margin_top(label, 2);
+    gtk_widget_set_margin_bottom(label, 2);
     gtk_widget_set_halign(label, GTK_ALIGN_FILL);
     gtk_widget_add_css_class(label, "ifm-detail-secondary");
     gtk_list_item_set_child(item, label);
