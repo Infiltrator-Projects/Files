@@ -114,6 +114,7 @@ add_library(infiltrator-files-ui STATIC
     src/ui/destructive_operation_controller.cpp
     src/ui/detail_metadata.cpp
     src/ui/file_manager_window.cpp
+    src/ui/interaction_controller.cpp
     src/ui/item_operation_controller.cpp
     src/ui/journal_recovery_controller.cpp
     src/ui/operation_surface_install.cpp
@@ -163,8 +164,17 @@ if(BUILD_TESTING)
         set_tests_properties(window-state PROPERTIES
             ENVIRONMENT "G_DEBUG=fatal-criticals;GTK_A11Y=none;GSETTINGS_BACKEND=memory"
             TIMEOUT 45)
+
+        add_executable(interaction-surface-test tests/interaction_surface_test.cpp)
+        target_link_libraries(interaction-surface-test PRIVATE infiltrator-files-ui)
+        infiltrator_enable_warnings(interaction-surface-test)
+        add_test(NAME interaction-surface COMMAND "${DBUS_RUN_SESSION_EXECUTABLE}" --
+            "${XVFB_RUN_EXECUTABLE}" -a $<TARGET_FILE:interaction-surface-test>)
+        set_tests_properties(interaction-surface PROPERTIES
+            ENVIRONMENT "G_DEBUG=fatal-criticals;GTK_A11Y=none;GSETTINGS_BACKEND=memory"
+            TIMEOUT 45)
     else()
-        message(STATUS "Headless window-state test requires xvfb-run and dbus-run-session")
+        message(STATUS "Headless window-state/interaction-surface tests require xvfb-run and dbus-run-session")
     endif()
 
     infiltrator_add_core_test(operation-engine-test tests/operation_engine_test.cpp operation-engine)

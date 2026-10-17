@@ -4,6 +4,7 @@
 #include "batch_item_operation_controller.hpp"
 #include "create_folder_controller.hpp"
 #include "destructive_operation_controller.hpp"
+#include "interaction_controller.hpp"
 #include "item_operation_controller.hpp"
 #include "journal_recovery_controller.hpp"
 
@@ -23,6 +24,17 @@ void FileManagerWindow::install_operation_surface()
     new DestructiveOperationController(GTK_WINDOW(window_), directory_list_, primary_selection_, status_label_);
     new BatchItemOperationController(GTK_WINDOW(window_), directory_list_, selection_, status_label_);
     new JournalRecoveryController(GTK_WINDOW(window_), status_label_);
+
+    // Install the shared interaction layer last. It consolidates the controller
+    // actions already proven above instead of reimplementing mutation semantics.
+    new InteractionController(GTK_WINDOW(window_),
+                              directory_list_,
+                              selection_,
+                              primary_selection_,
+                              location_entry_,
+                              content_stack_,
+                              status_label_);
+
     operation_surface_installed_ = true;
 }
 
