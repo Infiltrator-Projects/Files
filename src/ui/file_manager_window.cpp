@@ -38,7 +38,7 @@ enum class DetailField {
 };
 
 struct DetailSortContext {
-    bool *folders_first{nullptr};
+    std::shared_ptr<std::atomic_bool> folders_first;
     DetailField field{DetailField::Name};
 };
 
@@ -83,7 +83,8 @@ int compare_detail_items(gconstpointer left, gconstpointer right, gpointer user_
     auto *right_info = G_FILE_INFO(const_cast<gpointer>(right));
     const auto *context = static_cast<const DetailSortContext *>(user_data);
     if (left_info == nullptr || right_info == nullptr || context == nullptr) return 0;
-    if (context->folders_first != nullptr && *context->folders_first) {
+    if (context->folders_first != nullptr &&
+        context->folders_first->load(std::memory_order_relaxed)) {
         const bool left_directory = g_file_info_get_file_type(left_info) == G_FILE_TYPE_DIRECTORY;
         const bool right_directory = g_file_info_get_file_type(right_info) == G_FILE_TYPE_DIRECTORY;
         if (left_directory != right_directory) return left_directory ? -1 : 1;
@@ -183,6 +184,7 @@ FileManagerWindow::~FileManagerWindow()
     }
     g_clear_object(&selection_);
     g_clear_object(&visibility_filter_);
+    filter_hidden_state_ = nullptr; // Owned by GtkCustomFilter, which may outlive the window.
     g_clear_object(&directory_list_);
     if (current_location_ != nullptr) {
         g_object_unref(current_location_);
@@ -360,7 +362,10 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     g_signal_connect(directory_list_, "notify::loading", G_CALLBACK(on_loading_changed), this);
     g_signal_connect(directory_list_, "notify::error", G_CALLBACK(on_loading_changed), this);
 
-    visibility_filter_ = GTK_CUSTOM_FILTER(gtk_custom_filter_new(filter_visible, this, nullptr));
+    filter_hidden_state_ = new gboolean(FALSE);
+    visibility_filter_ = GTK_CUSTOM_FILTER(gtk_custom_filter_new(
+        filter_visible, filter_hidden_state_,
+        [](gpointer data) { delete static_cast<gboolean *>(data); }));
     g_object_ref(visibility_filter_);
     GtkFilterListModel *filtered = gtk_filter_list_model_new(
         G_LIST_MODEL(g_object_ref(directory_list_)), GTK_FILTER(visibility_filter_));
@@ -405,7 +410,7 @@ void FileManagerWindow::build_ui(GtkApplication *application)
         }
 
         GtkSorter *sorter = GTK_SORTER(gtk_custom_sorter_new(
-            compare_detail_items, new DetailSortContext{&folders_first_, field},
+            compare_detail_items, new DetailSortContext{folders_first_state_, field},
             [](gpointer data) { delete static_cast<DetailSortContext *>(data); }));
         gtk_column_view_column_set_sorter(column, sorter);
         g_object_unref(sorter);
@@ -491,9 +496,10 @@ void FileManagerWindow::build_ui(GtkApplication *application)
 
 gboolean FileManagerWindow::filter_visible(gpointer item, gpointer user_data)
 {
-    auto *self = static_cast<FileManagerWindow *>(user_data);
+    const auto *shown = static_cast<const gboolean *>(user_data);
     auto *info = G_FILE_INFO(item);
-    return self->show_hidden_ || (info != nullptr && !g_file_info_get_is_hidden(info));
+    return (shown != nullptr && *shown) ||
+           (info != nullptr && !g_file_info_get_is_hidden(info));
 }
 
 void FileManagerWindow::load_preferences()
@@ -514,6 +520,8 @@ void FileManagerWindow::load_preferences()
     }
     g_key_file_unref(keys);
     g_free(path);
+    if (filter_hidden_state_ != nullptr) *filter_hidden_state_ = show_hidden_;
+    folders_first_state_->store(folders_first_, std::memory_order_relaxed);
     // Loading settings must not create config directories as a side effect.
 }
 
@@ -570,6 +578,7 @@ void FileManagerWindow::notify_sort_changed()
 void FileManagerWindow::toggle_show_hidden()
 {
     show_hidden_ = !show_hidden_;
+    if (filter_hidden_state_ != nullptr) *filter_hidden_state_ = show_hidden_;
     if (visibility_filter_ != nullptr)
         gtk_filter_changed(GTK_FILTER(visibility_filter_), GTK_FILTER_CHANGE_DIFFERENT);
     save_preferences();
@@ -579,6 +588,7 @@ void FileManagerWindow::toggle_show_hidden()
 void FileManagerWindow::toggle_folders_first()
 {
     folders_first_ = !folders_first_;
+    folders_first_state_->store(folders_first_, std::memory_order_relaxed);
     notify_sort_changed();
     save_preferences();
 }

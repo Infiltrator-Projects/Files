@@ -7,6 +7,7 @@
 
 #include <gtk/gtk.h>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -194,6 +195,9 @@ private:
     GtkDirectoryList *directory_list_{nullptr};
     GtkMultiSelection *selection_{nullptr};
     GtkCustomFilter *visibility_filter_{nullptr};
+    gboolean *filter_hidden_state_{nullptr};
+    std::shared_ptr<std::atomic_bool> folders_first_state_{
+        std::make_shared<std::atomic_bool>(true)};
     GtkSingleSelection *primary_selection_{nullptr};
     GFile *current_location_{nullptr};
     GFileMonitor *temporal_policy_monitor_{nullptr};
