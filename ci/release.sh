@@ -46,7 +46,8 @@ load_artifacts() {
     cd "$RELEASE_DIRECTORY"
     [[ -f "$RELEASE_DEB" ]] || fail "missing release asset: $RELEASE_DEB"
     [[ -f "$RELEASE_NATIVE" ]] || fail "missing release asset: $RELEASE_NATIVE"
-    [[ -x "$RELEASE_NATIVE" ]] || fail "native installer is not executable: $RELEASE_NATIVE"
+    # GitHub artifact transport preserves file bytes, not POSIX executable mode.
+    # Integrity is established by SHA256SUMS and the CI execution test before upload.
     [[ -f "$RELEASE_SUMS" ]] || fail "missing release asset: $RELEASE_SUMS"
     sha256sum -c "$RELEASE_SUMS"
     [[ "$(dpkg-deb -f "$RELEASE_DEB" Package)" == 'files' ]] ||
