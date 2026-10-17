@@ -71,8 +71,8 @@ void ThumbnailCache::bind(GtkImage *image, GFileInfo *info, GFile *parent,
     g_object_set_data_full(G_OBJECT(image), "ifm-thumb-key", nullptr, nullptr);
     if (info == nullptr || parent == nullptr || !g_file_is_native(parent) ||
         g_file_info_get_file_type(info) != G_FILE_TYPE_REGULAR ||
-        g_file_info_get_size(info) > kMaximumImageBytes ||
-        state_->in_flight.size() >= kMaximumOutstandingDecodes)
+        g_file_info_get_size(info) < 0 ||
+        g_file_info_get_size(info) > kMaximumImageBytes)
         return;
     const char *type = g_file_info_get_content_type(info);
     if (type == nullptr || !g_str_has_prefix(type, "image/")) return;
@@ -85,6 +85,8 @@ void ThumbnailCache::bind(GtkImage *image, GFileInfo *info, GFile *parent,
     const std::string key = std::string(path) + ":" +
         std::to_string(g_file_info_get_attribute_uint64(
             info, G_FILE_ATTRIBUTE_TIME_MODIFIED)) + ":" +
+        std::to_string(g_file_info_get_attribute_uint32(
+            info, G_FILE_ATTRIBUTE_TIME_MODIFIED_NSEC)) + ":" +
         std::to_string(g_file_info_get_size(info)) + ":" +
         std::to_string(pixel_size);
     g_object_set_data_full(G_OBJECT(image), "ifm-thumb-key",
@@ -94,7 +96,9 @@ void ThumbnailCache::bind(GtkImage *image, GFileInfo *info, GFile *parent,
         g_free(path);
         return;
     }
-    if (state_->failed.find(key) != state_->failed.end()) {
+    if (state_->failed.find(key) != state_->failed.end() ||
+        (state_->in_flight.find(key) == state_->in_flight.end() &&
+         state_->in_flight.size() >= kMaximumOutstandingDecodes)) {
         g_free(path);
         return;
     }

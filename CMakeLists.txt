@@ -168,6 +168,15 @@ if(BUILD_TESTING)
             ENVIRONMENT "G_DEBUG=fatal-criticals;GTK_A11Y=none;GSETTINGS_BACKEND=memory"
             TIMEOUT 45)
 
+        add_executable(workspace-navigation-test tests/workspace_navigation_test.cpp)
+        target_link_libraries(workspace-navigation-test PRIVATE infiltrator-files-ui)
+        infiltrator_enable_warnings(workspace-navigation-test)
+        add_test(NAME workspace-navigation COMMAND "${DBUS_RUN_SESSION_EXECUTABLE}" --
+            "${XVFB_RUN_EXECUTABLE}" -a $<TARGET_FILE:workspace-navigation-test>)
+        set_tests_properties(workspace-navigation PROPERTIES
+            ENVIRONMENT "G_DEBUG=fatal-criticals;GTK_A11Y=none;GSETTINGS_BACKEND=memory"
+            TIMEOUT 45)
+
         add_executable(interaction-surface-test tests/interaction_surface_test.cpp)
         target_link_libraries(interaction-surface-test PRIVATE infiltrator-files-ui)
         infiltrator_enable_warnings(interaction-surface-test)

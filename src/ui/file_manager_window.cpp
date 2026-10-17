@@ -1566,12 +1566,15 @@ void FileManagerWindow::on_inline_entry_activate(GtkEntry *entry, gpointer user_
         g_object_get_data(G_OBJECT(self->window_), "ifm-item-controller"));
     if (operations != nullptr) operations->rename_selected_to(new_name);
 }
-gboolean FileManagerWindow::on_inline_key(GtkEventControllerKey *, guint keyval,
+gboolean FileManagerWindow::on_inline_key(GtkEventControllerKey *controller, guint keyval,
                                           guint, GdkModifierType, gpointer user_data)
 {
     (void)user_data;
     if (keyval != GDK_KEY_Escape) return FALSE;
-    return FALSE;
+    GtkWidget *entry = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(controller));
+    GtkWidget *stack = entry != nullptr ? gtk_widget_get_parent(entry) : nullptr;
+    if (GTK_IS_STACK(stack)) gtk_stack_set_visible_child_name(GTK_STACK(stack), "name");
+    return TRUE;
 }
 void FileManagerWindow::on_inline_focus_leave(GtkEventControllerFocus *focus, gpointer)
 {
