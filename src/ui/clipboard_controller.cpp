@@ -70,6 +70,15 @@ ClipboardController::ClipboardController(GtkWindow *window,
 
     g_object_ref(directory_list_);
     g_object_ref(selection_);
+    GdkDisplay *display = gtk_widget_get_display(GTK_WIDGET(window_));
+    if (display != nullptr) {
+        clipboard_ = gdk_display_get_clipboard(display);
+        if (clipboard_ != nullptr) {
+            g_object_ref(clipboard_);
+            clipboard_changed_handler_ = g_signal_connect(
+                clipboard_, "changed", G_CALLBACK(on_clipboard_changed), this);
+        }
+    }
     g_object_set_data(G_OBJECT(window_), "ifm-clipboard-controller", this);
 
     install_menu_actions();
@@ -88,6 +97,12 @@ ClipboardController::ClipboardController(GtkWindow *window,
 
 ClipboardController::~ClipboardController()
 {
+    if (clipboard_ != nullptr) {
+        if (clipboard_changed_handler_ != 0U)
+            g_signal_handler_disconnect(clipboard_, clipboard_changed_handler_);
+        g_clear_object(&owned_content_);
+        g_clear_object(&clipboard_);
+    }
     if (window_ != nullptr)
         g_object_set_data(G_OBJECT(window_), "ifm-clipboard-controller", nullptr);
     if (selection_ != nullptr) {
@@ -242,6 +257,16 @@ void ClipboardController::on_location_changed(GObject *object,
     static_cast<ClipboardController *>(user_data)->update_action_state();
 }
 
+void ClipboardController::on_clipboard_changed(GdkClipboard *clipboard, gpointer data)
+{
+    auto *self = static_cast<ClipboardController *>(data);
+    if (gdk_clipboard_get_content(clipboard) == self->owned_content_) return;
+    self->mode_ = Mode::None;
+    self->sources_.clear();
+    g_clear_object(&self->owned_content_);
+    self->update_action_state();
+}
+
 void ClipboardController::capture_selection(const Mode mode)
 {
     if (busy_ || reading_external_clipboard_ || mode == Mode::None) {
@@ -277,7 +302,13 @@ void ClipboardController::paste()
         return;
     }
 
-    if (!sources_.empty() && mode_ != Mode::None) {
+    if (clipboard_ != nullptr && owned_content_ != nullptr &&
+        gdk_clipboard_get_content(clipboard_) != owned_content_) {
+        mode_ = Mode::None;
+        sources_.clear();
+        g_clear_object(&owned_content_);
+    }
+    if (!sources_.empty() && mode_ != Mode::None && owned_content_ != nullptr) {
         if (mode_ == Mode::Cut) {
             const bool all_already_here = std::all_of(
                 sources_.begin(), sources_.end(),
@@ -534,14 +565,7 @@ void ClipboardController::on_conflict_chosen(GObject *source_object,
 
 void ClipboardController::publish_clipboard_text()
 {
-    if (window_ == nullptr) {
-        return;
-    }
-    GdkDisplay *display = gtk_widget_get_display(GTK_WIDGET(window_));
-    GdkClipboard *clipboard = display != nullptr ? gdk_display_get_clipboard(display) : nullptr;
-    if (clipboard == nullptr) {
-        return;
-    }
+    if (clipboard_ == nullptr) return;
 
     std::string payload;
     for (const std::string &source : sources_) {
@@ -557,7 +581,19 @@ void ClipboardController::publish_clipboard_text()
         payload += uri;
         g_free(uri);
     }
-    gdk_clipboard_set_text(clipboard, payload.c_str());
+    GdkContentProvider *provider = gdk_content_provider_new_typed(
+        G_TYPE_STRING, payload.c_str());
+    GdkContentProvider *previous = owned_content_;
+    owned_content_ = provider;
+    if (!gdk_clipboard_set_content(clipboard_, provider)) {
+        owned_content_ = previous;
+        g_object_unref(provider);
+        mode_ = Mode::None;
+        sources_.clear();
+        set_status("Unable to claim the system clipboard.");
+    } else if (previous != nullptr) {
+        g_object_unref(previous);
+    }
 }
 
 void ClipboardController::refresh_cut_state_after_paste(

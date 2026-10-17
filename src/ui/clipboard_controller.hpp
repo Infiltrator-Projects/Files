@@ -37,6 +37,7 @@ private:
     };
 
     static void on_window_finalized(gpointer user_data, GObject *where_object_was);
+    static void on_clipboard_changed(GdkClipboard *clipboard, gpointer user_data);
     static void on_copy_clicked(GtkButton *button, gpointer user_data);
     static void on_cut_clicked(GtkButton *button, gpointer user_data);
     static void on_paste_clicked(GtkButton *button, gpointer user_data);
@@ -93,6 +94,9 @@ private:
     GtkWidget *copy_button_{nullptr};
     GtkWidget *cut_button_{nullptr};
     GtkWidget *paste_button_{nullptr};
+    GdkClipboard *clipboard_{nullptr};
+    GdkContentProvider *owned_content_{nullptr};
+    gulong clipboard_changed_handler_{0U};
 
     Mode mode_{Mode::None};
     std::vector<std::string> sources_;
