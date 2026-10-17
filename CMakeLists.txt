@@ -120,7 +120,8 @@ add_library(infiltrator-files-ui STATIC
     src/ui/item_operation_controller.cpp
     src/ui/journal_recovery_controller.cpp
     src/ui/operation_surface_install.cpp
-    src/ui/theme_controller.cpp)
+    src/ui/theme_controller.cpp
+    src/ui/thumbnail_cache.cpp)
 target_include_directories(infiltrator-files-ui PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(infiltrator-files-ui PUBLIC cxx_std_20)

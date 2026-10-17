@@ -129,6 +129,7 @@ guint find_item_position(GListModel *model, GFileInfo *needle)
 FileManagerWindow::FileManagerWindow(GtkApplication *application)
 {
     build_ui(application);
+    thumbnails_ = std::make_unique<ThumbnailCache>();
     g_object_set_data(G_OBJECT(window_), "ifm-window-controller", this);
     apply_theme();
     arm_temporal_policy_monitor();
@@ -147,6 +148,7 @@ FileManagerWindow::~FileManagerWindow()
 {
     // Stop external callbacks before any UI/model references owned by this object are released.
     mounted_places_monitor_.reset();
+    thumbnails_.reset();
     if (temporal_policy_monitor_ != nullptr) {
         g_signal_handlers_disconnect_by_data(temporal_policy_monitor_, this);
         g_object_unref(temporal_policy_monitor_);
@@ -1673,6 +1675,9 @@ void FileManagerWindow::on_factory_bind(GtkSignalListItemFactory *factory,
         }
         const char *display_name = g_file_info_get_display_name(info);
         gtk_label_set_text(name, display_name != nullptr ? display_name : "");
+        if (self->thumbnails_ != nullptr)
+            self->thumbnails_->bind(icon, info,
+                gtk_directory_list_get_file(self->directory_list_), kDetailIconSize);
         break;
     }
     case DetailField::Type: {
@@ -1817,6 +1822,11 @@ void FileManagerWindow::on_icon_factory_bind(GtkSignalListItemFactory *factory,
     static_cast<FileManagerWindow *>(user_data)->cancel_inline_editor(tile);
     const char *display_name = g_file_info_get_display_name(info);
     gtk_label_set_text(name, display_name != nullptr ? display_name : "");
+    if (static_cast<FileManagerWindow *>(user_data)->thumbnails_ != nullptr)
+        static_cast<FileManagerWindow *>(user_data)->thumbnails_->bind(
+            icon, info,
+            gtk_directory_list_get_file(static_cast<FileManagerWindow *>(user_data)->directory_list_),
+            gtk_image_get_pixel_size(icon));
 }
 
 void FileManagerWindow::on_icon_factory_unbind(GtkSignalListItemFactory *, GtkListItem *item, gpointer user_data)

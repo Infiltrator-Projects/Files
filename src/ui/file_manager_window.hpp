@@ -3,6 +3,7 @@
 
 #include "../core/location.hpp"
 #include "../core/mounted_places.hpp"
+#include "thumbnail_cache.hpp"
 
 #include <gtk/gtk.h>
 
@@ -165,6 +166,7 @@ private:
     GtkWidget *status_label_{nullptr};
     GtkWidget *spinner_{nullptr};
     std::unique_ptr<MountedPlacesMonitor> mounted_places_monitor_;
+    std::unique_ptr<ThumbnailCache> thumbnails_;
     std::vector<MountedPlace> mounted_places_;
     std::vector<MountedPlaceRow> mounted_place_rows_;
     std::optional<MountedPlace> unavailable_mounted_place_;
