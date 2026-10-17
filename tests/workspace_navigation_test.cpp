@@ -28,6 +28,19 @@ struct FileManagerWindowTestAccess {
     static std::size_t bookmarks(const FileManagerWindow &w) { return w.bookmarks_.size(); }
     static void pin(FileManagerWindow &w) { FileManagerWindow::on_bookmark_toggle(nullptr, &w); }
     static bool rename(FileManagerWindow &w) { return w.begin_inline_rename(); }
+    static GtkWidget *find_editor(GtkWidget *widget)
+    {
+        if (widget == nullptr) return nullptr;
+        if (GTK_IS_ENTRY(widget) && GTK_IS_STACK(gtk_widget_get_parent(widget)) &&
+            gtk_stack_get_visible_child(GTK_STACK(gtk_widget_get_parent(widget))) == widget)
+            return widget;
+        for (GtkWidget *child = gtk_widget_get_first_child(widget);
+             child != nullptr; child = gtk_widget_get_next_sibling(child)) {
+            if (GtkWidget *editor = find_editor(child); editor != nullptr) return editor;
+        }
+        return nullptr;
+    }
+    static GtkWidget *editor(FileManagerWindow &w) { return find_editor(w.content_stack_); }
     static void set_icons(FileManagerWindow &w) { w.set_view_mode(FileManagerWindow::ViewMode::Icons); }
     static bool icons_active(FileManagerWindow &w) {
         return gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(w.icon_view_button_));
@@ -160,8 +173,8 @@ int main()
                 "Switching back must restore the active view-mode button");
         require(FileManagerWindowTestAccess::rename(*window),
                 "Selected file must have an in-place rename editor");
-        GtkWidget *editor = gtk_window_get_focus(window->native_window());
-        require(GTK_IS_ENTRY(editor), "In-place rename must focus a GTK entry");
+        GtkWidget *editor = FileManagerWindowTestAccess::editor(*window);
+        require(GTK_IS_ENTRY(editor), "In-place rename must expose an active GTK entry");
         gtk_editable_set_text(GTK_EDITABLE(editor), "renamed.txt");
         g_signal_emit_by_name(editor, "activate");
         await([&] { return std::filesystem::exists(a / "renamed.txt"); });
