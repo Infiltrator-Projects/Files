@@ -2,7 +2,7 @@
 Type=Application
 Name=Files
 Comment=Browse and manage files with Files
-Exec=files
+Exec=/Programs/files
 Icon=system-file-manager
 Terminal=false
 Categories=System;FileTools;FileManager;

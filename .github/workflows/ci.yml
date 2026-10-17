@@ -25,7 +25,7 @@ concurrency:
 jobs:
   build-test-package:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 50
     outputs:
       version: ${{ steps.release.outputs.version }}
       release_intent: ${{ steps.release.outputs.release_intent }}
@@ -59,8 +59,11 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "release_intent=$release_intent" >> "$GITHUB_OUTPUT"
 
-      - name: Validate release authority syntax
-        run: bash -n ci/release.sh
+      - name: Validate release and native-installer syntax
+        run: |
+          bash -n ci/release.sh
+          bash -n ci/build-native-installer.sh
+          bash -n packaging/native-installer.sh
 
       - name: Install build dependencies
         env:
@@ -107,18 +110,45 @@ jobs:
           tmp=$(mktemp -d)
           trap 'rm -rf "$tmp"' EXIT
           dpkg-deb -x "$deb" "$tmp/root"
-          test -x "$tmp/root/usr/bin/files"
+          test -x "$tmp/root/Programs/files"
+          test ! -e "$tmp/root/usr/bin/files"
           test -f "$tmp/root/usr/share/applications/files.desktop"
+          grep -Fxq 'Exec=/Programs/files' "$tmp/root/usr/share/applications/files.desktop"
+          test -f "$tmp/root/usr/share/doc/files/BUILD-INFO"
+          grep -Fxq 'Profile: release' "$tmp/root/usr/share/doc/files/BUILD-INFO"
 
           if [[ "$deb" != "$canonical" ]]; then
             mv "$deb" "$canonical"
           fi
 
+      - name: Build and qualify aggressive native installer
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ./ci/build-native-installer.sh dist
+          native="dist/files-${VERSION}-native-installer.run"
+          test -x "$native"
+
+          sudo "$native" --system-package-mode
+
+          test -x /Programs/files
+          test ! -e /usr/bin/files
+          test ! -e /System/Programs
+          grep -Fxq 'Exec=/Programs/files' /usr/share/applications/files.desktop
+          grep -Fxq 'Profile: aggressive' /usr/share/doc/files/BUILD-INFO
+          grep -Fxq 'PGO: trained two-pass profile' /usr/share/doc/files/BUILD-INFO
+          grep -Fq -- '-O3' /usr/share/doc/files/BUILD-INFO
+          grep -Fq -- '-march=native' /usr/share/doc/files/BUILD-INFO
+
           (
             cd dist
-            sha256sum "files_${VERSION}_amd64.deb" > SHA256SUMS
+            sha256sum "files_${VERSION}_amd64.deb" \
+                      "files-${VERSION}-native-installer.run" > SHA256SUMS
+            sha256sum -c SHA256SUMS
           )
-          (cd dist && sha256sum -c SHA256SUMS)
 
       - name: Preserve exact tested release package
         if: steps.release.outputs.release_intent == 'true'
@@ -127,6 +157,7 @@ jobs:
           name: release-package-${{ github.sha }}
           path: |
             dist/files_${{ steps.release.outputs.version }}_amd64.deb
+            dist/files-${{ steps.release.outputs.version }}-native-installer.run
             dist/SHA256SUMS
           if-no-files-found: error
           retention-days: 7

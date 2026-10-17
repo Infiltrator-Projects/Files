@@ -16,6 +16,9 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(INFILTRATOR_BUILD_PROFILE "release" CACHE STRING "Files build profile recorded in BUILD-INFO")
+set(INFILTRATOR_PGO_STATUS "not trained" CACHE STRING "Files PGO status recorded in BUILD-INFO")
+
 set(INFILTRATR_COMMON_MINIMUM_VERSION "1.19.46")
 set(INFILTRATR_COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/infiltratr-common")
 
@@ -172,10 +175,22 @@ if(BUILD_TESTING)
     infiltrator_add_core_test(operation-journal-test tests/operation_journal_test.cpp operation-journal)
 endif()
 
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/BUILD-INFO"
+    "Profile: ${INFILTRATOR_BUILD_PROFILE}\n"
+    "PGO: ${INFILTRATOR_PGO_STATUS}\n"
+    "C flags: ${CMAKE_C_FLAGS_RELEASE}\n"
+    "CXX flags: ${CMAKE_CXX_FLAGS_RELEASE}\n")
+
+# Native filesystem contract: launchable Infiltrator applications live directly
+# under /Programs. Desktop integration remains in the host's standard metadata
+# locations and points at the canonical executable explicitly, so a standalone
+# Files install works even when /Programs is not yet in the shell PATH.
 install(TARGETS files
-    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    RUNTIME DESTINATION "/Programs")
 install(FILES data/files.desktop
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+    DESTINATION "/usr/share/applications")
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/BUILD-INFO"
+    DESTINATION "/usr/share/doc/files")
 
 set(CPACK_PACKAGE_NAME "files")
 set(CPACK_PACKAGE_VENDOR "Infiltrator Projects")
@@ -186,4 +201,6 @@ set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+set(CPACK_SET_DESTDIR ON)
+set(CPACK_PACKAGING_INSTALL_PREFIX "/")
 include(CPack)

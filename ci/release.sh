@@ -40,10 +40,13 @@ load_artifacts() {
     RELEASE_VERSION=$(release_version)
     RELEASE_DIRECTORY=$(cd -- "$directory" && pwd)
     RELEASE_DEB="files_${RELEASE_VERSION}_${RELEASE_ARCHITECTURE}.deb"
+    RELEASE_NATIVE="files-${RELEASE_VERSION}-native-installer.run"
     RELEASE_SUMS='SHA256SUMS'
 
     cd "$RELEASE_DIRECTORY"
     [[ -f "$RELEASE_DEB" ]] || fail "missing release asset: $RELEASE_DEB"
+    [[ -f "$RELEASE_NATIVE" ]] || fail "missing release asset: $RELEASE_NATIVE"
+    [[ -x "$RELEASE_NATIVE" ]] || fail "native installer is not executable: $RELEASE_NATIVE"
     [[ -f "$RELEASE_SUMS" ]] || fail "missing release asset: $RELEASE_SUMS"
     sha256sum -c "$RELEASE_SUMS"
     [[ "$(dpkg-deb -f "$RELEASE_DEB" Package)" == 'files' ]] ||
@@ -70,9 +73,10 @@ publish_release() {
 
     local tag="v${RELEASE_VERSION}"
     local deb="$RELEASE_DIRECTORY/$RELEASE_DEB"
+    local native="$RELEASE_DIRECTORY/$RELEASE_NATIVE"
     local sums="$RELEASE_DIRECTORY/$RELEASE_SUMS"
     local expected_assets published_assets
-    expected_assets=$(printf '%s\n%s\n' "$RELEASE_SUMS" "$RELEASE_DEB" | sort)
+    expected_assets=$(printf '%s\n%s\n%s\n' "$RELEASE_SUMS" "$RELEASE_DEB" "$RELEASE_NATIVE" | sort)
     git -C "$ROOT" fetch origin --tags
     if git -C "$ROOT" rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null; then
         [[ "$(git -C "$ROOT" rev-parse "$tag^{commit}")" == "$expected_sha" ]] ||
@@ -93,7 +97,7 @@ publish_release() {
     draft=$(jq -r .isDraft "$state")
     rm -f "$state"
     if [[ "$draft" == true ]]; then
-        gh release upload "$tag" "$deb" "$sums" --repo "$GITHUB_REPOSITORY" --clobber
+        gh release upload "$tag" "$deb" "$native" "$sums" --repo "$GITHUB_REPOSITORY" --clobber
     fi
     verify_remote() {
         local destination
@@ -102,6 +106,7 @@ publish_release() {
         published_assets=$(find "$destination" -maxdepth 1 -type f -printf '%f\n' | sort)
         [[ "$published_assets" == "$expected_assets" ]] || fail "unexpected release asset set"
         cmp "$deb" "$destination/$RELEASE_DEB"
+        cmp "$native" "$destination/$RELEASE_NATIVE"
         cmp "$sums" "$destination/$RELEASE_SUMS"
         rm -rf "$destination"
     }
