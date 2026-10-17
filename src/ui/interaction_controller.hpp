@@ -114,6 +114,7 @@ private:
     GtkWidget *restore_target_{nullptr};
     GtkWidget *delete_target_{nullptr};
 
+    std::vector<GtkWidget *> open_in_tab_actions_;
     std::vector<ProxyAction> overflow_proxies_;
     std::vector<ProxyAction> context_proxies_;
 

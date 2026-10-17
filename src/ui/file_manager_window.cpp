@@ -796,6 +796,12 @@ void FileManagerWindow::set_view_mode(const ViewMode mode)
     }
 
     view_mode_ = mode;
+    GtkWidget *active_button = mode == ViewMode::List ? list_view_button_ :
+        mode == ViewMode::Icons ? icon_view_button_ : compact_view_button_;
+    if (GTK_IS_TOGGLE_BUTTON(active_button) &&
+        !gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(active_button))) {
+        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(active_button), TRUE);
+    }
     switch (mode) {
     case ViewMode::List:
         gtk_stack_set_visible_child_name(GTK_STACK(content_stack_), "list");
@@ -1109,6 +1115,7 @@ void FileManagerWindow::add_tab(GFile *file)
     GFile *target = G_FILE(g_object_ref(file));
     remember_tab();
     tabs_.push_back(TabState{});
+    tabs_.back().view = view_mode_;
     active_tab_ = tabs_.size() - 1U;
     history_.clear();
     history_index_ = 0;

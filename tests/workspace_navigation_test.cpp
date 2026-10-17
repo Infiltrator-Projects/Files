@@ -27,6 +27,11 @@ struct FileManagerWindowTestAccess {
     static std::size_t history(const FileManagerWindow &w) { return w.history_.size(); }
     static std::size_t bookmarks(const FileManagerWindow &w) { return w.bookmarks_.size(); }
     static void pin(FileManagerWindow &w) { FileManagerWindow::on_bookmark_toggle(nullptr, &w); }
+    static bool rename(FileManagerWindow &w) { return w.begin_inline_rename(); }
+    static void set_icons(FileManagerWindow &w) { w.set_view_mode(FileManagerWindow::ViewMode::Icons); }
+    static bool icons_active(FileManagerWindow &w) {
+        return gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(w.icon_view_button_));
+    }
     static GtkDirectoryList *directory(FileManagerWindow &w) { return w.directory_list_; }
     static GtkMultiSelection *selection(FileManagerWindow &w) { return w.selection_; }
     static std::string uri(FileManagerWindow &w)
@@ -131,6 +136,7 @@ int main()
                 FileManagerWindowTestAccess::directory(*window))) == 1; });
         select_name(*window, "selected.txt");
         FileManagerWindowTestAccess::pin(*window);
+        FileManagerWindowTestAccess::set_icons(*window);
         require(FileManagerWindowTestAccess::bookmarks(*window) == 1,
                 "Pinning must append one bookmark");
         FileManagerWindowTestAccess::add(*window, b);
@@ -139,6 +145,8 @@ int main()
         FileManagerWindowTestAccess::navigate(*window, c);
         require(FileManagerWindowTestAccess::history(*window) == 2,
                 "New tab must retain its own local history");
+        require(FileManagerWindowTestAccess::icons_active(*window),
+                "New tab must inherit the current presentation mode");
         FileManagerWindowTestAccess::activate(*window, 0);
         await([&] { return !gtk_directory_list_is_loading(
             FileManagerWindowTestAccess::directory(*window)) &&
@@ -148,6 +156,15 @@ int main()
                 "Tab activation must restore its own directory");
         require(selected_name(*window, "selected.txt"),
                 "Tab activation must restore selection by source filename");
+        require(FileManagerWindowTestAccess::icons_active(*window),
+                "Switching back must restore the active view-mode button");
+        require(FileManagerWindowTestAccess::rename(*window),
+                "Selected file must have an in-place rename editor");
+        GtkWidget *editor = gtk_window_get_focus(window->native_window());
+        require(GTK_IS_ENTRY(editor), "In-place rename must focus a GTK entry");
+        gtk_editable_set_text(GTK_EDITABLE(editor), "renamed.txt");
+        g_signal_emit_by_name(editor, "activate");
+        await([&] { return std::filesystem::exists(a / "renamed.txt"); });
         FileManagerWindowTestAccess::activate(*window, 1);
         require(FileManagerWindowTestAccess::uri(*window) == uri(c),
                 "Second tab must preserve independent navigation");

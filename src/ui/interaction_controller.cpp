@@ -326,6 +326,7 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
     GtkWidget *open_tab = gtk_button_new_with_label("Open folder in new tab");
     gtk_widget_add_css_class(open_tab, "flat");
     gtk_box_append(GTK_BOX(box), open_tab);
+    open_in_tab_actions_.push_back(open_tab);
     g_signal_connect(open_tab, "clicked", G_CALLBACK(+[](GtkButton *, gpointer data) {
         auto *self = static_cast<InteractionController *>(data);
         if (self->window_ != nullptr) {
@@ -654,6 +655,13 @@ void InteractionController::update_action_state()
 
     update(overflow_proxies_);
     update(context_proxies_);
+    auto *info = G_FILE_INFO(gtk_single_selection_get_selected_item(primary_selection_));
+    const bool folder = count == 1U && info != nullptr &&
+        g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY;
+    for (GtkWidget *button : open_in_tab_actions_) {
+        gtk_widget_set_visible(button, folder);
+        gtk_widget_set_sensitive(button, folder);
+    }
 
     if (overflow_open_button_ != nullptr) {
         gtk_widget_set_sensitive(overflow_open_button_, count == 1U);
