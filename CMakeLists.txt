@@ -145,6 +145,7 @@ if(BUILD_TESTING)
     infiltrator_add_core_test(location-model-test tests/location_model_test.cpp location-model)
 
     add_library(calendar-date-test-fixture MODULE tests/calendar_date_fixture.c)
+    target_link_libraries(calendar-date-test-fixture PRIVATE InfiltratrCommon::Portable)
 
     add_executable(detail-metadata-test tests/detail_metadata_test.cpp)
     target_compile_definitions(detail-metadata-test PRIVATE
