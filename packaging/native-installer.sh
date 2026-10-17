@@ -119,7 +119,13 @@ CC=gcc CXX=g++ cmake -S "$source_root" -B "$build_root" -G Ninja \
     -DINFILTRATOR_PGO_STATUS='profile generation pass' \
     -DBUILD_TESTING=ON
 cmake --build "$build_root" --parallel
-ctest --test-dir "$build_root" --output-on-failure
+
+# Release CI already runs the complete Files test suite. The native installer
+# uses a deterministic subset only as its PGO workload: installation must not
+# fail because a target machine has a different live mount or desktop-session
+# topology than the release runner.
+ctest --test-dir "$build_root" --output-on-failure \
+    -E '^(mounted-places|window-state)$'
 
 printf 'Files %s: final aggressive native PGO build...\n' "$version"
 rm -rf -- "$build_root"
