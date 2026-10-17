@@ -138,7 +138,7 @@ On a Debian-family development system with GTK 4 development files installed. In
 
 ```bash
 git clone --recurse-submodules https://github.com/Infiltrator-Projects/Files.git
-cd Infiltrator-File-Manager
+cd Files
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
