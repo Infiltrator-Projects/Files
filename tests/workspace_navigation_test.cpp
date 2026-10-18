@@ -187,8 +187,6 @@ int main()
         std::filesystem::create_directories(c);
         std::ofstream(a / "selected.txt") << "Selected";
         std::ofstream(a / ".hidden.txt") << "Hidden";
-        std::cerr << "workspace-phase: create window\n";
-        std::cerr << "WORKSPACE CHECK 1\n";
         auto *window = new FileManagerWindow(application);
         window->install_operation_surface();
         window->present();
@@ -205,8 +203,6 @@ int main()
         window->toggle_show_hidden();
         require(FileManagerWindowTestAccess::visible_count(*window) == 1U,
                 "Hiding hidden files must restore the visible model");
-        std::cerr << "workspace-phase: search\n";
-        std::cerr << "WORKSPACE CHECK 2\n";
         FileManagerWindowTestAccess::search(*window, "SELECTED");
         await([&] { return FileManagerWindowTestAccess::visible_count(*window) == 1U; });
         FileManagerWindowTestAccess::search(*window, "no-such-match");
@@ -216,13 +212,10 @@ int main()
         require(FileManagerWindowTestAccess::recents(*window) >= 1U,
                 "Visited native home folders should appear in Recent");
         select_name(*window, "selected.txt");
-        std::cerr << "workspace-phase: bookmark\n";
         FileManagerWindowTestAccess::pin(*window);
         FileManagerWindowTestAccess::set_icons(*window);
         require(FileManagerWindowTestAccess::bookmarks(*window) == 1,
                 "Pinning must append one bookmark");
-        std::cerr << "workspace-phase: tabs\n";
-        std::cerr << "WORKSPACE CHECK 3\n";
         FileManagerWindowTestAccess::add(*window, b);
         require(FileManagerWindowTestAccess::tabs(*window) == 2,
                 "New tab must preserve existing tab");
@@ -242,7 +235,6 @@ int main()
                 "Tab activation must restore selection by source filename");
         require(FileManagerWindowTestAccess::icons_active(*window),
                 "Switching back must restore the active view-mode button");
-        std::cerr << "workspace-phase: rename\n";
         require(FileManagerWindowTestAccess::rename(*window),
                 "Selected file must have an in-place rename editor");
         GtkWidget *editor = FileManagerWindowTestAccess::editor(*window);
@@ -253,7 +245,6 @@ int main()
         FileManagerWindowTestAccess::activate(*window, 1);
         require(FileManagerWindowTestAccess::uri(*window) == uri(c),
                 "Second tab must preserve independent navigation");
-        std::cerr << "workspace-phase: duplicate and restore\n";
         FileManagerWindowTestAccess::duplicate(*window);
         require(FileManagerWindowTestAccess::tabs(*window) == 3U,
                 "Duplicating a tab must leave the original tabs intact");
@@ -261,7 +252,6 @@ int main()
         require(FileManagerWindowTestAccess::active(*window) == 1U &&
                 FileManagerWindowTestAccess::uri(*window) == uri(c),
                 "Tab reorder must preserve the active directory");
-        std::cerr << "WORKSPACE CHECK 4\n";
         FileManagerWindowTestAccess::close(*window);
         require(FileManagerWindowTestAccess::tabs(*window) == 2U,
                 "Closing a tab must remove just that tab");
@@ -269,46 +259,53 @@ int main()
         require(FileManagerWindowTestAccess::tabs(*window) == 3U &&
                 FileManagerWindowTestAccess::uri(*window) == uri(c),
                 "Reopening a closed tab must recover its directory");
-        std::cerr << "workspace-phase: clipboard\n";
         window->toggle_show_hidden();
         window->toggle_sidebar();
         FileManagerWindowTestAccess::navigate(*window, a);
         await([&] { return !gtk_directory_list_is_loading(
             FileManagerWindowTestAccess::directory(*window)); });
         select_name(*window, "renamed.txt");
-        std::cerr << "WORKSPACE CHECK 5\n";
         GtkWidget *copy = find_clipboard_button(*window, "Copy");
         GtkWidget *paste = find_clipboard_button(*window, "Paste");
         require(copy != nullptr && paste != nullptr,
                 "Clipboard commands must be exposed through File actions");
-        std::cerr << "workspace-phase: clipboard copy\n";
         g_signal_emit_by_name(copy, "clicked");
         GdkClipboard *clipboard = gdk_display_get_clipboard(
             gtk_widget_get_display(GTK_WIDGET(window->native_window())));
         require(clipboard != nullptr, "Test requires a display clipboard");
-        std::cerr << "WORKSPACE CHECK 6\n";
+        GdkContentFormats *formats = gdk_clipboard_get_formats(clipboard);
+        require(formats != nullptr &&
+                gdk_content_formats_contain_mime_type(formats, "x-special/gnome-copied-files") &&
+                gdk_content_formats_contain_mime_type(formats, "text/uri-list"),
+                "File Copy must publish GNOME cut/copy and standard URI-list formats");
         gdk_clipboard_set_text(clipboard, "not a file reference");
         FileManagerWindowTestAccess::navigate(*window, b);
-        std::cerr << "workspace-phase: clipboard paste\n";
-        std::cerr << "WORKSPACE CHECK 7\n";
         g_signal_emit_by_name(paste, "clicked");
         await([&] { return !gtk_directory_list_is_loading(
             FileManagerWindowTestAccess::directory(*window)); });
         while (g_main_context_iteration(nullptr, FALSE)) {}
         require(!std::filesystem::exists(b / "renamed.txt"),
                 "Paste must not act on an old file after clipboard ownership changes");
-        std::cerr << "workspace-phase: destroy first window\n";
-        std::cerr << "WORKSPACE CHECK 8\n";
+        // Simulate a separate GNOME-compatible file manager offering file refs.
+        const std::string external_copy = "copy\n" + uri(a / "renamed.txt") + "\n";
+        GBytes *bytes = g_bytes_new(external_copy.data(), external_copy.size());
+        GdkContentProvider *external = gdk_content_provider_new_for_bytes(
+            "x-special/gnome-copied-files", bytes);
+        require(gdk_clipboard_set_content(clipboard, external),
+                "Clipboard test must own a GNOME file-reference offer");
+        g_object_unref(external);
+        g_bytes_unref(bytes);
+        g_signal_emit_by_name(paste, "clicked");
+        await([&] { return std::filesystem::is_regular_file(b / "renamed.txt"); });
+        require(std::filesystem::is_regular_file(a / "renamed.txt"),
+                "External GNOME Copy must preserve the source file");
         gtk_window_destroy(window->native_window());
         while (g_main_context_iteration(nullptr, FALSE)) {}
-        std::cerr << "workspace-phase: reopen window\n";
-        std::cerr << "WORKSPACE CHECK 9\n";
         auto *reopened = new FileManagerWindow(application);
         require(FileManagerWindowTestAccess::bookmarks(*reopened) == 1,
                 "Bookmark must survive a new window and profile read");
         require(FileManagerWindowTestAccess::recents(*reopened) >= 1U,
                 "Recent locations must survive new windows and process reinitialisation");
-        std::cerr << "WORKSPACE CHECK 10\n";
         FileManagerWindowTestAccess::clear_recents(*reopened);
         require(FileManagerWindowTestAccess::recents(*reopened) == 0U,
                 "Clearing recent history must empty the in-memory list");
@@ -318,8 +315,6 @@ int main()
                 "Sidebar preference must survive application restart");
         require(FileManagerWindowTestAccess::icons_active(*reopened),
                 "Default view preference must survive application restart");
-        std::cerr << "workspace-phase: destroy reopened window\n";
-        std::cerr << "WORKSPACE CHECK 11\n";
         gtk_window_destroy(reopened->native_window());
         while (g_main_context_iteration(nullptr, FALSE)) {}
     } catch (const std::exception &error) {

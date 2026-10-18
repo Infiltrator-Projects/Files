@@ -696,7 +696,8 @@ void ClipboardController::publish_clipboard_text()
         gdk_content_provider_new_typed(G_TYPE_STRING, payload.c_str())
     };
     GdkContentProvider *provider = gdk_content_provider_new_union(providers, G_N_ELEMENTS(providers));
-    for (auto *item : providers) g_object_unref(item);
+    // gdk_content_provider_new_union takes ownership of every provider.
+    // Releasing them here would leave the union with dangling pointers.
     g_bytes_unref(gnome_bytes);
     g_bytes_unref(uri_bytes);
     GdkContentProvider *previous = owned_content_;
