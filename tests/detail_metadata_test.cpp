@@ -82,9 +82,14 @@ int main()
 
     g_file_info_set_attribute_uint64(file, G_FILE_ATTRIBUTE_TIME_MODIFIED, 46800U);
     const std::string modified = detail_modified_text(file);
-    if (modified.empty() || modified == "—" ||
-        (modified.find("AM") == std::string::npos &&
-         modified.find("PM") == std::string::npos)) {
+    InfiltratrTemporalClockModule *civil_clock =
+        infiltratr_temporal_clock_module_open_id("standard-12");
+    const bool civil_ok = civil_clock != nullptr
+        ? (modified.find("AM") != std::string::npos ||
+           modified.find("PM") != std::string::npos)
+        : modified.find("clock resource unavailable") != std::string::npos;
+    infiltratr_temporal_clock_module_free(civil_clock);
+    if (modified.empty() || modified == "—" || !civil_ok) {
         g_free(config_home);
         g_object_unref(file);
         return 7;
@@ -253,8 +258,21 @@ int main()
     std::strcpy(policy.clock_mode, "standard-12");
     policy.show_seconds = false;
     const bool saved_twelve = infiltratr_temporal_posix_policy_save(&policy) == 0;
-    const bool twelve_language_ok = saved_twelve &&
-        detail_modified_text(file, date_provider) == "中文日期 下午3:30";
+    InfiltratrTemporalClockModule *twelve_clock =
+        infiltratr_temporal_clock_module_open_id("standard-12");
+    const std::string twelve_text = detail_modified_text(file, date_provider);
+    bool twelve_language_ok = false;
+    if (saved_twelve && twelve_clock != nullptr) {
+        char native[128]{};
+        twelve_language_ok = infiltratr_temporal_clock_format(
+            twelve_clock, "zh_TW", INT64_C(1791646200000000), 0,
+            false, false, 0.0, 0.0, native, sizeof(native), nullptr) &&
+            twelve_text == std::string("中文日期 ") + native;
+    } else if (saved_twelve) {
+        twelve_language_ok = twelve_text.find("clock resource unavailable") !=
+            std::string::npos;
+    }
+    infiltratr_temporal_clock_module_free(twelve_clock);
     g_setenv("LANGUAGE", "en_AU", TRUE);
     std::strcpy(policy.calendar, "roman");
     std::strcpy(policy.clock_mode, "chinese-time");
@@ -281,13 +299,18 @@ int main()
         return 17;
     }
 
-    // Native-only modes never fall back. Julian and MJD prefer installed
-    // resources, retaining the portable compatibility route if absent.
+    // All eleven extracted clocks require their installed modules. No
+    // Julian/MJD or other former compatibility formatter may take over.
     std::strcpy(policy.calendar, "gregorian");
     policy.show_seconds = true;
-    policy.location_configured = false;
+    policy.location_configured = true;
+    policy.latitude = 0.0;
+    policy.longitude = 0.0;
     g_file_info_set_attribute_uint64(file, G_FILE_ATTRIBUTE_TIME_MODIFIED, 43200U);
-    for (const char *mode : {"decimal", "internet", "unix", "hexadecimal", "binary", "julian", "modified-julian"}) {
+    for (const char *mode : {"decimal", "internet", "unix", "hexadecimal",
+                             "binary", "julian", "modified-julian",
+                             "standard-12", "standard-24",
+                             "chinese-ke", "mean-solar"}) {
         std::strcpy(policy.clock_mode, mode);
         if (infiltratr_temporal_posix_policy_save(&policy) != 0) {
             g_free(config_home);
@@ -305,18 +328,6 @@ int main()
                         resource, "en_AU", INT64_C(43200000000), 0,
                         true, false, 0.0, 0.0, expected, sizeof(expected),
                         &length) &&
-                length != 0U && visible.size() >= length &&
-                visible.compare(visible.size() - length, length, expected) == 0;
-        } else if (std::strcmp(mode, "julian") == 0 ||
-                   std::strcmp(mode, "modified-julian") == 0) {
-            // Transitional portable fallback is allowed only for modes not
-            // yet mandated as resource-only by Common's compatibility ABI.
-            char expected[128]{};
-            std::size_t length = 0U;
-            valid = infiltratr_temporal_format_clock_mode_localized(
-                        "en_AU", mode, INT64_C(43200000000), 0,
-                        true, false, false, 0.0, 0.0,
-                        expected, sizeof(expected), &length) &&
                 length != 0U && visible.size() >= length &&
                 visible.compare(visible.size() - length, length, expected) == 0;
         } else {
