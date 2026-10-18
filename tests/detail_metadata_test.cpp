@@ -329,7 +329,7 @@ int main()
         return detail_metadata_failure(17);
     }
 
-    // All eleven extracted clocks require their installed modules. No
+    // All explicit clocks require their installed modules. No
     // Julian/MJD or other former compatibility formatter may take over.
     std::strcpy(policy.calendar, "gregorian");
     policy.show_seconds = true;

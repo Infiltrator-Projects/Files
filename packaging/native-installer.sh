@@ -163,7 +163,7 @@ grep -Fq -- '-O3' "$inspect/usr/share/doc/files/BUILD-INFO"
 grep -Fq -- '-march=native' "$inspect/usr/share/doc/files/BUILD-INFO"
 
 printf 'Installing Files %s into /Programs...\n' "$version"
-run_root /usr/bin/dpkg -i "$deb"
+run_root /usr/bin/apt-get -o DPkg::Lock::Timeout=300 install -y "$deb"
 
 test -x /Programs/files
 test ! -e /usr/bin/files

@@ -242,7 +242,11 @@ set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Infiltrator Projects")
 set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "ca-certificates, fontconfig, curl | wget, infiltrator-calendar-resources (>= 1.0.116)")
+# One release requirement also drives native-installer CI dependency setup.
+set(INFILTRATOR_TEMPORAL_RESOURCES_VERSION "1.0.116")
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/temporal-resources-version"
+    CONTENT "${INFILTRATOR_TEMPORAL_RESOURCES_VERSION}\n")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "ca-certificates, fontconfig, curl | wget, infiltrator-calendar-resources (>= ${INFILTRATOR_TEMPORAL_RESOURCES_VERSION})")
 set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
     "${CMAKE_CURRENT_SOURCE_DIR}/packaging/postinst")
 set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)

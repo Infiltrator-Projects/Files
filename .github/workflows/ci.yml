@@ -137,9 +137,26 @@ jobs:
       - name: Build and qualify aggressive native installer
         env:
           VERSION: ${{ steps.release.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
+
+          # Qualify installation with the declared runtime dependency, using
+          # the immutable producer release rather than the APT refresh queue.
+          resources_version=$(cat build/temporal-resources-version)
+          [[ "$resources_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          resources_asset="infiltrator-calendar-resources_${resources_version}_amd64.deb"
+          resources_dir=$(mktemp -d)
+          chmod 0755 "$resources_dir"
+          gh release download "v$resources_version" \
+            --repo Infiltrator-Projects/Calendar \
+            --pattern "$resources_asset" --dir "$resources_dir"
+          digest=$(gh api "repos/Infiltrator-Projects/Calendar/releases/tags/v$resources_version" \
+            --jq ".assets[] | select(.name == \"$resources_asset\") | .digest")
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf '%s  %s\n' "${digest#sha256:}" "$resources_dir/$resources_asset" | sha256sum --check -
+          sudo apt-get install -y "$resources_dir/$resources_asset"
 
           ./ci/build-native-installer.sh dist
           native="dist/files-${VERSION}-native-installer.run"
