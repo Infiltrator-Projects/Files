@@ -313,21 +313,16 @@ int main()
     g_file_info_set_attribute_uint64(file, G_FILE_ATTRIBUTE_TIME_MODIFIED, 946728000U);
     for (const char *mode : {"japanese-temporal", "japanese-temporal-early"}) {
         std::strcpy(policy.clock_mode, mode);
-        InfiltratrTemporalClockModule *japanese_clock =
-            infiltratr_temporal_clock_module_open_id(mode);
-        const bool resource_available = japanese_clock != nullptr;
-        infiltratr_temporal_clock_module_free(japanese_clock);
+        // These historical Japanese modes still have an independent
+        // Common-owned seasonal formatter. They do not require a native
+        // standard-12/decimal/etc. clock resource module to be installed.
         const bool saved_edo = infiltratr_temporal_posix_policy_save(&policy) == 0;
         const std::string edo_text = detail_modified_text(file, date_provider);
-        const bool expected_edo =
-            edo_text == (resource_available
-                ? "— Mi · 四 bells"
-                : "— clock resource unavailable");
+        const bool expected_edo = edo_text == "— Mi · 四 bells";
         if (!expected_edo) {
             std::fprintf(stderr,
-                "edo temporal fixture mode=%s resource=%d saved=%d actual='%s'\n",
-                mode, (int)resource_available, (int)saved_edo,
-                edo_text.c_str());
+                "edo temporal fixture mode=%s saved=%d actual='%s'\n",
+                mode, (int)saved_edo, edo_text.c_str());
         }
         edo_ok = edo_ok && saved_edo && expected_edo;
     }
