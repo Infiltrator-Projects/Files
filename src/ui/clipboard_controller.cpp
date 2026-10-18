@@ -527,6 +527,16 @@ void ClipboardController::paste_sources(const Mode mode,
         destination_parent,
     };
 
+    // GtkDirectoryList's native monitor queries changed files asynchronously.
+    // During our own filesystem mutation, those monitor callbacks can still be
+    // outstanding when the window is closed. Stop the native monitor before
+    // the worker starts and reload the current listing on completion; ordinary
+    // navigation/enumeration remains available throughout the transfer.
+    restore_directory_monitor_ = directory_list_ != nullptr &&
+        gtk_directory_list_get_monitored(directory_list_);
+    if (restore_directory_monitor_)
+        gtk_directory_list_set_monitored(directory_list_, FALSE);
+
     busy_ = true;
     update_action_state();
     set_status(mode == Mode::Cut ? "Moving clipboard items…" : "Copying clipboard items…");
@@ -584,6 +594,11 @@ void ClipboardController::on_operation_finished(GObject *source_object,
     std::unique_ptr<OperationResult> operation(
         static_cast<OperationResult *>(g_task_propagate_pointer(task, &error)));
     self->busy_ = false;
+    if (self->restore_directory_monitor_) {
+        self->restore_directory_monitor_ = false;
+        if (!self->shutting_down_ && self->directory_list_ != nullptr)
+            gtk_directory_list_set_monitored(self->directory_list_, TRUE);
+    }
     // The GTask holds a reference to its GTK window, but an explicitly
     // destroyed window may already have disposed all child widgets. Consume
     // completion without accessing status/actions during shutdown.

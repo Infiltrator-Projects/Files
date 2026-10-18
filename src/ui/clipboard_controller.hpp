@@ -107,6 +107,7 @@ private:
     std::vector<std::string> sources_;
     PendingConflict pending_conflict_{};
     bool busy_{false};
+    bool restore_directory_monitor_{false};
     bool reading_external_clipboard_{false};
     bool shutting_down_{false};
     guint64 clipboard_generation_{0U};
