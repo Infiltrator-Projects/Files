@@ -269,6 +269,7 @@ int main()
         GtkWidget *paste = find_clipboard_button(*window, "Paste");
         require(copy != nullptr && paste != nullptr,
                 "Clipboard commands must be exposed through File actions");
+        std::cerr << "WORKSPACE-CLIP-STAGE 1\n";
         g_signal_emit_by_name(copy, "clicked");
         GdkClipboard *clipboard = gdk_display_get_clipboard(
             gtk_widget_get_display(GTK_WIDGET(window->native_window())));
@@ -278,15 +279,19 @@ int main()
                 gdk_content_formats_contain_mime_type(formats, "x-special/gnome-copied-files") &&
                 gdk_content_formats_contain_mime_type(formats, "text/uri-list"),
                 "File Copy must publish GNOME cut/copy and standard URI-list formats");
+        std::cerr << "WORKSPACE-CLIP-STAGE 2\n";
         gdk_clipboard_set_text(clipboard, "not a file reference");
         FileManagerWindowTestAccess::navigate(*window, b);
+        std::cerr << "WORKSPACE-CLIP-STAGE 5\n";
         g_signal_emit_by_name(paste, "clicked");
         await([&] { return !gtk_directory_list_is_loading(
             FileManagerWindowTestAccess::directory(*window)); });
         while (g_main_context_iteration(nullptr, FALSE)) {}
+        std::cerr << "WORKSPACE-CLIP-STAGE 3\n";
         require(!std::filesystem::exists(b / "renamed.txt"),
                 "Paste must not act on an old file after clipboard ownership changes");
         // Simulate a separate GNOME-compatible file manager offering file refs.
+        std::cerr << "WORKSPACE-CLIP-STAGE 4\n";
         const std::string external_copy = "copy\n" + uri(a / "renamed.txt") + "\n";
         GBytes *bytes = g_bytes_new(external_copy.data(), external_copy.size());
         GdkContentProvider *external = gdk_content_provider_new_for_bytes(
@@ -296,11 +301,14 @@ int main()
         g_object_unref(external);
         g_bytes_unref(bytes);
         g_signal_emit_by_name(paste, "clicked");
+        std::cerr << "WORKSPACE-CLIP-STAGE 6\n";
         await([&] { return std::filesystem::is_regular_file(b / "renamed.txt"); });
         require(std::filesystem::is_regular_file(a / "renamed.txt"),
                 "External GNOME Copy must preserve the source file");
+        std::cerr << "WORKSPACE-CLIP-STAGE 7\n";
         gtk_window_destroy(window->native_window());
         while (g_main_context_iteration(nullptr, FALSE)) {}
+        std::cerr << "WORKSPACE-CLIP-STAGE 8\n";
         auto *reopened = new FileManagerWindow(application);
         require(FileManagerWindowTestAccess::bookmarks(*reopened) == 1,
                 "Bookmark must survive a new window and profile read");
