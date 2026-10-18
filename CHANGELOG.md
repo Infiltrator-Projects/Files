@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.49 — 2026-10-18
+
+- Refine Files GTK4 typography after live Night screenshot review: stronger A Title Cond branding, clearer MB Corpo S Text navigation, and readable section labels and column headings.
+- Keep S Text Cond for metadata while using regular S Text for sidebar place names, preserving distinction without illegible compression.
+- Keep Common Day/Night semantics, file-operation behaviour, native row geometry and standalone 23-face provisioning unchanged.
+
 ## 0.1.48 — 2026-10-18
 
 - Pin Libraries/Common 1.19.57 and install its verified 23-face native font bootstrap through Files' Debian configure hook.

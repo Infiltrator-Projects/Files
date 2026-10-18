@@ -272,7 +272,7 @@ void ThemeController::apply_theme()
     rule("headerbar .ifm-brand-title", "color:" + title +
          ";font-family:'" + typography->brand_family +
          "';font-weight:" + std::to_string(typography->brand_weight) +
-         ";font-size:1.1em");
+         ";font-size:1.2em");
     rule("headerbar .ifm-brand-mark", "color:" + accent);
     rule("headerbar .ifm-breadcrumb", "color:" + title +
          ";padding:3px 9px;min-height:28px;"
@@ -317,8 +317,8 @@ void ThemeController::apply_theme()
           "outline:2px solid " + accent + ";outline-offset:-2px");
     rules({"columnview header", "columnview header button",
            "columnview header label"},
-          "background-color:" + panel + ";color:" + secondary +
-          ";border-color:" + subtle_border + ";font-weight:700;"
+          "background-color:" + panel + ";color:" + text +
+          ";border-color:" + subtle_border + ";font-size:1.00em;font-weight:700;"
           "font-family:'MB Corpo S Text WEB Cond','MB Corpo S Title WEB'");
     rule("columnview header button", "min-height:30px;padding:3px 10px");
     rule("columnview header button:hover", "background-color:" + hover +
@@ -349,12 +349,12 @@ void ThemeController::apply_theme()
          ";color:" + selected_text + ";border-left:3px solid " + accent +
          ";font-weight:650");
     rule(".ifm-sidebar row label", "color:" + text +
-         ";font-family:'MB Corpo S Text WEB Cond','MB Corpo S Title WEB'");
+         ";font-family:'MB Corpo S Text WEB','MB Corpo S Title WEB'");
     rule(".ifm-sidebar row.ifm-place-current label", "color:" + selected_text);
     rule(".ifm-sidebar row image", "color:" + muted);
     rule(".ifm-sidebar row.ifm-place-current image", "color:" + accent_text);
-    rule(".ifm-section-caption", "color:" + kicker +
-         ";font-size:0.78em;font-weight:700;letter-spacing:0.08em;"
+    rule(".ifm-section-caption", "color:" + secondary +
+         ";font-size:0.90em;font-weight:700;letter-spacing:0.08em;"
          "font-family:'MB Corpo S Title WEB Cond','MB Corpo S Title WEB'");
     rule(".ifm-sidebar row:focus-visible", "outline:2px solid " + accent);
 
@@ -377,7 +377,7 @@ void ThemeController::apply_theme()
 
     rule(".ifm-status", "background-color:" + panel + ";color:" + secondary +
          ";border-top:1px solid " + subtle_border + ";min-height:37px");
-    rule(".ifm-status-text", "color:" + secondary + ";font-size:0.93em");
+    rule(".ifm-status-text", "color:" + secondary + ";font-size:1.00em");
     // Native GTK linked/toggle button backgrounds were leaking a dark fill
     // into unselected Day controls. Set the full state, not just its text.
     rule(".ifm-view-switcher", "background-color:" + browsing_surface +
