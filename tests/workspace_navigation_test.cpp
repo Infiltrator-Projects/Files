@@ -187,6 +187,7 @@ int main()
         std::filesystem::create_directories(c);
         std::ofstream(a / "selected.txt") << "Selected";
         std::ofstream(a / ".hidden.txt") << "Hidden";
+        std::cerr << "workspace-phase: create window\n";
         auto *window = new FileManagerWindow(application);
         window->install_operation_surface();
         window->present();
@@ -203,6 +204,7 @@ int main()
         window->toggle_show_hidden();
         require(FileManagerWindowTestAccess::visible_count(*window) == 1U,
                 "Hiding hidden files must restore the visible model");
+        std::cerr << "workspace-phase: search\n";
         FileManagerWindowTestAccess::search(*window, "SELECTED");
         await([&] { return FileManagerWindowTestAccess::visible_count(*window) == 1U; });
         FileManagerWindowTestAccess::search(*window, "no-such-match");
@@ -212,10 +214,12 @@ int main()
         require(FileManagerWindowTestAccess::recents(*window) >= 1U,
                 "Visited native home folders should appear in Recent");
         select_name(*window, "selected.txt");
+        std::cerr << "workspace-phase: bookmark\n";
         FileManagerWindowTestAccess::pin(*window);
         FileManagerWindowTestAccess::set_icons(*window);
         require(FileManagerWindowTestAccess::bookmarks(*window) == 1,
                 "Pinning must append one bookmark");
+        std::cerr << "workspace-phase: tabs\n";
         FileManagerWindowTestAccess::add(*window, b);
         require(FileManagerWindowTestAccess::tabs(*window) == 2,
                 "New tab must preserve existing tab");
@@ -235,6 +239,7 @@ int main()
                 "Tab activation must restore selection by source filename");
         require(FileManagerWindowTestAccess::icons_active(*window),
                 "Switching back must restore the active view-mode button");
+        std::cerr << "workspace-phase: rename\n";
         require(FileManagerWindowTestAccess::rename(*window),
                 "Selected file must have an in-place rename editor");
         GtkWidget *editor = FileManagerWindowTestAccess::editor(*window);
@@ -245,6 +250,7 @@ int main()
         FileManagerWindowTestAccess::activate(*window, 1);
         require(FileManagerWindowTestAccess::uri(*window) == uri(c),
                 "Second tab must preserve independent navigation");
+        std::cerr << "workspace-phase: duplicate and restore\n";
         FileManagerWindowTestAccess::duplicate(*window);
         require(FileManagerWindowTestAccess::tabs(*window) == 3U,
                 "Duplicating a tab must leave the original tabs intact");
@@ -259,6 +265,7 @@ int main()
         require(FileManagerWindowTestAccess::tabs(*window) == 3U &&
                 FileManagerWindowTestAccess::uri(*window) == uri(c),
                 "Reopening a closed tab must recover its directory");
+        std::cerr << "workspace-phase: clipboard\n";
         window->toggle_show_hidden();
         window->toggle_sidebar();
         FileManagerWindowTestAccess::navigate(*window, a);
@@ -269,20 +276,24 @@ int main()
         GtkWidget *paste = find_clipboard_button(*window, "Paste");
         require(copy != nullptr && paste != nullptr,
                 "Clipboard commands must be exposed through File actions");
+        std::cerr << "workspace-phase: clipboard copy\n";
         g_signal_emit_by_name(copy, "clicked");
         GdkClipboard *clipboard = gdk_display_get_clipboard(
             gtk_widget_get_display(GTK_WIDGET(window->native_window())));
         require(clipboard != nullptr, "Test requires a display clipboard");
         gdk_clipboard_set_text(clipboard, "not a file reference");
         FileManagerWindowTestAccess::navigate(*window, b);
+        std::cerr << "workspace-phase: clipboard paste\n";
         g_signal_emit_by_name(paste, "clicked");
         await([&] { return !gtk_directory_list_is_loading(
             FileManagerWindowTestAccess::directory(*window)); });
         while (g_main_context_iteration(nullptr, FALSE)) {}
         require(!std::filesystem::exists(b / "renamed.txt"),
                 "Paste must not act on an old file after clipboard ownership changes");
+        std::cerr << "workspace-phase: destroy first window\n";
         gtk_window_destroy(window->native_window());
         while (g_main_context_iteration(nullptr, FALSE)) {}
+        std::cerr << "workspace-phase: reopen window\n";
         auto *reopened = new FileManagerWindow(application);
         require(FileManagerWindowTestAccess::bookmarks(*reopened) == 1,
                 "Bookmark must survive a new window and profile read");
@@ -297,6 +308,7 @@ int main()
                 "Sidebar preference must survive application restart");
         require(FileManagerWindowTestAccess::icons_active(*reopened),
                 "Default view preference must survive application restart");
+        std::cerr << "workspace-phase: destroy reopened window\n";
         gtk_window_destroy(reopened->native_window());
         while (g_main_context_iteration(nullptr, FALSE)) {}
     } catch (const std::exception &error) {
