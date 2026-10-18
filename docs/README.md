@@ -10,6 +10,7 @@ The root [README](../README.md) introduces the application. [InfiltratorOS produ
 - [Features](FEATURES.md) — intended capabilities and implementation scope.
 - [Common integration](COMMON-INTEGRATION.md) — shared-library mechanisms versus Files-owned semantics.
 - [Product quality](PRODUCT-QUALITY.md) — task journeys and acceptance criteria.
+- [Family font-role selection](https://github.com/Infiltrator-Projects/InfiltratorOS/blob/main/docs/FONT-ROLES.md) — the verified 23-face inventory and Files' hierarchy.
 - [Validation](VALIDATION.md) — build, test and release qualification.
 - [Changelog](../CHANGELOG.md) — maintained high-level release history.
 

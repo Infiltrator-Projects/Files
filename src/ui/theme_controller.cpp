@@ -253,8 +253,8 @@ void ThemeController::apply_theme()
     };
 
     css << scope << " { background-color: " << background << "; color: " << text
-        << "; font-family: '" << typography->ui_family << "', "
-        << typography->gtk_fallback << "; }\n";
+        << "; font-family: 'MB Corpo S Text WEB', '" << typography->ui_family
+        << "', " << typography->gtk_fallback << "; }\n";
 
     // Explicitly colour header descendants: native window controls and
     // breadcrumb text otherwise inherit a low-contrast desktop GTK theme.
@@ -275,7 +275,8 @@ void ThemeController::apply_theme()
          ";font-size:1.1em");
     rule("headerbar .ifm-brand-mark", "color:" + accent);
     rule("headerbar .ifm-breadcrumb", "color:" + title +
-         ";padding:3px 9px;min-height:28px");
+         ";padding:3px 9px;min-height:28px;"
+         "font-family:'MB Corpo A Text Cond WEB','MB Corpo A Title Cond WEB'");
     rule("headerbar .ifm-breadcrumb-current", "background-color:" + card +
          ";border:1px solid " + accent + ";color:" + title +
          ";font-weight:650");
@@ -317,13 +318,16 @@ void ThemeController::apply_theme()
     rules({"columnview header", "columnview header button",
            "columnview header label"},
           "background-color:" + panel + ";color:" + secondary +
-          ";border-color:" + subtle_border + ";font-weight:600");
+          ";border-color:" + subtle_border + ";font-weight:700;"
+          "font-family:'MB Corpo S Text WEB Cond','MB Corpo S Title WEB'");
     rule("columnview header button", "min-height:30px;padding:3px 10px");
     rule("columnview header button:hover", "background-color:" + hover +
          ";color:" + text);
     rules({".ifm-file-name", ".ifm-icon-tile .ifm-file-name"},
-          "color:" + text + ";font-weight:600;font-size:1.05em");
-    rule(".ifm-detail-secondary", "color:" + secondary + ";font-size:1.00em");
+          "color:" + text + ";font-weight:400;font-size:1.05em;"
+          "font-family:'MB Corpo S Text WEB','MB Corpo S Title WEB'");
+    rule(".ifm-detail-secondary", "color:" + secondary + ";font-size:1.00em;"
+         "font-family:'MB Corpo S Text WEB Cond','MB Corpo S Title WEB'");
     rules({"columnview row:selected .ifm-file-name",
            "columnview row:selected .ifm-detail-secondary",
            "gridview child:selected .ifm-file-name"},
@@ -344,12 +348,14 @@ void ThemeController::apply_theme()
     rule(".ifm-sidebar row.ifm-place-current", "background-color:" + selected +
          ";color:" + selected_text + ";border-left:3px solid " + accent +
          ";font-weight:650");
-    rule(".ifm-sidebar row label", "color:" + text);
+    rule(".ifm-sidebar row label", "color:" + text +
+         ";font-family:'MB Corpo S Text WEB Cond','MB Corpo S Title WEB'");
     rule(".ifm-sidebar row.ifm-place-current label", "color:" + selected_text);
     rule(".ifm-sidebar row image", "color:" + muted);
     rule(".ifm-sidebar row.ifm-place-current image", "color:" + accent_text);
     rule(".ifm-section-caption", "color:" + kicker +
-         ";font-size:0.78em;font-weight:650;letter-spacing:0.08em");
+         ";font-size:0.78em;font-weight:700;letter-spacing:0.08em;"
+         "font-family:'MB Corpo S Title WEB Cond','MB Corpo S Title WEB'");
     rule(".ifm-sidebar row:focus-visible", "outline:2px solid " + accent);
 
     // The header and tab rail form one navigation surface, separated by a
