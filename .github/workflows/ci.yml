@@ -215,4 +215,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_SHA: ${{ github.sha }}
-        run: ./ci/release.sh publish "$EXPECTED_SHA" dist
+        run: |
+          ./ci/release.sh publish "$EXPECTED_SHA" dist
+          # Do not mark a Files release green until its exact version is
+          # publicly visible in both the catalogue and beta APT index.
+          ./ci/release.sh wait-apt dist

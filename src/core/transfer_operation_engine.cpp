@@ -3,6 +3,7 @@
 #include "aggregate_arithmetic.hpp"
 #include "destination_ownership.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <fstream>
@@ -77,6 +78,39 @@ bool path_is_within(const std::filesystem::path &candidate,
     return true;
 }
 
+// Compare actual bytes as well as names, sizes and types. This is intentionally
+// used after copying and again after source quarantine for cross-volume moves.
+// A snapshot/lock is still required to guarantee a stable concurrently-written
+// file; detecting same-length edits avoids false verification by size alone.
+bool identical_file_bytes(const std::filesystem::path &source,
+                          const std::filesystem::path &destination,
+                          std::error_code &error)
+{
+    std::ifstream left(source, std::ios::binary);
+    std::ifstream right(destination, std::ios::binary);
+    if (!left.is_open() || !right.is_open()) {
+        error = std::make_error_code(std::errc::io_error);
+        return false;
+    }
+    std::array<char, 65536> a{};
+    std::array<char, 65536> b{};
+    for (;;) {
+        left.read(a.data(), static_cast<std::streamsize>(a.size()));
+        right.read(b.data(), static_cast<std::streamsize>(b.size()));
+        const auto left_count = left.gcount();
+        const auto right_count = right.gcount();
+        if (left.bad() || right.bad()) {
+            error = std::make_error_code(std::errc::io_error);
+            return false;
+        }
+        if (left_count != right_count ||
+            !std::equal(a.data(), a.data() + left_count, b.data())) {
+            return false;
+        }
+        if (left_count == 0) return true;
+    }
+}
+
 bool equivalent_copy_shape(const std::filesystem::path &source,
                            const std::filesystem::path &destination,
                            std::error_code &error)
@@ -100,7 +134,8 @@ bool equivalent_copy_shape(const std::filesystem::path &source,
         }
         const std::uintmax_t destination_size =
             std::filesystem::file_size(destination, error);
-        return !error && source_size == destination_size;
+        return !error && source_size == destination_size &&
+               identical_file_bytes(source, destination, error);
     }
 
     if (std::filesystem::is_symlink(source_status)) {
@@ -150,7 +185,8 @@ bool equivalent_copy_shape(const std::filesystem::path &source,
             }
             const std::uintmax_t counterpart_size =
                 std::filesystem::file_size(counterpart, error);
-            if (error || item_size != counterpart_size) {
+            if (error || item_size != counterpart_size ||
+                !identical_file_bytes(iterator->path(), counterpart, error)) {
                 return false;
             }
         } else if (std::filesystem::is_symlink(item_status)) {

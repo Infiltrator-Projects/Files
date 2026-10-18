@@ -645,12 +645,28 @@ OperationResult RecoveryOperationEngine::delete_item(const std::filesystem::path
                       "The selected item no longer exists.");
     }
 
-    (void)std::filesystem::remove_all(source, error);
-    if (error) {
-        return result(OperationEngine::status_for_error(error),
-                      OperationPhase::Execute,
-                      {},
-                      "The item could not be permanently deleted: " + error.message());
+    // Bind the destructive action to the selected inode, not a later
+    // pathname lookup. The ownership layer atomically quarantines that exact
+    // entry before recursively removing it and attempts restoration on error.
+    const auto identity = destination_ownership::identity_for(source, error);
+    if (error || !identity.valid) {
+        return result(error ? OperationEngine::status_for_error(error)
+                            : OperationStatus::VerificationFailure,
+                      OperationPhase::Preflight, {},
+                      "The selected item's identity could not be established.");
+    }
+    std::filesystem::path retained_quarantine;
+    if (!destination_ownership::remove_owned_tree(
+            {source, identity}, error, &retained_quarantine)) {
+        std::vector<std::filesystem::path> retained;
+        if (!retained_quarantine.empty()) retained.push_back(retained_quarantine);
+        return result(error ? OperationEngine::status_for_error(error)
+                            : OperationStatus::VerificationFailure,
+                      OperationPhase::Execute, {},
+                      "Permanent deletion did not complete: " + error.message() +
+                          ". Some children may already have been removed; inspect the "
+                          "original location and retained recovery evidence.",
+                      true, std::move(retained));
     }
 
     const bool still_exists = path_present(source, error);
