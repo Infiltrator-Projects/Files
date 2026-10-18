@@ -27,3 +27,7 @@ An unpublished VERSION retains release intent through corrective commits. Public
 The central repository owns APT publication. CI must run `ci/release.sh wait-apt dist` after the immutable GitHub release and must not be green until the central catalogue and beta amd64 Packages both show the exact Files version. Publishing outages retain the valid GitHub release but fail the publication observation.
 
 Merged-branch cleanup requires the current branch SHA to match a merged PR head, no open PR, and an exact-head deletion lease. Reusing an old branch name for new work cannot authorize its deletion.
+
+## Extended typography packaging
+
+Standalone release qualification must inspect the Debian control archive for an executable `postinst`, a package-installed `/usr/lib/files/ensure-extended-fonts` helper from pinned Common and dependencies sufficient for verified font acquisition (`ca-certificates`, `fontconfig`, and `curl | wget`). It must not contain private duplicated MB/Daimler TTF payloads. A live standalone installation uses the same resource cache as an InfiltratorOS installation, without changing default file-manager association or existing Files data operations.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.48 — 2026-10-18
+
+- Pin Libraries/Common 1.19.57 and install its verified 23-face native font bootstrap through Files' Debian configure hook.
+- Make Files' MB Corpo Text, Condensed and Title typography available when installed standalone without depending on InfiltratorOS, while retaining the existing platform-native appearance policy and no package-owned font binaries.
+- Preserve Files' copy/move/journal/recovery semantics and existing native installer optimisation profiles.
+
 ## 0.1.47 — 2026-10-18
 
 - Optimise Linux Files typography around the 23-face native MB Corpo font cache: Text regular for filenames and reading, Text Cond for dense file metadata and sidebar entries, A Text Cond for breadcrumbs, S Title Cond Bold for section captions and S Text Cond Bold for column headings.

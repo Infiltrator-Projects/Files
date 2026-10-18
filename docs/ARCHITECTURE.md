@@ -385,3 +385,7 @@ The following remain open and must be decided through research/prototyping rathe
 - plugin/extension model;
 - preview/thumbnail sandboxing; and
 - exact public InfiltratorFS capability API.
+
+## Standalone shared typography resources
+
+Files pins Libraries/Common 1.19.57 and packages the small `InfiltratrEnsureExtendedFonts.sh` helper at `/usr/lib/files/ensure-extended-fonts`. Its Debian configure hook verifies or establishes all 23 shared MB Corpo/Daimler faces at `/System/Resources/Fonts` from the immutable InfiltratorOS font source; fonts are not owned by Files' package and are not removed with Files. The GTK4 theme chooses Text, Condensed and Title families by product task and uses Common's existing fallback contract on systems where the optional extended cache is unavailable at runtime. No file manager operation, filesystem identity or recovery policy depends on a typography resource.

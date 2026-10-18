@@ -19,7 +19,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(INFILTRATOR_BUILD_PROFILE "release" CACHE STRING "Files build profile recorded in BUILD-INFO")
 set(INFILTRATOR_PGO_STATUS "not trained" CACHE STRING "Files PGO status recorded in BUILD-INFO")
 
-set(INFILTRATR_COMMON_MINIMUM_VERSION "1.19.56")
+set(INFILTRATR_COMMON_MINIMUM_VERSION "1.19.57")
 set(INFILTRATR_COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/infiltratr-common")
 
 if(NOT EXISTS "${INFILTRATR_COMMON_DIR}/VERSION")
@@ -226,6 +226,14 @@ install(FILES data/files.desktop
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/BUILD-INFO"
     DESTINATION "/usr/share/doc/files")
 
+# Standalone Files must resolve the same verified 23-face family as a full
+# InfiltratorOS installation. Font binaries belong to the persistent machine
+# resource cache, not this package. The helper comes from pinned Common.
+install(PROGRAMS
+    "${INFILTRATR_COMMON_DIR}/cmake/InfiltratrEnsureExtendedFonts.sh"
+    DESTINATION "/usr/lib/files"
+    RENAME "ensure-extended-fonts")
+
 set(CPACK_PACKAGE_NAME "files")
 set(CPACK_PACKAGE_VENDOR "Infiltrator Projects")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "InfiltratorOS file manager")
@@ -234,6 +242,9 @@ set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Infiltrator Projects")
 set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "ca-certificates, fontconfig, curl | wget")
+set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
+    "${CMAKE_CURRENT_SOURCE_DIR}/packaging/postinst")
 set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
 set(CPACK_SET_DESTDIR ON)
 set(CPACK_PACKAGING_INSTALL_PREFIX "/")
