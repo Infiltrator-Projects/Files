@@ -319,10 +319,17 @@ int main()
         infiltratr_temporal_clock_module_free(japanese_clock);
         const bool saved_edo = infiltratr_temporal_posix_policy_save(&policy) == 0;
         const std::string edo_text = detail_modified_text(file, date_provider);
-        edo_ok = edo_ok && saved_edo &&
+        const bool expected_edo =
             edo_text == (resource_available
                 ? "— Mi · 四 bells"
                 : "— clock resource unavailable");
+        if (!expected_edo) {
+            std::fprintf(stderr,
+                "edo temporal fixture mode=%s resource=%d saved=%d actual='%s'\n",
+                mode, (int)resource_available, (int)saved_edo,
+                edo_text.c_str());
+        }
+        edo_ok = edo_ok && saved_edo && expected_edo;
     }
     infiltratr_temporal_posix_date_provider_free(date_provider);
     if (!coarse_ok || !fine_ok || !chinese_language_ok || !twelve_language_ok ||
