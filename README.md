@@ -1,5 +1,7 @@
 # Files
 
+**InfiltratorOS product family:** [InfiltratorOS](https://github.com/Infiltrator-Projects/InfiltratorOS) · [System Monitor](https://github.com/Infiltrator-Projects/System-Monitor) · [Calculator](https://github.com/Infiltrator-Projects/Calculator) · [Files](https://github.com/Infiltrator-Projects/Files). Independently installable components, one [product-family and UI contract](https://github.com/Infiltrator-Projects/InfiltratorOS/blob/main/docs/PRODUCT-FAMILY.md).
+
 Files is a clean-sheet file-management project for InfiltratorOS.
 
 **Current source version:** authoritative in [`VERSION`](VERSION)\
