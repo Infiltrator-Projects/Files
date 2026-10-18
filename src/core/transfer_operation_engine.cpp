@@ -154,7 +154,11 @@ bool matches_content_evidence(const std::filesystem::path &source_root,
                               std::error_code &error)
 {
     for (const auto &[relative, expected] : evidence) {
-        const std::string actual = digest_file_bytes(source_root / relative, error);
+        // A single-file copy records "." relative to its root. Appending
+        // "/." to a regular-file quarantine path would yield ENOTDIR.
+        const std::filesystem::path file =
+            (relative.empty() || relative == ".") ? source_root : source_root / relative;
+        const std::string actual = digest_file_bytes(file, error);
         if (error || actual != expected) return false;
     }
     return true;
