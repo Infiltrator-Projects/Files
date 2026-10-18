@@ -21,6 +21,7 @@ public:
 private:
     static void on_window_finalized(gpointer user_data, GObject *where_object_was);
     static void on_new_folder_clicked(GtkButton *button, gpointer user_data);
+    static void on_new_file_clicked(GtkButton *button, gpointer user_data);
     static gboolean on_key_pressed(GtkEventControllerKey *controller,
                                    guint keyval,
                                    guint keycode,
@@ -44,7 +45,7 @@ private:
                                           GAsyncResult *result,
                                           gpointer user_data);
 
-    void show_dialog();
+    void show_dialog(bool file = false);
     void submit_dialog();
     void set_busy(bool busy);
     void update_action_state();
@@ -58,6 +59,8 @@ private:
     GtkSingleSelection *selection_{nullptr};
     GtkWidget *status_label_{nullptr};
     GtkWidget *button_{nullptr};
+    GtkWidget *new_file_button_{nullptr};
+    bool creating_file_{false};
     GtkWidget *dialog_{nullptr};
     GtkWidget *entry_{nullptr};
     GtkWidget *dialog_message_{nullptr};

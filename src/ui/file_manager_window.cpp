@@ -7,6 +7,7 @@
 #include <infiltratr/temporal_posix.h>
 
 #include <algorithm>
+#include <cstring>
 #include <sstream>
 #include <string>
 
@@ -133,6 +134,7 @@ FileManagerWindow::FileManagerWindow(GtkApplication *application)
     g_object_set_data(G_OBJECT(window_), "ifm-window-controller", this);
     arm_temporal_policy_monitor();
     load_bookmarks();
+    load_recents();
     load_preferences();
     apply_preferences();
     tabs_.push_back(TabState{});
@@ -150,6 +152,7 @@ FileManagerWindow::FileManagerWindow(GtkApplication *application)
 FileManagerWindow::~FileManagerWindow()
 {
     // Stop external callbacks before any UI/model references owned by this object are released.
+    if (search_timeout_ != 0U) g_source_remove(search_timeout_);
     mounted_places_monitor_.reset();
     thumbnails_.reset();
     if (temporal_policy_monitor_ != nullptr) {
@@ -177,7 +180,7 @@ FileManagerWindow::~FileManagerWindow()
     }
     g_clear_object(&selection_);
     g_clear_object(&visibility_filter_);
-    filter_hidden_state_ = nullptr; // Owned by GtkCustomFilter, which may outlive the window.
+    filter_state_ = nullptr; // Owned by GtkCustomFilter, which may outlive the window.
     g_clear_object(&directory_list_);
     if (current_location_ != nullptr) {
         g_object_unref(current_location_);
@@ -302,6 +305,17 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     gtk_widget_set_margin_bottom(tab_strip_, 2);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(tab_scroll), tab_strip_);
     gtk_box_append(GTK_BOX(tab_line), tab_scroll);
+    search_entry_ = gtk_search_entry_new();
+    gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(search_entry_), "Find in folder");
+    gtk_widget_set_size_request(search_entry_, 195, -1);
+    gtk_widget_set_visible(search_entry_, FALSE);
+    g_signal_connect(search_entry_, "search-changed", G_CALLBACK(on_search_changed), this);
+    gtk_box_append(GTK_BOX(tab_line), search_entry_);
+    search_button_ = gtk_button_new_from_icon_name("system-search-symbolic");
+    gtk_widget_add_css_class(search_button_, "flat");
+    gtk_widget_set_tooltip_text(search_button_, "Find in this folder (Ctrl+F)");
+    g_signal_connect(search_button_, "clicked", G_CALLBACK(on_search_toggle), this);
+    gtk_box_append(GTK_BOX(tab_line), search_button_);
     GtkWidget *add_tab_button = gtk_button_new_from_icon_name("list-add-symbolic");
     gtk_widget_add_css_class(add_tab_button, "flat");
     gtk_widget_set_tooltip_text(add_tab_button, "New tab (Ctrl+T)");
@@ -359,6 +373,19 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     }
     add_sidebar_location("Computer", "drive-harddisk-symbolic", "/");
     add_sidebar_location("Trash", "user-trash-symbolic", "trash:///");
+    GtkWidget *recent_row = gtk_list_box_row_new();
+    gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(recent_row), FALSE);
+    recent_menu_button_ = gtk_menu_button_new();
+    gtk_menu_button_set_child(GTK_MENU_BUTTON(recent_menu_button_),
+                              make_sidebar_content("Recent", "document-open-recent-symbolic"));
+    gtk_widget_set_halign(recent_menu_button_, GTK_ALIGN_FILL);
+    gtk_widget_add_css_class(recent_menu_button_, "flat");
+    recent_popover_ = gtk_popover_new();
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(recent_menu_button_), recent_popover_);
+    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(recent_row), recent_menu_button_);
+    gtk_list_box_append(GTK_LIST_BOX(sidebar_), recent_row);
+    ++static_sidebar_row_count_;
+    rebuild_recent_menu();
     mounted_places_monitor_ = std::make_unique<MountedPlacesMonitor>([this]() {
         refresh_mounted_places();
     });
@@ -370,10 +397,10 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     g_signal_connect(directory_list_, "notify::loading", G_CALLBACK(on_loading_changed), this);
     g_signal_connect(directory_list_, "notify::error", G_CALLBACK(on_loading_changed), this);
 
-    filter_hidden_state_ = new gboolean(FALSE);
+    filter_state_ = new FilterState();
     visibility_filter_ = GTK_CUSTOM_FILTER(gtk_custom_filter_new(
-        filter_visible, filter_hidden_state_,
-        [](gpointer data) { delete static_cast<gboolean *>(data); }));
+        filter_visible, filter_state_,
+        [](gpointer data) { delete static_cast<FilterState *>(data); }));
     g_object_ref(visibility_filter_);
     GtkFilterListModel *filtered = gtk_filter_list_model_new(
         G_LIST_MODEL(g_object_ref(directory_list_)), GTK_FILTER(visibility_filter_));
@@ -499,6 +526,7 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     gtk_widget_add_css_class(empty_icon, "dim-label");
     gtk_box_append(GTK_BOX(empty_state_), empty_icon);
     GtkWidget *empty_title = gtk_label_new("This folder is empty");
+    empty_title_ = empty_title;
     gtk_widget_add_css_class(empty_title, "title-3");
     gtk_box_append(GTK_BOX(empty_state_), empty_title);
     GtkWidget *empty_detail = gtk_label_new("Create a folder or drop files here");
@@ -538,10 +566,179 @@ void FileManagerWindow::build_ui(GtkApplication *application)
 
 gboolean FileManagerWindow::filter_visible(gpointer item, gpointer user_data)
 {
-    const auto *shown = static_cast<const gboolean *>(user_data);
+    const auto *state = static_cast<const FilterState *>(user_data);
     auto *info = G_FILE_INFO(item);
-    return (shown != nullptr && *shown) ||
-           (info != nullptr && !g_file_info_get_is_hidden(info));
+    if (state == nullptr || info == nullptr) return FALSE;
+    if (!state->show_hidden && g_file_info_get_is_hidden(info)) return FALSE;
+    if (state->query.empty()) return TRUE;
+    const char *name = g_file_info_get_display_name(info);
+    if (name == nullptr) name = g_file_info_get_name(info);
+    if (name == nullptr) return FALSE;
+    char *folded = g_utf8_casefold(name, -1);
+    const bool match = folded != nullptr &&
+                       std::string(folded).find(state->query) != std::string::npos;
+    g_free(folded);
+    return match;
+}
+
+void FileManagerWindow::show_search()
+{
+    if (search_entry_ == nullptr) return;
+    gtk_widget_set_visible(search_entry_, TRUE);
+    gtk_widget_grab_focus(search_entry_);
+}
+void FileManagerWindow::hide_search()
+{
+    if (search_entry_ == nullptr) return;
+    if (search_timeout_ != 0U) {
+        g_source_remove(search_timeout_);
+        search_timeout_ = 0U;
+    }
+    if (filter_state_ != nullptr && !filter_state_->query.empty()) {
+        filter_state_->query.clear();
+        if (visibility_filter_ != nullptr)
+            gtk_filter_changed(GTK_FILTER(visibility_filter_), GTK_FILTER_CHANGE_DIFFERENT);
+    }
+    if (*gtk_editable_get_text(GTK_EDITABLE(search_entry_)) != '\0')
+        gtk_editable_set_text(GTK_EDITABLE(search_entry_), "");
+    gtk_widget_set_visible(search_entry_, FALSE);
+}
+void FileManagerWindow::on_search_toggle(GtkButton *, gpointer user_data)
+{
+    auto *self = static_cast<FileManagerWindow *>(user_data);
+    if (gtk_widget_get_visible(self->search_entry_)) self->hide_search();
+    else self->show_search();
+    self->update_status();
+}
+void FileManagerWindow::on_search_changed(GtkSearchEntry *, gpointer user_data)
+{
+    auto *self = static_cast<FileManagerWindow *>(user_data);
+    if (self->search_timeout_ != 0U) g_source_remove(self->search_timeout_);
+    self->search_timeout_ = g_timeout_add(160, on_search_timeout, self);
+}
+gboolean FileManagerWindow::on_search_timeout(gpointer user_data)
+{
+    auto *self = static_cast<FileManagerWindow *>(user_data);
+    self->search_timeout_ = 0U;
+    if (self->filter_state_ == nullptr || self->search_entry_ == nullptr) return G_SOURCE_REMOVE;
+    const char *text = gtk_editable_get_text(GTK_EDITABLE(self->search_entry_));
+    if (text == nullptr || !g_utf8_validate(text, -1, nullptr)) text = "";
+    // A bounded current-directory filter, not a recursive or indexed search.
+    char *limited = g_utf8_substring(text, 0, MIN(g_utf8_strlen(text, -1), 160));
+    char *folded = g_utf8_casefold(limited != nullptr ? limited : "", -1);
+    self->filter_state_->query = folded != nullptr ? folded : "";
+    g_free(limited);
+    g_free(folded);
+    gtk_filter_changed(GTK_FILTER(self->visibility_filter_), GTK_FILTER_CHANGE_DIFFERENT);
+    self->update_status();
+    return G_SOURCE_REMOVE;
+}
+
+void FileManagerWindow::load_recents()
+{
+    char *path = g_build_filename(g_get_user_state_dir(), "infiltrator", "files",
+                                  "recent-locations", nullptr);
+    char *content = nullptr;
+    gsize length = 0;
+    if (g_file_get_contents(path, &content, &length, nullptr) && length <= 32U * 1024U) {
+        gchar **lines = g_strsplit(content, "\n", 0);
+        for (gchar **line = lines; *line != nullptr && recent_locations_.size() < 20U; ++line) {
+            if (**line == '\0') continue;
+            GFile *file = g_file_new_for_uri(*line);
+            if (g_file_is_native(file)) {
+                char *native = g_file_get_path(file);
+                // Never expose private/hidden locations or system internals.
+                const char *home = g_get_home_dir();
+                if (native != nullptr && g_str_has_prefix(native, home) &&
+                    native[strlen(home)] == '/' &&
+                    std::string(native + strlen(home) + 1).find("/.") == std::string::npos &&
+                    native[strlen(home) + 1] != '.') {
+                    recent_locations_.emplace_back(*line);
+                }
+                g_free(native);
+            }
+            g_object_unref(file);
+        }
+        g_strfreev(lines);
+    }
+    g_free(content);
+    g_free(path);
+}
+void FileManagerWindow::save_recents() const
+{
+    char *dir = g_build_filename(g_get_user_state_dir(), "infiltrator", "files", nullptr);
+    if (g_mkdir_with_parents(dir, 0700) == 0) {
+        char *path = g_build_filename(dir, "recent-locations", nullptr);
+        std::string content;
+        for (const auto &uri : recent_locations_) content += uri + "\n";
+        g_file_set_contents(path, content.c_str(), static_cast<gssize>(content.size()), nullptr);
+        g_free(path);
+    }
+    g_free(dir);
+}
+void FileManagerWindow::record_recent(GFile *file)
+{
+    if (file == nullptr || !g_file_is_native(file)) return;
+    char *path = g_file_get_path(file);
+    char *uri = g_file_get_uri(file);
+    const char *home = g_get_home_dir();
+    if (path != nullptr && uri != nullptr && g_str_has_prefix(path, home) &&
+        path[strlen(home)] == '/' &&
+        path[strlen(home) + 1] != '.' &&
+        std::string(path + strlen(home) + 1).find("/.") == std::string::npos) {
+        recent_locations_.erase(
+            std::remove(recent_locations_.begin(), recent_locations_.end(), uri),
+            recent_locations_.end());
+        recent_locations_.insert(recent_locations_.begin(), uri);
+        if (recent_locations_.size() > 20U) recent_locations_.resize(20U);
+        save_recents();
+        rebuild_recent_menu();
+    }
+    g_free(path);
+    g_free(uri);
+}
+void FileManagerWindow::rebuild_recent_menu()
+{
+    if (recent_popover_ == nullptr) return;
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+    for (const auto &uri : recent_locations_) {
+        GFile *file = g_file_new_for_uri(uri.c_str());
+        char *name = g_file_get_parse_name(file);
+        GtkWidget *button = gtk_button_new_with_label(name != nullptr ? name : uri.c_str());
+        gtk_widget_add_css_class(button, "flat");
+        gtk_widget_set_halign(button, GTK_ALIGN_FILL);
+        g_object_set_data_full(G_OBJECT(button), "recent-uri", g_strdup(uri.c_str()), g_free);
+        g_signal_connect(button, "clicked", G_CALLBACK(on_recent_open), this);
+        gtk_box_append(GTK_BOX(box), button);
+        g_free(name);
+        g_object_unref(file);
+    }
+    if (recent_locations_.empty())
+        gtk_box_append(GTK_BOX(box), gtk_label_new("No recent folders"));
+    GtkWidget *clear = gtk_button_new_with_label("Clear recent locations");
+    gtk_widget_set_sensitive(clear, !recent_locations_.empty());
+    g_signal_connect(clear, "clicked", G_CALLBACK(on_recent_clear), this);
+    gtk_box_append(GTK_BOX(box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+    gtk_box_append(GTK_BOX(box), clear);
+    gtk_popover_set_child(GTK_POPOVER(recent_popover_), box);
+}
+void FileManagerWindow::on_recent_open(GtkButton *button, gpointer user_data)
+{
+    auto *self = static_cast<FileManagerWindow *>(user_data);
+    const auto *uri = static_cast<const char *>(g_object_get_data(G_OBJECT(button), "recent-uri"));
+    if (uri == nullptr) return;
+    GFile *file = g_file_new_for_uri(uri);
+    self->navigate_to(file, true);
+    g_object_unref(file);
+    gtk_popover_popdown(GTK_POPOVER(self->recent_popover_));
+}
+void FileManagerWindow::on_recent_clear(GtkButton *, gpointer user_data)
+{
+    auto *self = static_cast<FileManagerWindow *>(user_data);
+    self->recent_locations_.clear();
+    self->save_recents();
+    self->rebuild_recent_menu();
+    gtk_popover_popdown(GTK_POPOVER(self->recent_popover_));
 }
 
 void FileManagerWindow::load_preferences()
@@ -562,7 +759,7 @@ void FileManagerWindow::load_preferences()
     }
     g_key_file_unref(keys);
     g_free(path);
-    if (filter_hidden_state_ != nullptr) *filter_hidden_state_ = show_hidden_;
+    if (filter_state_ != nullptr) filter_state_->show_hidden = show_hidden_;
     folders_first_state_->store(folders_first_, std::memory_order_relaxed);
     // Loading settings must not create config directories as a side effect.
 }
@@ -620,7 +817,7 @@ void FileManagerWindow::notify_sort_changed()
 void FileManagerWindow::toggle_show_hidden()
 {
     show_hidden_ = !show_hidden_;
-    if (filter_hidden_state_ != nullptr) *filter_hidden_state_ = show_hidden_;
+    if (filter_state_ != nullptr) filter_state_->show_hidden = show_hidden_;
     if (visibility_filter_ != nullptr)
         gtk_filter_changed(GTK_FILTER(visibility_filter_), GTK_FILTER_CHANGE_DIFFERENT);
     save_preferences();
@@ -955,7 +1152,9 @@ void FileManagerWindow::navigate_to(GFile *file, const bool record_history)
     unavailable_mounted_place_.reset();
 
     gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection_));
+    hide_search();
     gtk_directory_list_set_file(directory_list_, file);
+    if (record_history) record_recent(file);
     gtk_editable_set_text(GTK_EDITABLE(location_entry_), parse_name);
 
     const std::string title = location.display_name.empty() ? "Files" : "Files — " + location.display_name;
@@ -1102,6 +1301,9 @@ void FileManagerWindow::update_status()
     GListModel *visible = gtk_multi_selection_get_model(selection_);
     const guint count = visible != nullptr ? g_list_model_get_n_items(visible) : 0U;
     if (empty_state_ != nullptr) gtk_widget_set_visible(empty_state_, count == 0U);
+    if (empty_title_ != nullptr) gtk_label_set_text(GTK_LABEL(empty_title_),
+        filter_state_ != nullptr && !filter_state_->query.empty()
+            ? "No matching files" : "This folder is empty");
     GtkBitset *selected = gtk_selection_model_get_selection(GTK_SELECTION_MODEL(selection_));
     const guint selected_count = static_cast<guint>(gtk_bitset_get_size(selected));
     gtk_bitset_unref(selected);
@@ -1505,6 +1707,16 @@ gboolean FileManagerWindow::on_tab_key_pressed(GtkEventControllerKey *, guint ke
             g_object_unref(home);
             return TRUE;
         }
+    }
+    if (keyval == GDK_KEY_Escape && self->search_entry_ != nullptr &&
+        gtk_widget_get_visible(self->search_entry_)) {
+        self->hide_search();
+        self->update_status();
+        return TRUE;
+    }
+    if ((modifiers & GDK_CONTROL_MASK) && (keyval == GDK_KEY_f || keyval == GDK_KEY_F)) {
+        self->show_search();
+        return TRUE;
     }
     if (!(modifiers & GDK_CONTROL_MASK)) return FALSE;
     if ((keyval == GDK_KEY_t || keyval == GDK_KEY_T) &&

@@ -16,6 +16,7 @@ struct CreateFolderTaskData {
     std::string parent_uri;
     std::string name;
     std::string journal_id;
+    bool file{false};
 };
 
 } // namespace
@@ -40,6 +41,11 @@ CreateFolderController::CreateFolderController(GtkWindow *window,
         gtk_widget_set_tooltip_text(button_, "New Folder (Ctrl+Shift+N)");
         gtk_header_bar_pack_end(GTK_HEADER_BAR(titlebar), button_);
         g_signal_connect(button_, "clicked", G_CALLBACK(&CreateFolderController::on_new_folder_clicked), this);
+        new_file_button_ = gtk_button_new_from_icon_name("document-new-symbolic");
+        gtk_widget_set_tooltip_text(new_file_button_, "New Empty File (Ctrl+Alt+N)");
+        gtk_header_bar_pack_end(GTK_HEADER_BAR(titlebar), new_file_button_);
+        g_signal_connect(new_file_button_, "clicked",
+                         G_CALLBACK(&CreateFolderController::on_new_file_clicked), this);
     }
 
     GtkEventController *keys = gtk_event_controller_key_new();
@@ -91,7 +97,12 @@ void CreateFolderController::on_window_finalized(gpointer user_data, GObject *wh
 void CreateFolderController::on_new_folder_clicked(GtkButton *button, gpointer user_data)
 {
     (void)button;
-    static_cast<CreateFolderController *>(user_data)->show_dialog();
+    static_cast<CreateFolderController *>(user_data)->show_dialog(false);
+}
+void CreateFolderController::on_new_file_clicked(GtkButton *button, gpointer user_data)
+{
+    (void)button;
+    static_cast<CreateFolderController *>(user_data)->show_dialog(true);
 }
 
 gboolean CreateFolderController::on_key_pressed(GtkEventControllerKey *controller,
@@ -104,6 +115,11 @@ gboolean CreateFolderController::on_key_pressed(GtkEventControllerKey *controlle
     (void)keycode;
     const bool control = (state & GDK_CONTROL_MASK) != 0;
     const bool shift = (state & GDK_SHIFT_MASK) != 0;
+    if (control && (state & GDK_ALT_MASK) && !shift &&
+        (keyval == GDK_KEY_n || keyval == GDK_KEY_N)) {
+        static_cast<CreateFolderController *>(user_data)->show_dialog(true);
+        return TRUE;
+    }
     if (control && shift && (keyval == GDK_KEY_n || keyval == GDK_KEY_N)) {
         static_cast<CreateFolderController *>(user_data)->show_dialog();
         return TRUE;
@@ -167,9 +183,10 @@ void CreateFolderController::on_dialog_entry_activate(GtkEntry *entry, gpointer 
     static_cast<CreateFolderController *>(user_data)->submit_dialog();
 }
 
-void CreateFolderController::show_dialog()
+void CreateFolderController::show_dialog(const bool file)
 {
-    if (busy_ || button_ == nullptr || !gtk_widget_get_sensitive(button_)) {
+    GtkWidget *target = file ? new_file_button_ : button_;
+    if (busy_ || target == nullptr || !gtk_widget_get_sensitive(target)) {
         return;
     }
     if (dialog_ != nullptr) {
@@ -177,8 +194,9 @@ void CreateFolderController::show_dialog()
         return;
     }
 
+    creating_file_ = file;
     dialog_ = gtk_window_new();
-    gtk_window_set_title(GTK_WINDOW(dialog_), "New Folder");
+    gtk_window_set_title(GTK_WINDOW(dialog_), file ? "New Empty File" : "New Folder");
     gtk_window_set_transient_for(GTK_WINDOW(dialog_), window_);
     gtk_window_set_modal(GTK_WINDOW(dialog_), TRUE);
     gtk_window_set_resizable(GTK_WINDOW(dialog_), FALSE);
@@ -192,12 +210,12 @@ void CreateFolderController::show_dialog()
     gtk_widget_set_margin_bottom(box, 18);
     gtk_window_set_child(GTK_WINDOW(dialog_), box);
 
-    GtkWidget *label = gtk_label_new("Folder name");
+    GtkWidget *label = gtk_label_new(file ? "File name" : "Folder name");
     gtk_label_set_xalign(GTK_LABEL(label), 0.0F);
     gtk_box_append(GTK_BOX(box), label);
 
     entry_ = gtk_entry_new();
-    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_), "New Folder");
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_), file ? "New File.txt" : "New Folder");
     gtk_box_append(GTK_BOX(box), entry_);
     g_signal_connect(entry_, "activate",
                      G_CALLBACK(&CreateFolderController::on_dialog_entry_activate), this);
@@ -234,7 +252,7 @@ void CreateFolderController::submit_dialog()
     const char *text = gtk_editable_get_text(GTK_EDITABLE(entry_));
     const std::string name = text != nullptr ? text : "";
     std::string validation_error;
-    if (!OperationEngine::validate_directory_name(name, &validation_error)) {
+    if (!OperationEngine::validate_item_name(name, &validation_error)) {
         gtk_label_set_text(GTK_LABEL(dialog_message_), validation_error.c_str());
         gtk_widget_set_visible(dialog_message_, TRUE);
         return;
@@ -256,7 +274,8 @@ void CreateFolderController::submit_dialog()
     }
 
     OperationJournal journal;
-    const std::string journal_id = journal.begin("create-folder", path, name);
+    const std::string kind = creating_file_ ? "create-empty-file" : "create-folder";
+    const std::string journal_id = journal.begin(kind, path, name);
     if (journal_id.empty()) {
         g_free(path);
         g_free(uri);
@@ -265,14 +284,14 @@ void CreateFolderController::submit_dialog()
         return;
     }
 
-    auto *data = new CreateFolderTaskData{path, uri, name, journal_id};
+    auto *data = new CreateFolderTaskData{path, uri, name, journal_id, creating_file_};
     g_free(path);
     g_free(uri);
 
     gtk_window_destroy(GTK_WINDOW(dialog_));
     set_busy(true);
     if (status_label_ != nullptr) {
-        gtk_label_set_text(GTK_LABEL(status_label_), "Creating folder…");
+        gtk_label_set_text(GTK_LABEL(status_label_), data->file ? "Creating file…" : "Creating folder…");
     }
 
     GTask *task = g_task_new(G_OBJECT(window_), nullptr,
@@ -293,10 +312,13 @@ void CreateFolderController::on_create_folder_thread(GTask *task,
     (void)cancellable;
     const auto *data = static_cast<const CreateFolderTaskData *>(task_data);
     OperationEngine engine;
-    auto *result = new OperationResult(engine.create_directory(data->parent_path, data->name));
+    auto *result = new OperationResult(data->file
+        ? engine.create_empty_file(data->parent_path, data->name)
+        : engine.create_directory(data->parent_path, data->name));
 
     OperationJournal journal;
-    if (!journal.finish(data->journal_id, "create-folder", *result)) {
+    if (!journal.finish(data->journal_id,
+                        data->file ? "create-empty-file" : "create-folder", *result)) {
         if (result->ok()) {
             result->status = OperationStatus::VerificationFailure;
             result->phase = OperationPhase::Verify;
@@ -330,7 +352,7 @@ void CreateFolderController::on_create_folder_finished(GObject *source_object,
         if (self->status_label_ != nullptr) {
             gtk_label_set_text(GTK_LABEL(self->status_label_), error->message);
         }
-        self->show_alert("New Folder", error->message);
+        self->show_alert(data != nullptr && data->file ? "New Empty File" : "New Folder", error->message);
         g_error_free(error);
         return;
     }
@@ -375,6 +397,7 @@ void CreateFolderController::update_action_state()
     GFile *current = gtk_directory_list_get_file(directory_list_);
     const bool can_create = !busy_ && current != nullptr && g_file_is_native(current);
     gtk_widget_set_sensitive(button_, can_create);
+    if (new_file_button_ != nullptr) gtk_widget_set_sensitive(new_file_button_, can_create);
 }
 
 void CreateFolderController::select_pending_item()

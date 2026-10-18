@@ -3,7 +3,10 @@
 #include "destination_ownership.hpp"
 #include "transfer_operation_engine.hpp"
 
+#include <cerrno>
 #include <cstdint>
+#include <fcntl.h>
+#include <unistd.h>
 #include <string>
 #include <utility>
 
@@ -58,6 +61,89 @@ bool path_present(const std::filesystem::path &path, std::error_code &error)
 }
 
 } // namespace
+
+
+OperationResult OperationEngine::create_empty_file(const std::filesystem::path &parent,
+                                                    const std::string_view name) const
+{
+    std::string reason;
+    if (!validate_item_name(name, &reason))
+        return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight, {},
+                       std::move(reason));
+    if (parent.empty())
+        return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight, {},
+                       "The destination folder is not available.");
+
+    const auto destination = parent / std::filesystem::path(std::string(name));
+    std::error_code error;
+    const auto parent_status = std::filesystem::status(parent, error);
+    if (error || !std::filesystem::is_directory(parent_status))
+        return failure(error ? status_for_error(error) : OperationStatus::InvalidRequest,
+                       OperationPhase::Preflight, destination,
+                       "The destination folder is not accessible.");
+    if (path_present(destination, error))
+        return failure(OperationStatus::DestinationConflict, OperationPhase::Preflight,
+                       destination, "An item with that name already exists.");
+    if (error)
+        return failure(status_for_error(error), OperationPhase::Preflight, destination,
+                       "The destination could not be checked.");
+
+    // The same descriptor-rooted, no-replace publication boundary as New Folder.
+    // An empty file is never constructed directly in the visible namespace.
+    destination_ownership::ProtectedStaging staging;
+    destination_ownership::OwnedOutputs owned;
+    if (!destination_ownership::create_protected_staging(parent, staging, error))
+        return failure(status_for_error(error), OperationPhase::Execute, destination,
+                       "The private file staging area could not be created: " + error.message());
+
+    const int fd = ::openat(staging.descriptor, "payload",
+                            O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0666);
+    if (fd < 0) {
+        error = std::error_code(errno, std::generic_category());
+        return failure(status_for_error(error), OperationPhase::Execute, destination,
+                       "The new file could not be staged: " + error.message());
+    }
+    const int flushed = ::fsync(fd);
+    const int saved_errno = errno;
+    const int closed = ::close(fd);
+    if (flushed != 0 || closed != 0) {
+        error = std::error_code(flushed != 0 ? saved_errno : errno, std::generic_category());
+        return failure(OperationStatus::VerificationFailure, OperationPhase::Verify,
+                       destination, "The new file could not be made durable: " + error.message());
+    }
+
+    const auto private_path = staging.access_root() / "payload";
+    if (!destination_ownership::record_at(
+            staging.descriptor, "payload", private_path, owned, error)) {
+        std::error_code cleanup;
+        std::vector<std::filesystem::path> retained;
+        const bool cleaned = destination_ownership::cleanup_unpublished(
+            staging, destination, owned, cleanup, &retained);
+        return failure(OperationStatus::VerificationFailure, OperationPhase::Verify,
+                       destination, "The staged file identity could not be recorded." +
+                           (cleaned ? std::string{} : retained_paths_message(retained)),
+                       !cleaned, std::move(retained));
+    }
+    if (!destination_ownership::publish_private_tree(
+            staging, private_path, destination, owned, error)) {
+        const auto status = status_for_error(error);
+        std::error_code cleanup;
+        std::vector<std::filesystem::path> retained;
+        const bool cleaned = destination_ownership::cleanup_unpublished(
+            staging, destination, owned, cleanup, &retained);
+        return failure(status, OperationPhase::Execute, destination,
+                       (status == OperationStatus::DestinationConflict
+                           ? "An item with that name already exists."
+                           : "The file could not be published safely: " + error.message()) +
+                       (cleaned ? std::string{} : retained_paths_message(retained)),
+                       !cleaned, std::move(retained));
+    }
+    if (!destination_ownership::verify_all(owned, error))
+        return failure(OperationStatus::VerificationFailure, OperationPhase::Verify,
+                       destination, "The published file could not be verified.", true);
+    return OperationResult{OperationStatus::Success, OperationPhase::Verify, destination,
+                           "Created empty file “" + destination.filename().string() + "”.", true, {}};
+}
 
 bool OperationEngine::validate_item_name(const std::string_view name, std::string *reason)
 {

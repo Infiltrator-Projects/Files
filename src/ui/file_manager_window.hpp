@@ -77,7 +77,13 @@ private:
     static void on_tab_add_clicked(GtkButton *button, gpointer user_data);
     static gboolean on_tab_key_pressed(GtkEventControllerKey *controller, guint keyval,
                                        guint keycode, GdkModifierType state, gpointer user_data);
+    struct FilterState { bool show_hidden{false}; std::string query; };
     static gboolean filter_visible(gpointer item, gpointer user_data);
+    static void on_search_changed(GtkSearchEntry *entry, gpointer user_data);
+    static gboolean on_search_timeout(gpointer user_data);
+    static void on_search_toggle(GtkButton *button, gpointer user_data);
+    static void on_recent_open(GtkButton *button, gpointer user_data);
+    static void on_recent_clear(GtkButton *button, gpointer user_data);
     static void on_bookmark_toggle(GtkButton *button, gpointer user_data);
     static void on_bookmark_action(GtkButton *button, gpointer user_data);
     static void on_back_clicked(GtkButton *button, gpointer user_data);
@@ -139,6 +145,12 @@ private:
     void remember_tab();
     void update_tab_buttons();
     void restore_tab_selection();
+    void load_recents();
+    void save_recents() const;
+    void record_recent(GFile *file);
+    void rebuild_recent_menu();
+    void show_search();
+    void hide_search();
     void load_bookmarks();
     void save_bookmarks() const;
     void append_bookmark(const std::string &uri);
@@ -167,6 +179,13 @@ private:
     GtkWidget *window_{nullptr};
     GtkWidget *tab_strip_{nullptr};
     GtkWidget *bookmark_button_{nullptr};
+    GtkWidget *search_button_{nullptr};
+    GtkWidget *search_entry_{nullptr};
+    GtkWidget *recent_menu_button_{nullptr};
+    GtkWidget *recent_popover_{nullptr};
+    GtkWidget *empty_title_{nullptr};
+    guint search_timeout_{0U};
+    std::vector<std::string> recent_locations_;
     std::vector<TabState> tabs_;
     std::vector<TabState> recently_closed_tabs_;
     std::size_t active_tab_{0};
@@ -196,7 +215,7 @@ private:
     GtkDirectoryList *directory_list_{nullptr};
     GtkMultiSelection *selection_{nullptr};
     GtkCustomFilter *visibility_filter_{nullptr};
-    gboolean *filter_hidden_state_{nullptr};
+    FilterState *filter_state_{nullptr};
     std::shared_ptr<std::atomic_bool> folders_first_state_{
         std::make_shared<std::atomic_bool>(true)};
     GtkSingleSelection *primary_selection_{nullptr};

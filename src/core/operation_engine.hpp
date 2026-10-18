@@ -43,6 +43,8 @@ class OperationEngine final {
 public:
     [[nodiscard]] OperationResult create_directory(const std::filesystem::path &parent,
                                                    std::string_view name) const;
+    [[nodiscard]] OperationResult create_empty_file(const std::filesystem::path &parent,
+                                                    std::string_view name) const;
     [[nodiscard]] OperationResult rename_item(const std::filesystem::path &source,
                                               std::string_view new_name) const;
     [[nodiscard]] OperationResult copy_item(const std::filesystem::path &source,
