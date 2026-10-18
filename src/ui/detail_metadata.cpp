@@ -474,7 +474,8 @@ std::string detail_type_text(GFileInfo *info)
 
     // GtkDirectoryList follows valid links when deriving standard::type. Preserve
     // the link identity explicitly when GIO reports standard::is-symlink.
-    if (g_file_info_get_is_symlink(info)) {
+    if (g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_STANDARD_IS_SYMLINK) &&
+        g_file_info_get_is_symlink(info)) {
         return "Symbolic Link";
     }
 
@@ -495,6 +496,10 @@ std::string detail_type_text(GFileInfo *info)
         break;
     }
 
+    // Minimal GFileInfo instances and some network backends omit MIME type.
+    // Do not call the GIO getter unless the attribute is actually present.
+    if (!g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE))
+        return "File";
     if (const char *content_type = g_file_info_get_content_type(info);
         content_type != nullptr && content_type[0] != '\0') {
         char *description = g_content_type_get_description(content_type);
