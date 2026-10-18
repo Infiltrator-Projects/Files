@@ -104,6 +104,27 @@ int main()
         GtkWidget *popover = GTK_WIDGET(
             gtk_menu_button_get_popover(GTK_MENU_BUTTON(overflow)));
         require(popover != nullptr, "File actions popover is missing");
+        require(gtk_widget_get_sensitive(overflow),
+                "File actions button must be enabled at an empty location");
+        GtkWidget *menu_root = gtk_popover_get_child(GTK_POPOVER(popover));
+        require(GTK_IS_BOX(menu_root), "File actions needs a menu container");
+        GtkWidget *scroller = gtk_widget_get_first_child(menu_root);
+        require(GTK_IS_SCROLLED_WINDOW(scroller),
+                "File actions must be bounded and scrollable on small displays");
+        require(gtk_scrolled_window_get_max_content_height(
+                    GTK_SCROLLED_WINDOW(scroller)) > 0 &&
+                gtk_scrolled_window_get_max_content_height(
+                    GTK_SCROLLED_WINDOW(scroller)) <= 400,
+                "File actions must fit within a laptop-height popup");
+        gtk_menu_button_popup(GTK_MENU_BUTTON(overflow));
+        for (int i = 0; i < 30 && !gtk_widget_get_mapped(popover); ++i) {
+            while (g_main_context_iteration(nullptr, FALSE)) {}
+            g_usleep(1000);
+        }
+        require(gtk_widget_get_mapped(popover),
+                "Clicking File actions must display the native GTK popover");
+        require(gtk_widget_get_height(popover) <= 500,
+                "File actions popup must not exceed the compact test window height");
         require(find_button(popover, "New Folder") != nullptr,
                 "New Folder must remain available after header consolidation");
         require(find_button(popover, "Properties") != nullptr,
@@ -114,6 +135,9 @@ int main()
                 "Clipboard Cut must be available from File actions");
         require(find_button(popover, "Paste") != nullptr,
                 "Clipboard Paste must be available from File actions");
+        gtk_menu_button_popdown(GTK_MENU_BUTTON(overflow));
+        require(!gtk_widget_get_visible(popover),
+                "Closing File actions must dismiss its popover");
 
         bool finalized = false;
         g_object_weak_ref(G_OBJECT(window->native_window()), [](gpointer data, GObject *) {

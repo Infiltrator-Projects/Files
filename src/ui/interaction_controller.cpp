@@ -425,11 +425,30 @@ void InteractionController::install_action_surfaces()
     gtk_header_bar_pack_end(GTK_HEADER_BAR(titlebar), overflow_menu_button_);
 
     overflow_popover_ = gtk_popover_new();
+    gtk_popover_set_has_arrow(GTK_POPOVER(overflow_popover_), TRUE);
+
+    // The action catalogue is taller than a laptop screen. Never make the
+    // native popover grow to the full unbounded height of every action:
+    // constrain its scrolled main section, leaving file clipboard controls
+    // permanently available at the bottom of the menu.
+    GtkWidget *overflow_root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_add_css_class(overflow_root, "ifm-overflow-menu");
+    GtkWidget *overflow_scroller = gtk_scrolled_window_new();
+    gtk_widget_add_css_class(overflow_scroller, "ifm-overflow-scroll");
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(overflow_scroller),
+                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_propagate_natural_height(
+        GTK_SCROLLED_WINDOW(overflow_scroller), TRUE);
+    gtk_scrolled_window_set_max_content_height(
+        GTK_SCROLLED_WINDOW(overflow_scroller), 340);
+    gtk_widget_set_size_request(overflow_scroller, 270, -1);
     GtkWidget *overflow_box =
         build_action_box(overflow_proxies_,
                          &overflow_open_button_,
                          &overflow_properties_button_);
-    gtk_popover_set_child(GTK_POPOVER(overflow_popover_), overflow_box);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(overflow_scroller), overflow_box);
+    gtk_box_append(GTK_BOX(overflow_root), overflow_scroller);
+    gtk_popover_set_child(GTK_POPOVER(overflow_popover_), overflow_root);
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(overflow_menu_button_), overflow_popover_);
 
     context_popover_ = gtk_popover_new();
