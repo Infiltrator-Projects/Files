@@ -188,6 +188,7 @@ int main()
         std::ofstream(a / "selected.txt") << "Selected";
         std::ofstream(a / ".hidden.txt") << "Hidden";
         std::cerr << "workspace-phase: create window\n";
+        std::cerr << "WORKSPACE CHECK 1\n";
         auto *window = new FileManagerWindow(application);
         window->install_operation_surface();
         window->present();
@@ -205,6 +206,7 @@ int main()
         require(FileManagerWindowTestAccess::visible_count(*window) == 1U,
                 "Hiding hidden files must restore the visible model");
         std::cerr << "workspace-phase: search\n";
+        std::cerr << "WORKSPACE CHECK 2\n";
         FileManagerWindowTestAccess::search(*window, "SELECTED");
         await([&] { return FileManagerWindowTestAccess::visible_count(*window) == 1U; });
         FileManagerWindowTestAccess::search(*window, "no-such-match");
@@ -220,6 +222,7 @@ int main()
         require(FileManagerWindowTestAccess::bookmarks(*window) == 1,
                 "Pinning must append one bookmark");
         std::cerr << "workspace-phase: tabs\n";
+        std::cerr << "WORKSPACE CHECK 3\n";
         FileManagerWindowTestAccess::add(*window, b);
         require(FileManagerWindowTestAccess::tabs(*window) == 2,
                 "New tab must preserve existing tab");
@@ -258,6 +261,7 @@ int main()
         require(FileManagerWindowTestAccess::active(*window) == 1U &&
                 FileManagerWindowTestAccess::uri(*window) == uri(c),
                 "Tab reorder must preserve the active directory");
+        std::cerr << "WORKSPACE CHECK 4\n";
         FileManagerWindowTestAccess::close(*window);
         require(FileManagerWindowTestAccess::tabs(*window) == 2U,
                 "Closing a tab must remove just that tab");
@@ -272,6 +276,7 @@ int main()
         await([&] { return !gtk_directory_list_is_loading(
             FileManagerWindowTestAccess::directory(*window)); });
         select_name(*window, "renamed.txt");
+        std::cerr << "WORKSPACE CHECK 5\n";
         GtkWidget *copy = find_clipboard_button(*window, "Copy");
         GtkWidget *paste = find_clipboard_button(*window, "Paste");
         require(copy != nullptr && paste != nullptr,
@@ -281,9 +286,11 @@ int main()
         GdkClipboard *clipboard = gdk_display_get_clipboard(
             gtk_widget_get_display(GTK_WIDGET(window->native_window())));
         require(clipboard != nullptr, "Test requires a display clipboard");
+        std::cerr << "WORKSPACE CHECK 6\n";
         gdk_clipboard_set_text(clipboard, "not a file reference");
         FileManagerWindowTestAccess::navigate(*window, b);
         std::cerr << "workspace-phase: clipboard paste\n";
+        std::cerr << "WORKSPACE CHECK 7\n";
         g_signal_emit_by_name(paste, "clicked");
         await([&] { return !gtk_directory_list_is_loading(
             FileManagerWindowTestAccess::directory(*window)); });
@@ -291,14 +298,17 @@ int main()
         require(!std::filesystem::exists(b / "renamed.txt"),
                 "Paste must not act on an old file after clipboard ownership changes");
         std::cerr << "workspace-phase: destroy first window\n";
+        std::cerr << "WORKSPACE CHECK 8\n";
         gtk_window_destroy(window->native_window());
         while (g_main_context_iteration(nullptr, FALSE)) {}
         std::cerr << "workspace-phase: reopen window\n";
+        std::cerr << "WORKSPACE CHECK 9\n";
         auto *reopened = new FileManagerWindow(application);
         require(FileManagerWindowTestAccess::bookmarks(*reopened) == 1,
                 "Bookmark must survive a new window and profile read");
         require(FileManagerWindowTestAccess::recents(*reopened) >= 1U,
                 "Recent locations must survive new windows and process reinitialisation");
+        std::cerr << "WORKSPACE CHECK 10\n";
         FileManagerWindowTestAccess::clear_recents(*reopened);
         require(FileManagerWindowTestAccess::recents(*reopened) == 0U,
                 "Clearing recent history must empty the in-memory list");
@@ -309,6 +319,7 @@ int main()
         require(FileManagerWindowTestAccess::icons_active(*reopened),
                 "Default view preference must survive application restart");
         std::cerr << "workspace-phase: destroy reopened window\n";
+        std::cerr << "WORKSPACE CHECK 11\n";
         gtk_window_destroy(reopened->native_window());
         while (g_main_context_iteration(nullptr, FALSE)) {}
     } catch (const std::exception &error) {
