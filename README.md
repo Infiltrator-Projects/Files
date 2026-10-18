@@ -93,7 +93,7 @@ It currently provides:
 - a real GTK multi-selection model for selecting more than one directory item while preserving the existing single-item action contract when exactly one item is selected;
 - deterministic **New Folder**, available from the header action or `Ctrl+Shift+N` for native locations;
 - deterministic **Rename**, including inline filename editing in List, Icons and Compact views via `F2`, preserving the filename extension when initially selecting text and reusing the journalled rename engine;
-- right-click item actions and one consolidated header overflow menu with the same underlying operation controllers;
+- right-click item actions and one consolidated, height-bounded scrollable header overflow menu (with Copy/Cut/Paste accessible in the footer), sharing the same underlying operation controllers;
 - a read-only Properties surface for selected-item metadata;
 - system clipboard file-reference Copy/Cut/Paste (`Ctrl+C`/`Ctrl+X`/`Ctrl+V`) using the same batch transfer engine and collision decisions;
 - copy-only drag-and-drop of local file selections onto browseable local folders or sidebar destinations, with journalled mutation; the source deliberately does not negotiate external drag-move deletion;
