@@ -26,6 +26,16 @@ static int detail_metadata_failure(int code)
     return code;
 }
 
+static bool matches_clock(const std::string &visible,const char *date,
+    const char *id,const char *expected)
+{
+    InfiltratrTemporalClockModule *module=infiltratr_temporal_clock_module_open_id(id);
+    const bool installed=module != nullptr;
+    infiltratr_temporal_clock_module_free(module);
+    return visible == std::string(date)+" "+
+        (installed ? expected : "clock resource unavailable");
+}
+
 int main()
 {
     const std::string invalid_utf8("%H:%M:%S\xff");
@@ -254,29 +264,19 @@ int main()
     std::strcpy(policy.clock_mode, "chinese-time");
     policy.show_seconds = false;
     g_file_info_set_attribute_uint64(file, G_FILE_ATTRIBUTE_TIME_MODIFIED, 1791646200U);
-    InfiltratrTemporalClockModule *chinese_clock =
-        infiltratr_temporal_clock_module_open_id("chinese-time");
-    const bool chinese_resource_available = chinese_clock != nullptr;
-    infiltratr_temporal_clock_module_free(chinese_clock);
     const bool saved_coarse = infiltratr_temporal_posix_policy_save(&policy) == 0;
     const std::string coarse_text = detail_modified_text(file, date_provider);
     const bool coarse_ok = saved_coarse &&
-        coarse_text == (chinese_resource_available
-            ? "Chinese lunar date Shēn hour"
-            : "Chinese lunar date clock resource unavailable");
+        matches_clock(coarse_text,"Chinese lunar date","chinese-time","Shēn hour");
     policy.show_seconds = true;
     const bool saved_fine = infiltratr_temporal_posix_policy_save(&policy) == 0;
     const std::string fine_text = detail_modified_text(file, date_provider);
     const bool fine_ok = saved_fine &&
-        fine_text == (chinese_resource_available
-            ? "Chinese lunar date Shēn, first half"
-            : "Chinese lunar date clock resource unavailable");
+        matches_clock(fine_text,"Chinese lunar date","chinese-time","Shēn, first half");
     g_setenv("LANGUAGE", "zh_TW", TRUE);
     const std::string chinese_text = detail_modified_text(file, date_provider);
     const bool chinese_language_ok =
-        chinese_text == (chinese_resource_available
-            ? "中文日期 申初"
-            : "中文日期 clock resource unavailable");
+        matches_clock(chinese_text,"中文日期","chinese-time","申初");
     std::strcpy(policy.clock_mode, "standard-12");
     policy.show_seconds = false;
     const bool saved_twelve = infiltratr_temporal_posix_policy_save(&policy) == 0;
@@ -302,9 +302,7 @@ int main()
     const bool saved_unavailable = infiltratr_temporal_posix_policy_save(&policy) == 0;
     const std::string unavailable_text = detail_modified_text(file, date_provider);
     const bool unavailable_ok = saved_unavailable &&
-        unavailable_text == (chinese_resource_available
-            ? "— Shēn, first half"
-            : "— clock resource unavailable");
+        matches_clock(unavailable_text,"calendar resource unavailable","chinese-time","Shēn, first half");
     bool edo_ok = true;
     policy.location_configured = true;
     policy.latitude = 0.0;
@@ -313,18 +311,8 @@ int main()
     g_file_info_set_attribute_uint64(file, G_FILE_ATTRIBUTE_TIME_MODIFIED, 946728000U);
     for (const char *mode : {"japanese-temporal", "japanese-temporal-early"}) {
         std::strcpy(policy.clock_mode, mode);
-        // These historical Japanese modes still have an independent
-        // Common-owned seasonal formatter. They do not require a native
-        // standard-12/decimal/etc. clock resource module to be installed.
-        const bool saved_edo = infiltratr_temporal_posix_policy_save(&policy) == 0;
-        const std::string edo_text = detail_modified_text(file, date_provider);
-        const bool expected_edo = edo_text == "— Mi · 四 bells";
-        if (!expected_edo) {
-            std::fprintf(stderr,
-                "edo temporal fixture mode=%s saved=%d actual='%s'\n",
-                mode, (int)saved_edo, edo_text.c_str());
-        }
-        edo_ok = edo_ok && saved_edo && expected_edo;
+        edo_ok = edo_ok && infiltratr_temporal_posix_policy_save(&policy) == 0 &&
+            matches_clock(detail_modified_text(file,date_provider),"calendar resource unavailable",mode,"Mi · 四 bells");
     }
     infiltratr_temporal_posix_date_provider_free(date_provider);
     if (!coarse_ok || !fine_ok || !chinese_language_ok || !twelve_language_ok ||
@@ -352,7 +340,10 @@ int main()
     for (const char *mode : {"decimal", "internet", "unix", "hexadecimal",
                              "binary", "julian", "modified-julian",
                              "standard-12", "standard-24",
-                             "chinese-ke", "mean-solar"}) {
+                             "chinese-ke", "mean-solar", "sidereal", "solar", "chinese-time",
+                             "roman-temporal", "japanese-temporal", "japanese-temporal-early",
+                             "italian-hours", "babylonian-hours", "babylonian-ancient",
+                             "indian-ghati", "nuremberg-hours", "nuremberg-solar"}) {
         std::strcpy(policy.clock_mode, mode);
         if (infiltratr_temporal_posix_policy_save(&policy) != 0) {
             g_free(config_home);

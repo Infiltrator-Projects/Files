@@ -19,7 +19,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(INFILTRATOR_BUILD_PROFILE "release" CACHE STRING "Files build profile recorded in BUILD-INFO")
 set(INFILTRATOR_PGO_STATUS "not trained" CACHE STRING "Files PGO status recorded in BUILD-INFO")
 
-set(INFILTRATR_COMMON_MINIMUM_VERSION "1.19.57")
+set(INFILTRATR_COMMON_MINIMUM_VERSION "1.19.64")
 set(INFILTRATR_COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/infiltratr-common")
 
 if(NOT EXISTS "${INFILTRATR_COMMON_DIR}/VERSION")
@@ -242,7 +242,7 @@ set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Infiltrator Projects")
 set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "ca-certificates, fontconfig, curl | wget")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "ca-certificates, fontconfig, curl | wget, infiltrator-calendar-resources (>= 1.0.116)")
 set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
     "${CMAKE_CURRENT_SOURCE_DIR}/packaging/postinst")
 set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)

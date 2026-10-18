@@ -549,22 +549,14 @@ std::string detail_modified_text(GFileInfo *info,
         // configured; its historic Files default includes seconds.
         policy.show_seconds = true;
     }
-    std::string date = "—";
-    if (std::strcmp(policy.calendar, "gregorian") == 0) {
-        char *formatted = g_date_time_format(local, "%x");
-        if (formatted != nullptr && formatted[0] != '\0') {
-            date = formatted;
-        }
-        g_free(formatted);
-    } else {
-        char formatted[INFILTRATR_TEMPORAL_DATE_CAPACITY]{};
-        if (infiltratr_temporal_posix_format_date(
-                date_provider != nullptr ? date_provider : default_date_provider(),
-                policy.calendar, g_date_time_get_year(local),
-                g_date_time_get_month(local), g_date_time_get_day_of_month(local),
-                "short", formatted, sizeof(formatted), nullptr)) {
-            date = formatted;
-        }
+    std::string date = "calendar resource unavailable";
+    char formatted[INFILTRATR_TEMPORAL_DATE_CAPACITY]{};
+    if (infiltratr_temporal_posix_format_date(
+            date_provider != nullptr ? date_provider : default_date_provider(),
+            policy.calendar, g_date_time_get_year(local),
+            g_date_time_get_month(local), g_date_time_get_day_of_month(local),
+            "short", formatted, sizeof(formatted), nullptr)) {
+        date = formatted;
     }
     // Missing selected chronology stays unavailable; never silently substitute
     // a Gregorian date under the user's chosen calendar. Raw sort values remain
