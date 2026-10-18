@@ -663,6 +663,7 @@ void FileManagerWindow::load_recents()
     }
     g_free(content);
     g_free(path);
+    rebuild_recent_menu();
 }
 void FileManagerWindow::save_recents() const
 {
@@ -727,10 +728,13 @@ void FileManagerWindow::on_recent_open(GtkButton *button, gpointer user_data)
     auto *self = static_cast<FileManagerWindow *>(user_data);
     const auto *uri = static_cast<const char *>(g_object_get_data(G_OBJECT(button), "recent-uri"));
     if (uri == nullptr) return;
-    GFile *file = g_file_new_for_uri(uri);
+    // Navigation refreshes the Recent popover; own the target independently
+    // before the active button's menu can be rebuilt and destroyed.
+    std::string target(uri);
+    gtk_popover_popdown(GTK_POPOVER(self->recent_popover_));
+    GFile *file = g_file_new_for_uri(target.c_str());
     self->navigate_to(file, true);
     g_object_unref(file);
-    gtk_popover_popdown(GTK_POPOVER(self->recent_popover_));
 }
 void FileManagerWindow::on_recent_clear(GtkButton *, gpointer user_data)
 {

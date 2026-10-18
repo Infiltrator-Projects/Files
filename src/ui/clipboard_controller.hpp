@@ -51,6 +51,10 @@ private:
                                      guint n_items,
                                      gpointer user_data);
     static void on_location_changed(GObject *object, GParamSpec *pspec, gpointer user_data);
+    static void on_clipboard_stream_open(GObject *source_object,
+                                         GAsyncResult *result, gpointer user_data);
+    static void on_clipboard_stream_read(GObject *source_object,
+                                         GAsyncResult *result, gpointer user_data);
     static void on_clipboard_text_read(GObject *source_object,
                                        GAsyncResult *result,
                                        gpointer user_data);
@@ -103,6 +107,8 @@ private:
     PendingConflict pending_conflict_{};
     bool busy_{false};
     bool reading_external_clipboard_{false};
+    guint64 clipboard_generation_{0U};
+    guint64 clipboard_read_generation_{0U};
     gulong selection_handler_{0U};
     gulong location_handler_{0U};
 };

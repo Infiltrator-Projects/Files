@@ -71,6 +71,7 @@ private:
     void close_popovers();
     void select_item_at_pointer(GtkWidget *view, double x, double y);
     void open_primary();
+    void show_open_with();
     void show_properties();
 
     GtkWidget *create_action_button(GtkWidget *box,
@@ -108,6 +109,8 @@ private:
     GtkWidget *context_properties_button_{nullptr};
 
     GtkWidget *new_folder_target_{nullptr};
+    GtkWidget *new_file_target_{nullptr};
+    std::vector<GtkWidget *> open_with_actions_;
     GtkWidget *rename_target_{nullptr};
     GtkWidget *copy_target_{nullptr};
     GtkWidget *move_target_{nullptr};

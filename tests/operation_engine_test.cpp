@@ -76,6 +76,25 @@ int main()
         return 91;
     }
 
+    // New File must be no-replace, empty, and never damage an existing item.
+    const auto new_file = engine.create_empty_file(root, "blank.txt");
+    if (!new_file.ok() || !new_file.changed ||
+        !fs::is_regular_file(root / "blank.txt") || fs::file_size(root / "blank.txt") != 0) {
+        fs::remove_all(root, cleanup_error);
+        return 93;
+    }
+    const auto existing_file = engine.create_empty_file(root, "blank.txt");
+    if (existing_file.status != OperationStatus::DestinationConflict ||
+        existing_file.changed || fs::file_size(root / "blank.txt") != 0) {
+        fs::remove_all(root, cleanup_error);
+        return 94;
+    }
+    const auto bad_file = engine.create_empty_file(root, "../escape.txt");
+    if (bad_file.status != OperationStatus::InvalidRequest || bad_file.changed) {
+        fs::remove_all(root, cleanup_error);
+        return 95;
+    }
+
     const fs::path original = root / "original.txt";
     if (!write_text(original, "rename-copy-move\n")) {
         fs::remove_all(root, cleanup_error);

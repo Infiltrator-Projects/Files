@@ -24,6 +24,12 @@ struct FileManagerWindowTestAccess {
     }
     static void activate(FileManagerWindow &w, std::size_t i) { w.activate_tab(i); }
     static std::size_t tabs(const FileManagerWindow &w) { return w.tabs_.size(); }
+    static void search(FileManagerWindow &w, const char *query) {
+        w.show_search();
+        gtk_editable_set_text(GTK_EDITABLE(w.search_entry_), query);
+    }
+    static std::size_t recents(FileManagerWindow &w) { return w.recent_locations_.size(); }
+    static void clear_recents(FileManagerWindow &w) { FileManagerWindow::on_recent_clear(nullptr, &w); }
     static guint visible_count(FileManagerWindow &w) {
         GListModel *model = gtk_multi_selection_get_model(w.selection_);
         return model != nullptr ? g_list_model_get_n_items(model) : 0U;
@@ -163,6 +169,8 @@ int main()
     g_free(temporary);
     const auto config = root / "config";
     g_setenv("XDG_CONFIG_HOME", config.c_str(), TRUE);
+    g_setenv("XDG_STATE_HOME", (root / "state").c_str(), TRUE);
+    g_setenv("HOME", root.c_str(), TRUE);
     g_setenv("GTK_A11Y", "none", TRUE);
     g_setenv("GSETTINGS_BACKEND", "memory", TRUE);
     gtk_init();
@@ -195,6 +203,14 @@ int main()
         window->toggle_show_hidden();
         require(FileManagerWindowTestAccess::visible_count(*window) == 1U,
                 "Hiding hidden files must restore the visible model");
+        FileManagerWindowTestAccess::search(*window, "SELECTED");
+        await([&] { return FileManagerWindowTestAccess::visible_count(*window) == 1U; });
+        FileManagerWindowTestAccess::search(*window, "no-such-match");
+        await([&] { return FileManagerWindowTestAccess::visible_count(*window) == 0U; });
+        FileManagerWindowTestAccess::search(*window, "selected");
+        await([&] { return FileManagerWindowTestAccess::visible_count(*window) == 1U; });
+        require(FileManagerWindowTestAccess::recents(*window) >= 1U,
+                "Visited native home folders should appear in Recent");
         select_name(*window, "selected.txt");
         FileManagerWindowTestAccess::pin(*window);
         FileManagerWindowTestAccess::set_icons(*window);
@@ -270,6 +286,11 @@ int main()
         auto *reopened = new FileManagerWindow(application);
         require(FileManagerWindowTestAccess::bookmarks(*reopened) == 1,
                 "Bookmark must survive a new window and profile read");
+        require(FileManagerWindowTestAccess::recents(*reopened) >= 1U,
+                "Recent locations must survive new windows and process reinitialisation");
+        FileManagerWindowTestAccess::clear_recents(*reopened);
+        require(FileManagerWindowTestAccess::recents(*reopened) == 0U,
+                "Clearing recent history must empty the in-memory list");
         require(reopened->show_hidden(),
                 "Hidden-files preference must survive application restart");
         require(!reopened->sidebar_visible(),

@@ -223,6 +223,8 @@ void InteractionController::discover_existing_actions()
 
     GtkWidget *new_folder_button =
         find_widget_by_tooltip(titlebar, "New Folder (Ctrl+Shift+N)");
+    GtkWidget *new_file_button =
+        find_widget_by_tooltip(titlebar, "New Empty File (Ctrl+Alt+N)");
     GtkWidget *single_menu =
         find_widget_by_tooltip(titlebar, "Selected item actions");
     GtkWidget *batch_menu =
@@ -231,6 +233,7 @@ void InteractionController::discover_existing_actions()
         find_widget_by_tooltip(titlebar, "Trash, restore and permanent delete");
 
     new_folder_target_ = new_folder_button;
+    new_file_target_ = new_file_button;
     rename_target_ = menu_action(single_menu, "Rename");
     copy_target_ = menu_action(single_menu, "Copy to…");
     move_target_ = menu_action(single_menu, "Move to…");
@@ -240,7 +243,7 @@ void InteractionController::discover_existing_actions()
     restore_target_ = menu_action(destructive_menu, "Restore");
     delete_target_ = menu_action(destructive_menu, "Delete Permanently…");
 
-    for (GtkWidget *legacy : {new_folder_button, single_menu, batch_menu, destructive_menu}) {
+    for (GtkWidget *legacy : {new_folder_button, new_file_button, single_menu, batch_menu, destructive_menu}) {
         if (legacy != nullptr) {
             gtk_widget_set_visible(legacy, FALSE);
         }
@@ -332,6 +335,9 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
     *open_button = create_action_button(
         box, "Open", nullptr, ActionScope::SingleSelection, proxies,
         G_CALLBACK(&InteractionController::on_open_clicked));
+    GtkWidget *open_with = add_command(box, "Open With…", "open-with",
+                                       ActionScope::SingleSelection, proxies);
+    open_with_actions_.push_back(open_with);
 
     GtkWidget *open_tab = gtk_button_new_with_label("Open folder in new tab");
     gtk_widget_add_css_class(open_tab, "flat");
@@ -355,6 +361,8 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
         add_command(box, "Reopen Closed Tab", "reopen-tab", ActionScope::Always, proxies);
     }
     create_action_button(box, "New Folder", new_folder_target_,
+                         ActionScope::Always, proxies);
+    create_action_button(box, "New Empty File", new_file_target_,
                          ActionScope::Always, proxies);
     add_separator(box);
 
@@ -483,7 +491,8 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
     auto *window = static_cast<FileManagerWindow *>(
         g_object_get_data(G_OBJECT(self->window_), "ifm-window-controller"));
     if (window == nullptr) return;
-    if (g_strcmp0(command, "new-window") == 0) window->open_new_window();
+    if (g_strcmp0(command, "open-with") == 0) self->show_open_with();
+    else if (g_strcmp0(command, "new-window") == 0) window->open_new_window();
     else if (g_strcmp0(command, "folder-window") == 0) {
         (void)window->open_primary_directory_in_new_window();
     }
@@ -517,6 +526,121 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
     }
     self->update_action_state();
     self->close_popovers();
+}
+
+
+void InteractionController::show_open_with()
+{
+    if (window_ == nullptr || directory_list_ == nullptr || primary_selection_ == nullptr)
+        return;
+    auto *info = G_FILE_INFO(gtk_single_selection_get_selected_item(primary_selection_));
+    GFile *parent = gtk_directory_list_get_file(directory_list_);
+    if (info == nullptr || parent == nullptr ||
+        g_file_info_get_file_type(info) != G_FILE_TYPE_REGULAR)
+        return;
+    const char *name = g_file_info_get_name(info);
+    if (name == nullptr || *name == '\0') return;
+
+    const char *type = g_file_info_get_content_type(info);
+    char *guessed = nullptr;
+    if (type == nullptr || *type == '\0') {
+        guessed = g_content_type_guess(name, nullptr, 0, nullptr);
+        type = guessed;
+    }
+    GList *apps = type != nullptr ? g_app_info_get_all_for_type(type) : nullptr;
+    if (apps == nullptr) {
+        gtk_label_set_text(GTK_LABEL(status_label_),
+                           "No compatible installed application is registered for this file type.");
+        g_free(guessed);
+        return;
+    }
+
+    struct Choice {
+        GList *apps{nullptr};
+        GFile *file{nullptr};
+        GtkDropDown *drop{nullptr};
+        GtkCheckButton *default_box{nullptr};
+        std::string type;
+        ~Choice() {
+            if (apps) g_list_free_full(apps, g_object_unref);
+            if (file) g_object_unref(file);
+        }
+    };
+    GtkWidget *dialog = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(dialog), "Open With");
+    gtk_window_set_transient_for(GTK_WINDOW(dialog), window_);
+    gtk_window_set_destroy_with_parent(GTK_WINDOW(dialog), TRUE);
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 440, -1);
+    auto *choice = new Choice{apps, g_file_get_child(parent, name), nullptr, nullptr,
+                              type != nullptr ? type : ""};
+    g_object_set_data_full(G_OBJECT(dialog), "ifm-open-with",
+                           choice, [](gpointer data) { delete static_cast<Choice *>(data); });
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    gtk_widget_set_margin_start(box, 18);
+    gtk_widget_set_margin_end(box, 18);
+    gtk_widget_set_margin_top(box, 18);
+    gtk_widget_set_margin_bottom(box, 18);
+    gtk_window_set_child(GTK_WINDOW(dialog), box);
+    gtk_box_append(GTK_BOX(box), gtk_label_new("Choose an installed application"));
+    GPtrArray *names = g_ptr_array_new_with_free_func(g_free);
+    for (GList *iter = apps; iter != nullptr; iter = iter->next) {
+        auto *app = G_APP_INFO(iter->data);
+        g_ptr_array_add(names, g_strdup(g_app_info_get_display_name(app)));
+    }
+    g_ptr_array_add(names, nullptr);
+    GtkWidget *dropdown = gtk_drop_down_new_from_strings(
+        reinterpret_cast<const char *const *>(names->pdata));
+    g_ptr_array_free(names, TRUE);
+    choice->drop = GTK_DROP_DOWN(dropdown);
+    gtk_widget_set_hexpand(dropdown, TRUE);
+    gtk_box_append(GTK_BOX(box), dropdown);
+    GtkWidget *defaults = gtk_check_button_new_with_label(
+        "Use this application as the default for this file type");
+    choice->default_box = GTK_CHECK_BUTTON(defaults);
+    gtk_box_append(GTK_BOX(box), defaults);
+    GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_set_halign(actions, GTK_ALIGN_END);
+    gtk_box_append(GTK_BOX(box), actions);
+    GtkWidget *cancel = gtk_button_new_with_label("Cancel");
+    GtkWidget *launch = gtk_button_new_with_label("Open");
+    gtk_widget_add_css_class(launch, "suggested-action");
+    gtk_box_append(GTK_BOX(actions), cancel);
+    gtk_box_append(GTK_BOX(actions), launch);
+    g_signal_connect_swapped(cancel, "clicked",
+                              G_CALLBACK(gtk_window_destroy), dialog);
+    g_signal_connect(launch, "clicked", G_CALLBACK(+[](GtkButton *, gpointer raw) {
+        auto *win = GTK_WINDOW(raw);
+        auto *data = static_cast<Choice *>(g_object_get_data(G_OBJECT(win), "ifm-open-with"));
+        if (data == nullptr) return;
+        const guint index = gtk_drop_down_get_selected(data->drop);
+        if (index == GTK_INVALID_LIST_POSITION) return;
+        auto *app = G_APP_INFO(g_list_nth_data(data->apps, index));
+        if (app == nullptr) return;
+        GList items{data->file, nullptr, nullptr};
+        GError *error = nullptr;
+        if (!g_app_info_launch(app, &items, nullptr, &error)) {
+            GtkAlertDialog *alert = gtk_alert_dialog_new("Could not open file");
+            gtk_alert_dialog_set_detail(alert, error != nullptr ? error->message : "Application launch failed.");
+            gtk_alert_dialog_show(alert, win);
+            g_object_unref(alert);
+            g_clear_error(&error);
+            return;
+        }
+        if (gtk_check_button_get_active(data->default_box) &&
+            !data->type.empty() &&
+            !g_app_info_set_as_default_for_type(app, data->type.c_str(), &error)) {
+            GtkAlertDialog *alert = gtk_alert_dialog_new("Default application could not be saved");
+            gtk_alert_dialog_set_detail(alert, error != nullptr ? error->message : "Association update failed.");
+            gtk_alert_dialog_show(alert, win);
+            g_object_unref(alert);
+            g_clear_error(&error);
+            return;
+        }
+        gtk_window_destroy(win);
+    }), dialog);
+    gtk_window_present(GTK_WINDOW(dialog));
+    g_free(guessed);
 }
 
 void InteractionController::on_open_clicked(GtkButton *button, gpointer user_data)
@@ -757,6 +881,12 @@ void InteractionController::update_action_state()
     for (GtkWidget *button : open_in_window_actions_) {
         gtk_widget_set_visible(button, folder);
         gtk_widget_set_sensitive(button, folder);
+    }
+    const bool regular = count == 1U && info != nullptr &&
+        g_file_info_get_file_type(info) == G_FILE_TYPE_REGULAR;
+    for (GtkWidget *button : open_with_actions_) {
+        gtk_widget_set_visible(button, regular);
+        gtk_widget_set_sensitive(button, regular);
     }
     auto *window = static_cast<FileManagerWindow *>(
         g_object_get_data(G_OBJECT(window_), "ifm-window-controller"));

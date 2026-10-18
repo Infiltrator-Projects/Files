@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <cstring>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -12,6 +13,17 @@
 namespace infiltrator::files {
 
 namespace {
+
+struct ClipboardReadData {
+    ClipboardController *controller{nullptr};
+    GtkWindow *held_window{nullptr};
+    GInputStream *stream{nullptr};
+    std::string destination;
+    guint64 generation{0U};
+    bool special{false};
+    std::vector<char> bytes = std::vector<char>(256U * 1024U + 1U);
+    ~ClipboardReadData() { g_clear_object(&stream); if (held_window) g_object_unref(held_window); }
+};
 
 struct ClipboardTaskData {
     int mode{0};
@@ -261,6 +273,7 @@ void ClipboardController::on_clipboard_changed(GdkClipboard *clipboard, gpointer
 {
     auto *self = static_cast<ClipboardController *>(data);
     if (gdk_clipboard_get_content(clipboard) == self->owned_content_) return;
+    ++self->clipboard_generation_;
     self->mode_ = Mode::None;
     self->sources_.clear();
     g_clear_object(&self->owned_content_);
@@ -333,11 +346,89 @@ void ClipboardController::paste()
     }
 
     reading_external_clipboard_ = true;
+    clipboard_read_generation_ = clipboard_generation_;
     update_action_state();
     set_status("Reading file references from the clipboard…");
     g_object_ref(window_);
-    gdk_clipboard_read_text_async(clipboard, nullptr,
-                                  &ClipboardController::on_clipboard_text_read, this);
+    const GdkContentFormats *formats = gdk_clipboard_get_formats(clipboard);
+    const bool structured = formats != nullptr && (
+        gdk_content_formats_contain_mime_type(formats, "x-special/gnome-copied-files") ||
+        gdk_content_formats_contain_mime_type(formats, "text/uri-list"));
+    if (structured) {
+        const char *types[] = {"x-special/gnome-copied-files", "text/uri-list", nullptr};
+        gdk_clipboard_read_async(clipboard, types, G_PRIORITY_DEFAULT, nullptr,
+                                 &ClipboardController::on_clipboard_stream_open, this);
+    } else {
+        gdk_clipboard_read_text_async(clipboard, nullptr,
+                                      &ClipboardController::on_clipboard_text_read, this);
+    }
+}
+
+
+void ClipboardController::on_clipboard_stream_open(GObject *source_object,
+                                                    GAsyncResult *result, gpointer user_data)
+{
+    auto *self = static_cast<ClipboardController *>(user_data);
+    const char *mime = nullptr;
+    GError *error = nullptr;
+    GInputStream *stream = gdk_clipboard_read_finish(GDK_CLIPBOARD(source_object),
+                                                      result, &mime, &error);
+    if (stream == nullptr || error != nullptr) {
+        self->reading_external_clipboard_ = false;
+        self->update_action_state();
+        self->set_status("Could not read file references from the clipboard.");
+        g_clear_error(&error);
+        if (stream != nullptr) g_object_unref(stream);
+        g_object_unref(self->window_);
+        return;
+    }
+    auto *read = new ClipboardReadData();
+    read->controller = self;
+    // Transfer the one window reference captured in paste() to this request.
+    read->held_window = self->window_;
+    read->stream = stream;
+    read->generation = self->clipboard_read_generation_;
+    read->special = g_strcmp0(mime, "x-special/gnome-copied-files") == 0;
+    read->destination = self->current_destination();
+    g_input_stream_read_all_async(stream, read->bytes.data(), read->bytes.size(),
+                                  G_PRIORITY_DEFAULT, nullptr,
+                                  &ClipboardController::on_clipboard_stream_read, read);
+}
+void ClipboardController::on_clipboard_stream_read(GObject *source_object,
+                                                    GAsyncResult *result, gpointer user_data)
+{
+    std::unique_ptr<ClipboardReadData> read(static_cast<ClipboardReadData *>(user_data));
+    auto *self = read->controller;
+    gsize n = 0;
+    GError *error = nullptr;
+    const bool ok = g_input_stream_read_all_finish(G_INPUT_STREAM(source_object),
+                                                    result, &n, &error);
+    self->reading_external_clipboard_ = false;
+    self->update_action_state();
+    if (!ok || error != nullptr || n == read->bytes.size() ||
+        read->generation != self->clipboard_generation_) {
+        self->set_status("Clipboard changed, could not be read, or contains too many references.");
+        g_clear_error(&error);
+        return;
+    }
+    read->bytes[n] = '\0';
+    if (memchr(read->bytes.data(), '\0', n) != nullptr) {
+        self->set_status("The clipboard contains invalid file reference data.");
+        return;
+    }
+    std::string input(read->bytes.data(), n);
+    const bool cut = read->special && input.rfind("cut\n", 0U) == 0U;
+    const auto sources = self->parse_local_file_references(input.c_str());
+    if (sources.empty()) {
+        self->set_status("The clipboard contains no accessible local file references.");
+        return;
+    }
+    if (read->destination.empty() || read->destination != self->current_destination()) {
+        self->set_status("The destination changed while reading the clipboard.");
+        return;
+    }
+    self->paste_sources(cut ? Mode::Cut : Mode::Copy, sources, read->destination,
+                        BatchConflictPolicy::Fail);
 }
 
 void ClipboardController::on_clipboard_text_read(GObject *source_object,
@@ -352,6 +443,13 @@ void ClipboardController::on_clipboard_text_read(GObject *source_object,
     self->reading_external_clipboard_ = false;
     self->update_action_state();
 
+    if (self->clipboard_read_generation_ != self->clipboard_generation_) {
+        g_free(text);
+        g_clear_error(&error);
+        self->set_status("Clipboard contents changed before Paste.");
+        g_object_unref(held_window);
+        return;
+    }
     if (error != nullptr) {
         self->set_status("The clipboard does not contain readable local file references.");
         g_error_free(error);
@@ -581,8 +679,26 @@ void ClipboardController::publish_clipboard_text()
         payload += uri;
         g_free(uri);
     }
-    GdkContentProvider *provider = gdk_content_provider_new_typed(
-        G_TYPE_STRING, payload.c_str());
+    std::string gnome = (mode_ == Mode::Cut ? "cut\n" : "copy\n") + payload + "\n";
+    std::string uri_list;
+    for (const std::string &source : sources_) {
+        GFile *file = g_file_new_for_path(source.c_str());
+        char *uri = g_file_get_uri(file);
+        if (uri != nullptr) { uri_list += uri; uri_list += "\r\n"; }
+        g_free(uri);
+        g_object_unref(file);
+    }
+    GBytes *gnome_bytes = g_bytes_new(gnome.data(), gnome.size());
+    GBytes *uri_bytes = g_bytes_new(uri_list.data(), uri_list.size());
+    GdkContentProvider *providers[] = {
+        gdk_content_provider_new_for_bytes("x-special/gnome-copied-files", gnome_bytes),
+        gdk_content_provider_new_for_bytes("text/uri-list", uri_bytes),
+        gdk_content_provider_new_typed(G_TYPE_STRING, payload.c_str())
+    };
+    GdkContentProvider *provider = gdk_content_provider_new_union(providers, G_N_ELEMENTS(providers));
+    for (auto *item : providers) g_object_unref(item);
+    g_bytes_unref(gnome_bytes);
+    g_bytes_unref(uri_bytes);
     GdkContentProvider *previous = owned_content_;
     owned_content_ = provider;
     if (!gdk_clipboard_set_content(clipboard_, provider)) {
@@ -686,12 +802,14 @@ std::vector<std::string> ClipboardController::parse_local_file_references(
         return result;
     }
 
+    if (strlen(text) > 256U * 1024U || !g_utf8_validate(text, -1, nullptr)) return result;
     std::istringstream stream(text);
     std::string line;
     while (std::getline(stream, line)) {
         if (!line.empty() && line.back() == '\r') {
             line.pop_back();
         }
+        if (result.size() >= 512U) break;
         if (line.empty() || line[0] == '#' || line == "copy" || line == "cut") {
             continue;
         }
