@@ -121,9 +121,10 @@ It currently provides:
 - explicit verification failure when copied contents exist but supported permission/timestamp metadata could not be preserved, rather than claiming perfect preservation;
 - byte and item progress for single-item Copy/Move transfers, surfaced in the header without blocking the GTK main loop;
 - explicit transfer cancellation, checked during chunked file copy and directory traversal, with partial copy destinations removed where cleanup is safe;
-- cross-volume moves verify the complete copied output set, atomically quarantine the unchanged source, compare the stable source shape with the published copy and only then remove it; remaining source data is restored after a deletion failure when the original name is still free;
+- cross-volume moves verify the complete copied output set, atomically quarantine the unchanged source, compare regular-file contents as well as the source shape with the published copy and only then remove it; remaining source data is restored after a deletion failure when the original name is still free;
 - cancellation remains effective during copy and traversal; a fully copied, metadata-preserved and identity-verified destination is the cross-volume move commit point and is reported as completed rather than as a late cancellation with duplicate data;
 - deterministic **Move to Trash** for one selected native item, available from the Trash action and the `Delete` key;
+- permanent deletion through identity-bound quarantine, retaining exact evidence on a failed or partial recursive removal;
 - **Restore** from the Trash namespace to the original local path when the platform exposes the original location;
 - explicit restore-collision handling with staged replacement rather than deleting the existing destination first;
 - explicit **Delete Permanently…**, guarded by a confirmation dialog and available separately from recoverable Trash removal; `Shift+Delete` invokes the permanent path directly;
@@ -131,7 +132,7 @@ It currently provides:
 - a dedicated transfer operation layer for conflict policy, progress accounting, cancellation and qualified metadata preservation rather than enlarging the ordinary operation engine;
 - a separate batch-transfer engine that owns multi-source planning and policy while reusing the qualified single-item transfer/recovery layers;
 - a separate recovery/destructive operation layer for replacement rollback, Trash, restoration and permanent deletion so destructive policy does not inflate the ordinary operation engine;
-- an fsync-backed durable operation journal at the user's XDG state location, with a persisted START record before mutation and END record after the operation result;
+- an fsync-backed durable operation journal at the user's XDG state location, with a persisted START record before mutation and END record after the operation result; oversized logs (over 128 MiB) fail closed pending inspection/archival, rather than making an unbounded memory allocation;
 - fail-closed journalling for New Folder, Rename, Copy, Move, Keep Both, Replace, Trash, Restore, Permanent Delete and each item in a batch: if the START record cannot be persisted, that mutation is not started;
 - startup inspection of journal START records with no matching END from a previous Files session;
 - conservative interrupted-operation closure as **verification failure**, never inferred success, while retaining the exact operation kind/source/destination for inspection;

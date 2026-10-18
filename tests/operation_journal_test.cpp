@@ -156,6 +156,18 @@ int main()
         return 14;
     }
 
+    // The safety ceiling must reject a sparse oversized journal without
+    // allocating its entire length or allowing new mutations.
+    const fs::path oversized_path = root / "state" / "oversized.log";
+    { std::ofstream create(oversized_path, std::ios::binary); }
+    fs::resize_file(oversized_path, 128ULL * 1024ULL * 1024ULL + 1ULL);
+    OperationJournal oversized(oversized_path);
+    if (oversized.interrupted_operations(interrupted) ||
+        !oversized.begin("copy", "/tmp/a", "/tmp/b").empty()) {
+        fs::remove_all(root, cleanup_error);
+        return 15;
+    }
+
     const auto permissions = fs::status(journal_path).permissions();
     const auto group_or_other = fs::perms::group_read | fs::perms::group_write |
                                 fs::perms::group_exec | fs::perms::others_read |

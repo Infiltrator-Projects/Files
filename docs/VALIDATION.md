@@ -24,6 +24,6 @@ CI builds the product once, runs CTest, packages the same build, validates Debia
 
 An unpublished VERSION retains release intent through corrective commits. Publication rechecks current main and consumes only the qualifying artifact. Drafts may be repaired; remote bytes are compared before and after publication. A public release with missing or different assets fails verification without modification.
 
-The central repository owns APT publication. Its scheduling and availability do not invalidate a qualified GitHub release. The explicit `ci/release.sh wait-apt dist` command remains available for publication observation.
+The central repository owns APT publication. CI must run `ci/release.sh wait-apt dist` after the immutable GitHub release and must not be green until the central catalogue and beta amd64 Packages both show the exact Files version. Publishing outages retain the valid GitHub release but fail the publication observation.
 
 Merged-branch cleanup requires the current branch SHA to match a merged PR head, no open PR, and an exact-head deletion lease. Reusing an old branch name for new work cannot authorize its deletion.
