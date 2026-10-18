@@ -425,8 +425,11 @@ void ClipboardController::on_clipboard_stream_read(GObject *source_object,
     const bool ok = g_input_stream_read_all_finish(G_INPUT_STREAM(source_object),
                                                     result, &n, &error);
     self->reading_external_clipboard_ = false;
+    if (self->shutting_down_) {
+        g_clear_error(&error);
+        return;
+    }
     self->update_action_state();
-    if (self->shutting_down_) return;
     if (!ok || error != nullptr || n == read->bytes.size() ||
         read->generation != self->clipboard_generation_) {
         self->set_status("Clipboard changed, could not be read, or contains too many references.");
@@ -581,6 +584,13 @@ void ClipboardController::on_operation_finished(GObject *source_object,
     std::unique_ptr<OperationResult> operation(
         static_cast<OperationResult *>(g_task_propagate_pointer(task, &error)));
     self->busy_ = false;
+    // The GTask holds a reference to its GTK window, but an explicitly
+    // destroyed window may already have disposed all child widgets. Consume
+    // completion without accessing status/actions during shutdown.
+    if (self->shutting_down_) {
+        g_clear_error(&error);
+        return;
+    }
     self->update_action_state();
 
     if (error != nullptr) {

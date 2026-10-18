@@ -32,6 +32,10 @@ struct FileManagerWindowTestAccess {
         gtk_editable_set_text(GTK_EDITABLE(w.search_entry_), query);
     }
     static std::size_t recents(FileManagerWindow &w) { return w.recent_locations_.size(); }
+    static std::string status(const FileManagerWindow &w) {
+        const char *label = gtk_label_get_text(GTK_LABEL(w.status_label_));
+        return label != nullptr ? label : "";
+    }
     static void clear_recents(FileManagerWindow &w) { FileManagerWindow::on_recent_clear(nullptr, &w); }
     static guint visible_count(FileManagerWindow &w) {
         GListModel *model = gtk_multi_selection_get_model(w.selection_);
@@ -313,7 +317,14 @@ int main()
         g_bytes_unref(bytes);
         g_signal_emit_by_name(paste, "clicked");
         std::cerr << "WORKSPACE-CLIP-STAGE 6\n";
-        await([&] { return std::filesystem::is_regular_file(b / "renamed.txt"); });
+        // BatchTransferEngine runs on a worker. Disk visibility precedes its
+        // completion callback and is not safe evidence that the GTK window can
+        // be destroyed. Wait for the actual user-visible operation result.
+        await([&] {
+            return std::filesystem::is_regular_file(b / "renamed.txt") &&
+                   FileManagerWindowTestAccess::status(*window).find(
+                       "Copied 1 item") != std::string::npos;
+        });
         require(std::filesystem::is_regular_file(a / "renamed.txt"),
                 "External GNOME Copy must preserve the source file");
         std::cerr << "WORKSPACE-CLIP-STAGE 7\n";
