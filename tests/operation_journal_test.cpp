@@ -129,8 +129,8 @@ int main()
     const std::string other_live_id = "ab123-" + live_pid.str() + "-cd456-7";
     {
         std::ofstream append(journal_path, std::ios::binary | std::ios::app);
-        append << "102\\t" << other_live_id
-               << "\\tSTART\\tcopy\\t/tmp/live-source\\t/tmp/live-destination\\n";
+        append << "102\t" << other_live_id
+               << "\tSTART\tcopy\t/tmp/live-source\t/tmp/live-destination\n";
     }
     if (!journal.interrupted_operations(interrupted) || !interrupted.empty()) {
         fs::remove_all(root, cleanup_error);
@@ -148,7 +148,7 @@ int main()
     const fs::path malformed_path = root / "state" / "malformed.log";
     {
         std::ofstream corrupt(malformed_path, std::ios::binary);
-        corrupt << "103\\tmalformed\\tSTART\\tcopy\\tmissing-destination\\n";
+        corrupt << "103\tmalformed\tSTART\tcopy\tmissing-destination\n";
     }
     OperationJournal malformed(malformed_path);
     if (malformed.interrupted_operations(interrupted)) {
