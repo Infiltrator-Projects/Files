@@ -270,8 +270,9 @@ void ThemeController::apply_theme()
     rule("headerbar button:disabled", "color:" + muted);
     rule("headerbar .ifm-brand", "margin-right:12px");
     rule("headerbar .ifm-brand-title", "color:" + title +
-         ";font-family:'" + typography->brand_family + "'," + typography->gtk_fallback +
-         ";font-weight:600;font-size:1.1em");
+         ";font-family:'" + typography->brand_family +
+         "';font-weight:" + std::to_string(typography->brand_weight) +
+         ";font-size:1.1em");
     rule("headerbar .ifm-brand-mark", "color:" + accent);
     rule("headerbar .ifm-breadcrumb", "color:" + title +
          ";padding:3px 9px;min-height:28px");

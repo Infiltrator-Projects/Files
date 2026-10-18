@@ -11,6 +11,7 @@ The root [README](../README.md) introduces the application. [InfiltratorOS produ
 - [Common integration](COMMON-INTEGRATION.md) — shared-library mechanisms versus Files-owned semantics.
 - [Product quality](PRODUCT-QUALITY.md) — task journeys and acceptance criteria.
 - [Validation](VALIDATION.md) — build, test and release qualification.
+- [Changelog](../CHANGELOG.md) — maintained high-level release history.
 
 ## Historical work and research
 
