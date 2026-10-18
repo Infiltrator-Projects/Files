@@ -281,13 +281,13 @@ int main()
         return 17;
     }
 
-    // Migrated modes render exclusively through installed executable system
-    // clock resources; when missing they never use Common's old copy.
+    // Native-only modes never fall back. Julian and MJD prefer installed
+    // resources, retaining the portable compatibility route if absent.
     std::strcpy(policy.calendar, "gregorian");
     policy.show_seconds = true;
     policy.location_configured = false;
     g_file_info_set_attribute_uint64(file, G_FILE_ATTRIBUTE_TIME_MODIFIED, 43200U);
-    for (const char *mode : {"decimal", "internet", "unix", "hexadecimal", "binary"}) {
+    for (const char *mode : {"decimal", "internet", "unix", "hexadecimal", "binary", "julian", "modified-julian"}) {
         std::strcpy(policy.clock_mode, mode);
         if (infiltratr_temporal_posix_policy_save(&policy) != 0) {
             g_free(config_home);
@@ -305,6 +305,18 @@ int main()
                         resource, "en_AU", INT64_C(43200000000), 0,
                         true, false, 0.0, 0.0, expected, sizeof(expected),
                         &length) &&
+                length != 0U && visible.size() >= length &&
+                visible.compare(visible.size() - length, length, expected) == 0;
+        } else if (std::strcmp(mode, "julian") == 0 ||
+                   std::strcmp(mode, "modified-julian") == 0) {
+            // Transitional portable fallback is allowed only for modes not
+            // yet mandated as resource-only by Common's compatibility ABI.
+            char expected[128]{};
+            std::size_t length = 0U;
+            valid = infiltratr_temporal_format_clock_mode_localized(
+                        "en_AU", mode, INT64_C(43200000000), 0,
+                        true, false, false, 0.0, 0.0,
+                        expected, sizeof(expected), &length) &&
                 length != 0U && visible.size() >= length &&
                 visible.compare(visible.size() - length, length, expected) == 0;
         } else {

@@ -1,8 +1,8 @@
 # Files — Common Integration and Ownership Ledger
 
 **Date:** 18 October 2026\
-**Pinned Common:** 1.19.54\
-**Pinned commit:** `18d542b63ba7878c72f5ed465ea7af1bb98071ed`
+**Pinned Common:** 1.19.55\
+**Pinned commit:** `914ca4bce8968340a974667b47e12bf82601c104`
 
 Common is one of Files's principal architectural advantages. Files must not treat Common as a token submodule used only for colours. It is the first place to look whenever Files needs a product-neutral mechanism already proven elsewhere in the Infiltrator family.
 
@@ -47,8 +47,8 @@ Files pins an exact reviewed Common release and commit. It must not silently flo
 Current requirement:
 
 ```text
-Common version: 1.19.54
-Commit:         18d542b63ba7878c72f5ed465ea7af1bb98071ed
+Common version: 1.19.55
+Commit:         914ca4bce8968340a974667b47e12bf82601c104
 ```
 
 A Common update is an explicit Files change with build/test qualification. A same-version but different Common commit must not build in a normal Git checkout.
@@ -408,7 +408,7 @@ Common already carries the shared system-wide temporal presentation authority us
 
 Rule: Files should not invent another clock/calendar configuration system.
 
-Status: **ACTIVE**. One policy snapshot supplies the date and clock for each displayed timestamp. Five migrated clock systems execute only from independent system resource modules (never a duplicate built-in formatter); a missing resource is explicit. Non-Gregorian dates use the Common-owned Calendar Resources ABI for matching UI-language presentation and native historical year conventions; a missing/incompatible provider is shown as unavailable. Gregorian locale presentation stays with the platform adapter. Live policy refresh and raw timestamp sorting share the existing row-formatting seam. A fresh profile watches the nearest existing configuration ancestor until the shared policy directory appears. Native locale time patterns are converted to UTF-8 before GTK formatting.
+Status: **ACTIVE**. One policy snapshot supplies the date and clock for each displayed timestamp. Five migrated fixed-unit clock systems require their independent executable resources, without any compiled fallback. Julian Date and Modified Julian Date now prefer installed resources under Common 1.19.55, preserving a temporary portable compatibility fallback if those newer modules are not installed. Non-Gregorian dates use the Common-owned Calendar Resources ABI for matching UI-language presentation and native historical year conventions; a missing/incompatible provider is shown as unavailable. Gregorian locale presentation stays with the platform adapter. Live policy refresh and raw timestamp sorting share the existing row-formatting seam. A fresh profile watches the nearest existing configuration ancestor until the shared policy directory appears. Native locale time patterns are converted to UTF-8 before GTK formatting.
 
 ---
 
