@@ -364,6 +364,15 @@ bool OperationJournal::append_line(const std::string &line) const
     if (ok && ::fchmod(descriptor, 0600) != 0) {
         ok = false;
     }
+    // Check the original size before tail repair. An oversized or corrupted
+    // journal must not be silently truncated to zero by scanning for a newline.
+    struct stat preflight_status {};
+    if (ok && (::fstat(descriptor, &preflight_status) != 0 ||
+               preflight_status.st_size < 0 ||
+               static_cast<std::uintmax_t>(preflight_status.st_size) >
+                   kMaximumJournalBytes)) {
+        ok = false;
+    }
     if (ok && !discard_incomplete_tail(descriptor)) {
         ok = false;
     }
