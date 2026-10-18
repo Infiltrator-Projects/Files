@@ -123,6 +123,51 @@ int main()
         return 7;
     }
 
+    // Another live Files process must not be misclassified as a crash.
+    std::ostringstream live_pid;
+    live_pid << std::hex << static_cast<unsigned long>(::getpid());
+    const std::string other_live_id = "ab123-" + live_pid.str() + "-cd456-7";
+    {
+        std::ofstream append(journal_path, std::ios::binary | std::ios::app);
+        append << "102\t" << other_live_id
+               << "\tSTART\tcopy\t/tmp/live-source\t/tmp/live-destination\n";
+    }
+    if (!journal.interrupted_operations(interrupted) || !interrupted.empty()) {
+        fs::remove_all(root, cleanup_error);
+        return 12;
+    }
+    const OperationResult live_result{
+        OperationStatus::Success, OperationPhase::Complete,
+        "/tmp/live-destination", "Completed.", true};
+    if (!journal.finish(other_live_id, "copy", live_result)) {
+        fs::remove_all(root, cleanup_error);
+        return 13;
+    }
+
+    // A complete but malformed record is unhealthy, not silently ignored.
+    const fs::path malformed_path = root / "state" / "malformed.log";
+    {
+        std::ofstream corrupt(malformed_path, std::ios::binary);
+        corrupt << "103\tmalformed\tSTART\tcopy\tmissing-destination\n";
+    }
+    OperationJournal malformed(malformed_path);
+    if (malformed.interrupted_operations(interrupted)) {
+        fs::remove_all(root, cleanup_error);
+        return 14;
+    }
+
+    // The safety ceiling must reject a sparse oversized journal without
+    // allocating its entire length or allowing new mutations.
+    const fs::path oversized_path = root / "state" / "oversized.log";
+    { std::ofstream create(oversized_path, std::ios::binary); }
+    fs::resize_file(oversized_path, 128ULL * 1024ULL * 1024ULL + 1ULL);
+    OperationJournal oversized(oversized_path);
+    if (oversized.interrupted_operations(interrupted) ||
+        !oversized.begin("copy", "/tmp/a", "/tmp/b").empty()) {
+        fs::remove_all(root, cleanup_error);
+        return 15;
+    }
+
     const auto permissions = fs::status(journal_path).permissions();
     const auto group_or_other = fs::perms::group_read | fs::perms::group_write |
                                 fs::perms::group_exec | fs::perms::others_read |

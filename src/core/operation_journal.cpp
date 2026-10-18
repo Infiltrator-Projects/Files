@@ -7,11 +7,14 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <charconv>
+#include <csignal>
 #include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <fcntl.h>
 #include <limits>
+#include <climits>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -29,6 +32,9 @@ namespace {
 
 std::atomic_uint64_t sequence{0};
 std::mutex journal_mutex;
+// Prevent an unbounded log from exhausting memory or hiding recovery state.
+// Oversized journals fail closed until explicitly inspected/archived.
+constexpr std::uintmax_t kMaximumJournalBytes = 128U * 1024U * 1024U;
 
 std::string status_name(const OperationStatus status)
 {
@@ -84,6 +90,49 @@ bool belongs_to_current_session(const std::string_view operation_id)
     return operation_id.size() > session.size() &&
            operation_id.compare(0U, session.size(), session) == 0 &&
            operation_id[session.size()] == '-';
+}
+
+// Session IDs contain a hexadecimal creation time, hexadecimal PID,
+// monotonic nonce and operation serial. Do not call an operation "crashed"
+// while its owner process is still running in another Files window/process.
+// PID reuse intentionally errs toward retaining evidence rather than
+// falsely closing a live operation.
+bool belongs_to_live_process(const std::string_view id)
+{
+    if (belongs_to_current_session(id)) return true;
+    const std::size_t first = id.find('-');
+    if (first == std::string_view::npos) return false;
+    const std::size_t second = id.find('-', first + 1U);
+    if (second == std::string_view::npos ||
+        id.find('-', second + 1U) == std::string_view::npos) return false;
+    const auto pid_text = id.substr(first + 1U, second - first - 1U);
+    unsigned long long value = 0U;
+    const auto parsed = std::from_chars(pid_text.data(),
+                                        pid_text.data() + pid_text.size(), value, 16);
+    if (parsed.ec != std::errc{} ||
+        parsed.ptr != pid_text.data() + pid_text.size() ||
+        value == 0U || value > static_cast<unsigned long long>(INT_MAX)) return false;
+    const pid_t pid = static_cast<pid_t>(value);
+    if (::kill(pid, 0) == 0) return true;
+    return errno == EPERM;
+}
+
+bool valid_record_escape(const std::string_view value)
+{
+    for (std::size_t i = 0; i < value.size(); ++i) {
+        if (value[i] != '\\') continue;
+        if (++i == value.size()) return false;
+        if (value[i] != '\\' && value[i] != 'n' &&
+            value[i] != 't' && value[i] != 'r') return false;
+    }
+    return true;
+}
+
+bool valid_record_time(const std::string_view value)
+{
+    std::uint64_t timestamp = 0U;
+    const auto parsed = std::from_chars(value.data(), value.data() + value.size(), timestamp);
+    return parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size();
 }
 
 std::vector<std::string> split_tabs(const std::string &line)
@@ -315,12 +364,30 @@ bool OperationJournal::append_line(const std::string &line) const
     if (ok && ::fchmod(descriptor, 0600) != 0) {
         ok = false;
     }
+    // Check the original size before tail repair. An oversized or corrupted
+    // journal must not be silently truncated to zero by scanning for a newline.
+    struct stat preflight_status {};
+    if (ok && (::fstat(descriptor, &preflight_status) != 0 ||
+               preflight_status.st_size < 0 ||
+               static_cast<std::uintmax_t>(preflight_status.st_size) >
+                   kMaximumJournalBytes)) {
+        ok = false;
+    }
     if (ok && !discard_incomplete_tail(descriptor)) {
         ok = false;
     }
 
     std::string record = line;
     record.push_back('\n');
+    struct stat journal_status {};
+    if (ok && (::fstat(descriptor, &journal_status) != 0 ||
+               journal_status.st_size < 0 ||
+               static_cast<std::uintmax_t>(journal_status.st_size) >
+                   kMaximumJournalBytes ||
+               record.size() > kMaximumJournalBytes -
+                   static_cast<std::uintmax_t>(journal_status.st_size))) {
+        ok = false;
+    }
     if (ok && infiltratr_write_full(descriptor, record.data(), record.size()) != 0) {
         ok = false;
     }
@@ -366,7 +433,8 @@ bool OperationJournal::read_snapshot(std::string &contents) const
     std::size_t size = 0U;
     if (ok) {
         const auto unsigned_size = static_cast<std::uintmax_t>(status.st_size);
-        if (unsigned_size > static_cast<std::uintmax_t>(
+        if (unsigned_size > kMaximumJournalBytes ||
+            unsigned_size > static_cast<std::uintmax_t>(
                                 std::numeric_limits<std::size_t>::max())) {
             ok = false;
         } else {
@@ -452,28 +520,42 @@ bool OperationJournal::interrupted_operations(
     std::string line;
     while (std::getline(stream, line)) {
         const std::vector<std::string> fields = split_tabs(line);
-        if (fields.size() < 4U) {
-            continue;
+        const bool start = fields.size() == 6U && fields[2] == "START";
+        const bool end = fields.size() == 8U && fields[2] == "END";
+        if ((!start && !end) || !valid_record_time(fields[0])) {
+            interrupted.clear();
+            return false;
         }
-
+        for (std::size_t index = 1; index < fields.size(); ++index) {
+            if (!valid_record_escape(fields[index])) {
+                interrupted.clear();
+                return false;
+            }
+        }
         const std::string id = unescape(fields[1]);
-        if (id.empty()) {
-            continue;
+        if (id.empty() || fields[3].empty()) {
+            interrupted.clear();
+            return false;
         }
-        if (fields[2] == "END") {
+        if (end) {
+            if ((fields[5] != "changed" && fields[5] != "unchanged") ||
+                fields[4].empty()) {
+                interrupted.clear();
+                return false;
+            }
             open.erase(id);
             continue;
         }
-        if (fields[2] != "START" || fields.size() < 6U ||
-            belongs_to_current_session(id)) {
-            continue;
-        }
+        if (belongs_to_live_process(id)) continue;
 
         InterruptedOperation operation;
-        try {
-            operation.started_millis = static_cast<std::uint64_t>(std::stoull(fields[0]));
-        } catch (...) {
-            continue;
+        const auto millis = std::string_view(fields[0]);
+        const auto parsed = std::from_chars(
+            millis.data(), millis.data() + millis.size(), operation.started_millis);
+        if (parsed.ec != std::errc{} ||
+            parsed.ptr != millis.data() + millis.size()) {
+            interrupted.clear();
+            return false;
         }
         operation.operation_id = id;
         operation.kind = unescape(fields[3]);

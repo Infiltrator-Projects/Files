@@ -46,6 +46,22 @@ bool force_cross_device(
     return false;
 }
 
+bool quarantine_then_rewrite_same_length(
+    const infiltrator::files::destination_ownership::OwnedOutput &output,
+    infiltrator::files::destination_ownership::ProtectedStaging &staging,
+    std::filesystem::path &quarantine,
+    std::error_code &error,
+    std::filesystem::path *retained) noexcept
+{
+    if (!infiltrator::files::destination_ownership::quarantine_owned(
+            output, staging, quarantine, error, retained)) return false;
+    if (!write_text(quarantine, "BBBBBB\n")) {
+        error = std::make_error_code(std::errc::io_error);
+        return false;
+    }
+    return true;
+}
+
 bool force_unsupported_quarantine(
     const infiltrator::files::destination_ownership::OwnedOutput &,
     infiltrator::files::destination_ownership::ProtectedStaging &,
@@ -383,6 +399,29 @@ int main()
         unsupported_move.message.find("copied destination was removed") == std::string::npos) {
         fs::remove_all(root, cleanup_error);
         return 22;
+    }
+
+    // An equal-length source rewrite after copy but before source deletion
+    // must fail content verification and restore the original pathname.
+    const fs::path changed_source = root / "changed-same-length.txt";
+    const fs::path changed_parent = root / "changed-same-length-destination";
+    fs::create_directories(changed_parent);
+    if (!write_text(changed_source, "AAAAAA\n")) {
+        fs::remove_all(root, cleanup_error);
+        return 61;
+    }
+    TransferOperationHooks changed_hooks;
+    changed_hooks.move_owned = force_cross_device;
+    changed_hooks.quarantine_owned = quarantine_then_rewrite_same_length;
+    TransferOperationEngine changed_engine{changed_hooks};
+    const auto changed_move = changed_engine.move_item(
+        changed_source, changed_parent, ConflictPolicy::Fail);
+    if (changed_move.status != OperationStatus::VerificationFailure ||
+        !fs::exists(changed_source) ||
+        read_text(changed_source) != "BBBBBB\n" ||
+        fs::exists(changed_parent / changed_source.filename())) {
+        fs::remove_all(root, cleanup_error);
+        return 62;
     }
 
     // If descriptor-relative inspection proves that the quarantined source is
