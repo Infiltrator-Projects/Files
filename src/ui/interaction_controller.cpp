@@ -609,7 +609,7 @@ void InteractionController::show_open_with()
     gtk_box_append(GTK_BOX(actions), launch);
     g_signal_connect_swapped(cancel, "clicked",
                               G_CALLBACK(gtk_window_destroy), dialog);
-    g_signal_connect(launch, "clicked", G_CALLBACK(+[](GtkButton *, gpointer raw) {
+    g_signal_connect(launch, "clicked", G_CALLBACK((+[](GtkButton *, gpointer raw) {
         auto *win = GTK_WINDOW(raw);
         auto *data = static_cast<Choice *>(g_object_get_data(G_OBJECT(win), "ifm-open-with"));
         if (data == nullptr) return;
@@ -638,7 +638,7 @@ void InteractionController::show_open_with()
             return;
         }
         gtk_window_destroy(win);
-    }), dialog);
+    })), dialog);
     gtk_window_present(GTK_WINDOW(dialog));
     g_free(guessed);
 }
