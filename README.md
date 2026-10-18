@@ -58,7 +58,7 @@ Product-level acceptance is defined in [`docs/PRODUCT-QUALITY.md`](docs/PRODUCT-
 
 ## Current implementation
 
-File modification timestamps use one shared temporal policy snapshot for both date and time. All 23 explicit clocks use Common's validated executable resource interface, including Roman temporal time, both Edo seasonal models, historical Nürnberg and location-aware Nürnberg. Clock resources own locale-sensitive wording, numerals and visible-tick scheduling. All 30 calendars, including Gregorian, use Common's executable Calendar Resources ABI for UI-language date presentation. Missing, invalid or incompatible resources remain visibly unavailable. Common 1.19.64 supplies discovery, validation, loading and policy integration; Files owns no duplicate calendar or clock-face implementation. The independently installed resource package survives consumer removal. Existing live policy monitoring refreshes visible labels; sorting continues to use raw filesystem timestamps.
+File modification timestamps use one shared temporal policy snapshot for both date and time. All 23 explicit clocks use Common's validated executable resource interface, including Roman temporal time, both Edo seasonal models, historical Nürnberg and location-aware Nürnberg. Clock resources own locale-sensitive wording, numerals and visible-tick scheduling. All 30 calendars, including Gregorian, use Common's executable Calendar Resources ABI for UI-language date presentation. Missing, invalid or incompatible resources remain visibly unavailable. Common 1.19.66 supplies discovery, validation, loading and policy integration; Files owns no duplicate calendar or clock-face implementation. The independently installed resource package survives consumer removal. Existing live policy monitoring refreshes visible labels; sorting continues to use raw filesystem timestamps.
 
 The executable is `files`, presented to the user as **Files**.
 
@@ -212,3 +212,8 @@ The implementation proceeds by proving boundaries rather than accumulating visib
 Each tranche must remain useful and testable without making later architectural layers authoritative by accident.
 
 Current browsing foundation discovers mounted/removable places through GIO, keeps them deterministically ordered, blocks nested-mount fall-through when a supplying mount disappears, and restores an unavailable current view automatically only when the returning mount's root and provider UUID prove the same source.
+
+The normal host Gregorian calendar and standard system time remain usable without
+optional modules. Shared calendar/clock implementation source, builds and Debian
+releases belong to Common, which supplies the optional system resource package.
+This application contains no custom calendar or clock fallback implementations.

@@ -150,9 +150,9 @@ jobs:
           resources_dir=$(mktemp -d)
           chmod 0755 "$resources_dir"
           gh release download "v$resources_version" \
-            --repo Infiltrator-Projects/Calendar \
+            --repo Infiltrator-Projects/Libraries \
             --pattern "$resources_asset" --dir "$resources_dir"
-          digest=$(gh api "repos/Infiltrator-Projects/Calendar/releases/tags/v$resources_version" \
+          digest=$(gh api "repos/Infiltrator-Projects/Libraries/releases/tags/v$resources_version" \
             --jq ".assets[] | select(.name == \"$resources_asset\") | .digest")
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
           printf '%s  %s\n' "${digest#sha256:}" "$resources_dir/$resources_asset" | sha256sum --check -
