@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "../src/ui/file_manager_window.hpp"
 
+#include <csignal>
+#include <execinfo.h>
+#include <unistd.h>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -161,8 +164,16 @@ bool selected_name(FileManagerWindow &w, const char *name)
 }
 } // namespace
 
+void trace_fatal(int)
+{
+    void *frames[40]{};
+    const int count = backtrace(frames, 40);
+    backtrace_symbols_fd(frames, count, STDERR_FILENO);
+    _exit(99);
+}
 int main()
 {
+    std::signal(SIGTRAP, trace_fatal);
     char *temporary = g_dir_make_tmp("files-workspace-XXXXXX", nullptr);
     require(temporary != nullptr, "Failed to create test profile");
     std::filesystem::path root(temporary);
