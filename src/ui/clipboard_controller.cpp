@@ -104,6 +104,10 @@ ClipboardController::ClipboardController(GtkWindow *window,
         G_CALLBACK(&ClipboardController::on_location_changed), this);
 
     update_action_state();
+    // Destroy precedes finalisation. Dismiss child action pointers before GTK
+    // disposes the buttons and before pending GIO work can emit late signals.
+    g_signal_connect(window_, "destroy",
+                     G_CALLBACK(&ClipboardController::on_window_destroyed), this);
     g_object_weak_ref(G_OBJECT(window_), &ClipboardController::on_window_finalized, this);
 }
 
@@ -131,6 +135,22 @@ ClipboardController::~ClipboardController()
         g_object_unref(directory_list_);
         directory_list_ = nullptr;
     }
+}
+
+void ClipboardController::on_window_destroyed(GtkWidget *, gpointer user_data)
+{
+    auto *self = static_cast<ClipboardController *>(user_data);
+    self->shutting_down_ = true;
+    ++self->clipboard_generation_;
+    if (self->clipboard_ != nullptr && self->clipboard_changed_handler_ != 0U) {
+        g_signal_handler_disconnect(self->clipboard_, self->clipboard_changed_handler_);
+        self->clipboard_changed_handler_ = 0U;
+    }
+    // The widgets are owned by the native window, not by the controller.
+    self->copy_button_ = nullptr;
+    self->cut_button_ = nullptr;
+    self->paste_button_ = nullptr;
+    self->status_label_ = nullptr;
 }
 
 void ClipboardController::on_window_finalized(gpointer user_data, GObject *where_object_was)
@@ -272,6 +292,7 @@ void ClipboardController::on_location_changed(GObject *object,
 void ClipboardController::on_clipboard_changed(GdkClipboard *clipboard, gpointer data)
 {
     auto *self = static_cast<ClipboardController *>(data);
+    if (self->shutting_down_) return;
     if (gdk_clipboard_get_content(clipboard) == self->owned_content_) return;
     ++self->clipboard_generation_;
     self->mode_ = Mode::None;
@@ -282,7 +303,7 @@ void ClipboardController::on_clipboard_changed(GdkClipboard *clipboard, gpointer
 
 void ClipboardController::capture_selection(const Mode mode)
 {
-    if (busy_ || reading_external_clipboard_ || mode == Mode::None) {
+    if (shutting_down_ || busy_ || reading_external_clipboard_ || mode == Mode::None) {
         return;
     }
 
@@ -305,7 +326,7 @@ void ClipboardController::capture_selection(const Mode mode)
 
 void ClipboardController::paste()
 {
-    if (busy_ || reading_external_clipboard_) {
+    if (shutting_down_ || busy_ || reading_external_clipboard_) {
         return;
     }
 
@@ -373,7 +394,7 @@ void ClipboardController::on_clipboard_stream_open(GObject *source_object,
     GError *error = nullptr;
     GInputStream *stream = gdk_clipboard_read_finish(GDK_CLIPBOARD(source_object),
                                                       result, &mime, &error);
-    if (stream == nullptr || error != nullptr) {
+    if (self->shutting_down_ || stream == nullptr || error != nullptr) {
         self->reading_external_clipboard_ = false;
         self->update_action_state();
         self->set_status("Could not read file references from the clipboard.");
@@ -405,6 +426,7 @@ void ClipboardController::on_clipboard_stream_read(GObject *source_object,
                                                     result, &n, &error);
     self->reading_external_clipboard_ = false;
     self->update_action_state();
+    if (self->shutting_down_) return;
     if (!ok || error != nullptr || n == read->bytes.size() ||
         read->generation != self->clipboard_generation_) {
         self->set_status("Clipboard changed, could not be read, or contains too many references.");
@@ -840,6 +862,7 @@ std::vector<std::string> ClipboardController::parse_local_file_references(
 
 void ClipboardController::update_action_state()
 {
+    if (shutting_down_) return;
     GtkBitset *selected = selection_ != nullptr
         ? gtk_selection_model_get_selection(GTK_SELECTION_MODEL(selection_))
         : nullptr;

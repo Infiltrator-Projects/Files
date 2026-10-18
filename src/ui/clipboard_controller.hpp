@@ -37,6 +37,7 @@ private:
     };
 
     static void on_window_finalized(gpointer user_data, GObject *where_object_was);
+    static void on_window_destroyed(GtkWidget *window, gpointer user_data);
     static void on_clipboard_changed(GdkClipboard *clipboard, gpointer user_data);
     static void on_copy_clicked(GtkButton *button, gpointer user_data);
     static void on_cut_clicked(GtkButton *button, gpointer user_data);
@@ -107,6 +108,7 @@ private:
     PendingConflict pending_conflict_{};
     bool busy_{false};
     bool reading_external_clipboard_{false};
+    bool shutting_down_{false};
     guint64 clipboard_generation_{0U};
     guint64 clipboard_read_generation_{0U};
     gulong selection_handler_{0U};
