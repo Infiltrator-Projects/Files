@@ -71,7 +71,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build pkg-config libgtk-4-dev dpkg-dev xvfb xauth dbus-x11
+            build-essential cmake ninja-build pkg-config libgtk-4-dev dpkg-dev xvfb xauth dbus-x11 gdb
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -80,7 +80,20 @@ jobs:
         run: cmake --build build --parallel
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        shell: bash
+        run: |
+          if ctest --test-dir build --output-on-failure; then
+            exit 0
+          fi
+          # Keep failed UI tests diagnostic rather than silently retrying or
+          # suppressing them: capture the actual GTK process stack under Xvfb.
+          echo 'CTest failed. Capturing headless workspace-navigation backtrace.'
+          dbus-run-session -- xvfb-run -a gdb -q -batch \
+            -ex 'set pagination off' \
+            -ex run \
+            -ex 'thread apply all bt 35' \
+            --args build/workspace-navigation-test || true
+          exit 1
 
       - name: Build and validate Debian package
         env:
