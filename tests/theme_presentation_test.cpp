@@ -45,6 +45,19 @@ GtkWidget *find_css_class(GtkWidget *root, const char *name)
     return nullptr;
 }
 
+GtkWidget *find_named_label(GtkWidget *root, const char *name)
+{
+    if (root == nullptr) return nullptr;
+    if (GTK_IS_LABEL(root) &&
+        g_strcmp0(gtk_label_get_text(GTK_LABEL(root)), name) == 0) return root;
+    for (GtkWidget *child = gtk_widget_get_first_child(root); child != nullptr;
+         child = gtk_widget_get_next_sibling(child)) {
+        if (GtkWidget *found = find_named_label(child, name); found != nullptr)
+            return found;
+    }
+    return nullptr;
+}
+
 // Observe the actual GTK4 ColumnView row allocation, not merely its CSS
 // min-height. Native theme row/cell insets previously produced 45px rows.
 std::pair<int, int> row_geometry(GtkWidget *widget)
@@ -135,6 +148,14 @@ int main()
                                                  "ifm-sidebar");
         GtkWidget *night_sidebar = find_css_class(GTK_WIDGET(second->native_window()),
                                                    "ifm-sidebar");
+        GtkWidget *day_recent = find_css_class(GTK_WIDGET(first->native_window()),
+                                                "ifm-recent-button");
+        GtkWidget *night_recent = find_css_class(GTK_WIDGET(second->native_window()),
+                                                  "ifm-recent-button");
+        GtkWidget *day_recent_label = find_named_label(day_recent, "Recent");
+        GtkWidget *night_recent_label = find_named_label(night_recent, "Recent");
+        require(day_recent_label != nullptr && night_recent_label != nullptr,
+                "Recent GTK menu control must expose theme-controlled text");
         GtkWidget *day_brand = find_css_class(GTK_WIDGET(first->native_window()),
                                                "ifm-brand-title");
         GtkWidget *night_brand = find_css_class(GTK_WIDGET(second->native_window()),
@@ -165,6 +186,9 @@ int main()
         require(style_matches(day_sidebar, day_palette->text_rgb) &&
                 style_matches(night_sidebar, night_palette->text_rgb),
                 "Sidebar foreground must use the Common primary text role");
+        require(style_matches(day_recent_label, day_palette->text_rgb) &&
+                style_matches(night_recent_label, night_palette->text_rgb),
+                "Recent menu text must use the current Common foreground");
         require(style_matches(day_brand, day_palette->title_rgb) &&
                 style_matches(night_brand, night_palette->title_rgb),
                 "Brand title must use the Common title role");
@@ -182,6 +206,9 @@ int main()
         require(style_matches(day_sidebar, night_palette->text_rgb) &&
                 style_matches(night_sidebar, day_palette->text_rgb),
                 "Sidebar text must continue matching its own window theme");
+        require(style_matches(day_recent_label, night_palette->text_rgb) &&
+                style_matches(night_recent_label, day_palette->text_rgb),
+                "Recent menu text must switch with its own window theme");
 
         gtk_window_destroy(first->native_window());
         gtk_window_destroy(second->native_window());

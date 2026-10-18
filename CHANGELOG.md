@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.50 — 2026-10-18
+
+- Fix unreadable Day-mode text on the Recent sidebar menu button: style its GTK4 inner button, label and icon with the active Common theme, including hover and open states.
+- Qualify the actual Recent text in both Day and Night GTK windows and after independent per-window theme changes.
+- Preserve sidebar geometry, all file operations, menu behaviour and shared MB Corpo typography.
+
 ## 0.1.49 — 2026-10-18
 
 - Refine Files GTK4 typography after live Night screenshot review: stronger A Title Cond branding, clearer MB Corpo S Text navigation, and readable section labels and column headings.

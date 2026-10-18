@@ -352,6 +352,26 @@ void ThemeController::apply_theme()
     rule(".ifm-sidebar row.ifm-place-current label", "color:" + selected_text);
     rule(".ifm-sidebar row image", "color:" + muted);
     rule(".ifm-sidebar row.ifm-place-current image", "color:" + accent_text);
+    // GtkMenuButton contains a native button node that a dark host GTK theme
+    // may paint charcoal despite Files' independently chosen Day palette.
+    rule(".ifm-sidebar row menubutton.ifm-recent-button",
+         "background-color:transparent;background-image:none;box-shadow:none;"
+         "color:" + text);
+    rule(".ifm-sidebar row menubutton.ifm-recent-button > button",
+         "background-color:transparent;background-image:none;box-shadow:none;"
+         "border:0;color:" + text);
+    rule(".ifm-sidebar row menubutton.ifm-recent-button label",
+         "color:" + text +
+         ";font-family:'MB Corpo S Text WEB','MB Corpo S Title WEB'");
+    rule(".ifm-sidebar row menubutton.ifm-recent-button image", "color:" + muted);
+    rule(".ifm-sidebar row menubutton.ifm-recent-button > button:hover",
+         "background-color:" + hover + ";color:" + text);
+    rule(".ifm-sidebar row menubutton.ifm-recent-button > button:checked",
+         "background-color:" + selected + ";color:" + selected_text);
+    rule(".ifm-sidebar row menubutton.ifm-recent-button > button:checked label",
+         "color:" + selected_text);
+    rule(".ifm-sidebar row menubutton.ifm-recent-button > button:checked image",
+         "color:" + accent_text);
     rule(".ifm-section-caption", "color:" + secondary +
          ";font-size:0.90em;font-weight:700;letter-spacing:0.08em;"
          "font-family:'MB Corpo S Title WEB Cond','MB Corpo S Title WEB'");

@@ -380,6 +380,9 @@ void FileManagerWindow::build_ui(GtkApplication *application)
                               make_sidebar_content("Recent", "document-open-recent-symbolic"));
     gtk_widget_set_halign(recent_menu_button_, GTK_ALIGN_FILL);
     gtk_widget_add_css_class(recent_menu_button_, "flat");
+    // Recent is a menu button, not an ordinary sidebar row. Its native inner
+    // button needs scoped Day/Night styling independent of the host GTK theme.
+    gtk_widget_add_css_class(recent_menu_button_, "ifm-recent-button");
     recent_popover_ = gtk_popover_new();
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(recent_menu_button_), recent_popover_);
     gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(recent_row), recent_menu_button_);
