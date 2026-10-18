@@ -2,7 +2,7 @@
 
 **Date:** 18 October 2026\
 **Pinned Common:** 1.19.63\
-**Pinned commit:** `aa2d6ae6188ceb85c4a8e5b216628a40986eb7b8`
+**Pinned commit:** `ae38474d162e08afce06e234ccb0f8e00f406c85`
 
 Common is one of Files's principal architectural advantages. Files must not treat Common as a token submodule used only for colours. It is the first place to look whenever Files needs a product-neutral mechanism already proven elsewhere in the Infiltrator family.
 
