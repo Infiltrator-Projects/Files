@@ -100,6 +100,21 @@ std::string uri(const std::filesystem::path &path)
     g_object_unref(file);
     return result;
 }
+bool directory_contains_name(FileManagerWindow &w, const char *name)
+{
+    // Filesystem existence alone does not prove GTK's asynchronous monitor
+    // has delivered its new entry. Verify the visible model as well.
+    GListModel *model = G_LIST_MODEL(FileManagerWindowTestAccess::directory(w));
+    if (model == nullptr) return false;
+    for (guint i = 0; i < g_list_model_get_n_items(model); ++i) {
+        auto *info = G_FILE_INFO(g_list_model_get_item(model, i));
+        const bool found = info != nullptr &&
+                           g_strcmp0(g_file_info_get_name(info), name) == 0;
+        if (info != nullptr) g_object_unref(info);
+        if (found) return true;
+    }
+    return false;
+}
 void select_name(FileManagerWindow &w, const char *name)
 {
     GtkMultiSelection *selection = FileManagerWindowTestAccess::selection(w);
@@ -316,6 +331,9 @@ int main()
         await([&] { return std::filesystem::is_regular_file(b / "renamed.txt"); });
         require(std::filesystem::is_regular_file(a / "renamed.txt"),
                 "External GNOME Copy must preserve the source file");
+        // Exercise the actual model refresh, rather than racing the pending
+        // GFileMonitor query by closing immediately after the disk write.
+        await([&] { return directory_contains_name(*window, "renamed.txt"); });
         std::cerr << "WORKSPACE-CLIP-STAGE 7\n";
         gtk_window_destroy(window->native_window());
         while (g_main_context_iteration(nullptr, FALSE)) {}
