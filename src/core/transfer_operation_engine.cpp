@@ -7,6 +7,7 @@
 #include <array>
 #include <cerrno>
 #include <fstream>
+#include <glib.h>
 #include <string>
 #include <utility>
 #include <vector>
@@ -111,6 +112,54 @@ bool identical_file_bytes(const std::filesystem::path &source,
     }
 }
 
+using FileContentEvidence = std::vector<std::pair<std::filesystem::path, std::string>>;
+
+// The private output is still owner-readable here, before the destination's
+// original mode is applied. Retain a digest so later source verification need
+// not reopen a destination which may correctly have no owner-read permission.
+std::string digest_file_bytes(const std::filesystem::path &path,
+                              std::error_code &error)
+{
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream.is_open()) {
+        error = std::make_error_code(std::errc::io_error);
+        return {};
+    }
+    GChecksum *checksum = g_checksum_new(G_CHECKSUM_SHA256);
+    if (checksum == nullptr) {
+        error = std::make_error_code(std::errc::not_enough_memory);
+        return {};
+    }
+    std::array<char, 65536> buffer{};
+    while (stream) {
+        stream.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+        const auto n = stream.gcount();
+        if (n > 0)
+            g_checksum_update(checksum,
+                              reinterpret_cast<const guchar *>(buffer.data()),
+                              static_cast<gssize>(n));
+    }
+    std::string digest;
+    if (stream.bad() || !stream.eof()) {
+        error = std::make_error_code(std::errc::io_error);
+    } else {
+        digest = g_checksum_get_string(checksum);
+    }
+    g_checksum_free(checksum);
+    return digest;
+}
+
+bool matches_content_evidence(const std::filesystem::path &source_root,
+                              const FileContentEvidence &evidence,
+                              std::error_code &error)
+{
+    for (const auto &[relative, expected] : evidence) {
+        const std::string actual = digest_file_bytes(source_root / relative, error);
+        if (error || actual != expected) return false;
+    }
+    return true;
+}
+
 bool equivalent_copy_shape(const std::filesystem::path &source,
                            const std::filesystem::path &destination,
                            std::error_code &error)
@@ -134,8 +183,7 @@ bool equivalent_copy_shape(const std::filesystem::path &source,
         }
         const std::uintmax_t destination_size =
             std::filesystem::file_size(destination, error);
-        return !error && source_size == destination_size &&
-               identical_file_bytes(source, destination, error);
+        return !error && source_size == destination_size;
     }
 
     if (std::filesystem::is_symlink(source_status)) {
@@ -185,8 +233,7 @@ bool equivalent_copy_shape(const std::filesystem::path &source,
             }
             const std::uintmax_t counterpart_size =
                 std::filesystem::file_size(counterpart, error);
-            if (error || item_size != counterpart_size ||
-                !identical_file_bytes(iterator->path(), counterpart, error)) {
+            if (error || item_size != counterpart_size) {
                 return false;
             }
         } else if (std::filesystem::is_symlink(item_status)) {
@@ -434,7 +481,8 @@ OperationResult metadata_failure(const std::filesystem::path &destination,
                                  destination_ownership::OwnedOutputs &owned,
                                  const std::error_code &error,
                                  const bool unpublished,
-                                 destination_ownership::ProtectedStaging &staging)
+                                 destination_ownership::ProtectedStaging &staging,
+                                 const char *reason = "The transfer could not preserve permissions or modification time: ")
 {
     std::error_code cleanup_error;
     std::vector<std::filesystem::path> retained_paths;
@@ -444,8 +492,7 @@ OperationResult metadata_failure(const std::filesystem::path &destination,
                              : destination_ownership::cleanup_owned(
                                    owned, cleanup_error, &retained_paths);
     const std::string failure_message =
-        "The transfer could not preserve permissions or modification time: " +
-        error.message() +
+        std::string(reason) + (error ? error.message() : "copied file bytes differ") +
         (cleaned ? " The owned partial destination was removed."
                  : retained_paths_message(retained_paths));
     return failure(OperationStatus::VerificationFailure,
@@ -467,7 +514,8 @@ OperationResult copy_exact(const std::filesystem::path &source,
                            const std::filesystem::path &destination,
                            TransferControl *control,
                            const TransferOperationHooks &hooks,
-                           destination_ownership::OwnedOutputs *completed_outputs = nullptr)
+                           destination_ownership::OwnedOutputs *completed_outputs = nullptr,
+                           FileContentEvidence *completed_evidence = nullptr)
 {
     std::error_code error;
     if (control != nullptr && !control->has_batch_totals()) {
@@ -664,6 +712,28 @@ OperationResult copy_exact(const std::filesystem::path &source,
         return cancelled_result(destination, !cleaned, std::move(retained_paths));
     }
 
+    // Verify byte-for-byte while the unpublished private files still have
+    // readable owner permissions. Applying source modes before this check can
+    // make a correctly copied group-readable file unreadable to its new owner.
+    FileContentEvidence content_evidence;
+    for (const auto &entry : file_metadata) {
+        if (!identical_file_bytes(entry.first, entry.second, error)) {
+            return metadata_failure(destination, owned, error, unpublished,
+                                    private_staging,
+                                    "The transfer could not verify copied file contents: ");
+        }
+        if (completed_evidence != nullptr) {
+            const std::string digest = digest_file_bytes(entry.second, error);
+            if (error) {
+                return metadata_failure(destination, owned, error, unpublished,
+                                        private_staging,
+                                        "The transfer could not hash its private copy: ");
+            }
+            content_evidence.emplace_back(
+                entry.first.lexically_relative(source), digest);
+        }
+    }
+
     for (const auto &entry : file_metadata) {
         if (!preserve_metadata(entry.first, entry.second, error)) {
             return metadata_failure(destination, owned, error, unpublished, private_staging);
@@ -744,6 +814,21 @@ OperationResult copy_exact(const std::filesystem::path &source,
                        std::move(retained_paths));
     }
 
+    if (completed_evidence != nullptr) {
+        if (!matches_content_evidence(source, content_evidence, error)) {
+            std::error_code cleanup_error;
+            std::vector<std::filesystem::path> retained_paths;
+            const bool cleaned = destination_ownership::cleanup_owned(
+                owned, cleanup_error, &retained_paths);
+            return failure(OperationStatus::VerificationFailure,
+                           OperationPhase::Verify, destination,
+                           "The source contents changed before the copy committed." +
+                               std::string{cleaned ? " The copied destination was removed."
+                                                   : retained_paths_message(retained_paths)},
+                           !cleaned, std::move(retained_paths));
+        }
+        *completed_evidence = std::move(content_evidence);
+    }
     if (completed_outputs != nullptr) {
         *completed_outputs = owned;
     }
@@ -1081,8 +1166,10 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
     }
 
     destination_ownership::OwnedOutputs copied_outputs;
+    FileContentEvidence content_evidence;
     OperationResult copied =
-        copy_exact(source, decision.destination, control, hooks_, &copied_outputs);
+        copy_exact(source, decision.destination, control, hooks_,
+                   &copied_outputs, &content_evidence);
     if (!copied.ok()) {
         return copied;
     }
@@ -1177,7 +1264,8 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
                        std::move(retained_paths));
     }
 
-    if (!equivalent_copy_shape(source_quarantine, decision.destination, error)) {
+    if (!equivalent_copy_shape(source_quarantine, decision.destination, error) ||
+        !matches_content_evidence(source_quarantine, content_evidence, error)) {
         std::error_code restore_error;
         bool source_absent = false;
         const bool restored = destination_ownership::restore_quarantine(
