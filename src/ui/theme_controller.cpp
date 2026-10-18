@@ -225,7 +225,6 @@ void ThemeController::apply_theme()
     const std::string text = colour_hex(palette->text_rgb);
     const std::string muted = colour_hex(palette->muted_rgb);
     const std::string secondary = colour_hex(palette->summary_rgb);
-    const std::string kicker = colour_hex(palette->kicker_rgb);
     const std::string titlebar = colour_hex(palette->titlebar_rgb);
     const std::string title = colour_hex(palette->title_rgb);
     const std::string hover = colour_hex(palette->surface_hover_rgb);
