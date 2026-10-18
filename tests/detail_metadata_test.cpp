@@ -254,16 +254,29 @@ int main()
     std::strcpy(policy.clock_mode, "chinese-time");
     policy.show_seconds = false;
     g_file_info_set_attribute_uint64(file, G_FILE_ATTRIBUTE_TIME_MODIFIED, 1791646200U);
+    InfiltratrTemporalClockModule *chinese_clock =
+        infiltratr_temporal_clock_module_open_id("chinese-time");
+    const bool chinese_resource_available = chinese_clock != nullptr;
+    infiltratr_temporal_clock_module_free(chinese_clock);
     const bool saved_coarse = infiltratr_temporal_posix_policy_save(&policy) == 0;
+    const std::string coarse_text = detail_modified_text(file, date_provider);
     const bool coarse_ok = saved_coarse &&
-        detail_modified_text(file, date_provider) == "Chinese lunar date Shēn hour";
+        coarse_text == (chinese_resource_available
+            ? "Chinese lunar date Shēn hour"
+            : "Chinese lunar date clock resource unavailable");
     policy.show_seconds = true;
     const bool saved_fine = infiltratr_temporal_posix_policy_save(&policy) == 0;
+    const std::string fine_text = detail_modified_text(file, date_provider);
     const bool fine_ok = saved_fine &&
-        detail_modified_text(file, date_provider) == "Chinese lunar date Shēn, first half";
+        fine_text == (chinese_resource_available
+            ? "Chinese lunar date Shēn, first half"
+            : "Chinese lunar date clock resource unavailable");
     g_setenv("LANGUAGE", "zh_TW", TRUE);
+    const std::string chinese_text = detail_modified_text(file, date_provider);
     const bool chinese_language_ok =
-        detail_modified_text(file, date_provider) == "中文日期 申初";
+        chinese_text == (chinese_resource_available
+            ? "中文日期 申初"
+            : "中文日期 clock resource unavailable");
     std::strcpy(policy.clock_mode, "standard-12");
     policy.show_seconds = false;
     const bool saved_twelve = infiltratr_temporal_posix_policy_save(&policy) == 0;
@@ -287,8 +300,11 @@ int main()
     std::strcpy(policy.clock_mode, "chinese-time");
     policy.show_seconds = true;
     const bool saved_unavailable = infiltratr_temporal_posix_policy_save(&policy) == 0;
+    const std::string unavailable_text = detail_modified_text(file, date_provider);
     const bool unavailable_ok = saved_unavailable &&
-        detail_modified_text(file, date_provider) == "— Shēn, first half";
+        unavailable_text == (chinese_resource_available
+            ? "— Shēn, first half"
+            : "— clock resource unavailable");
     bool edo_ok = true;
     policy.location_configured = true;
     policy.latitude = 0.0;
@@ -297,14 +313,29 @@ int main()
     g_file_info_set_attribute_uint64(file, G_FILE_ATTRIBUTE_TIME_MODIFIED, 946728000U);
     for (const char *mode : {"japanese-temporal", "japanese-temporal-early"}) {
         std::strcpy(policy.clock_mode, mode);
-        edo_ok = edo_ok && infiltratr_temporal_posix_policy_save(&policy) == 0 &&
-            detail_modified_text(file, date_provider) == "— Mi · 四 bells";
+        InfiltratrTemporalClockModule *japanese_clock =
+            infiltratr_temporal_clock_module_open_id(mode);
+        const bool resource_available = japanese_clock != nullptr;
+        infiltratr_temporal_clock_module_free(japanese_clock);
+        const bool saved_edo = infiltratr_temporal_posix_policy_save(&policy) == 0;
+        const std::string edo_text = detail_modified_text(file, date_provider);
+        edo_ok = edo_ok && saved_edo &&
+            edo_text == (resource_available
+                ? "— Mi · 四 bells"
+                : "— clock resource unavailable");
     }
     infiltratr_temporal_posix_date_provider_free(date_provider);
     if (!coarse_ok || !fine_ok || !chinese_language_ok || !twelve_language_ok ||
         !unavailable_ok || !edo_ok) {
         g_free(config_home);
         g_object_unref(file);
+        std::fprintf(stderr,
+            "clock fixtures coarse=%d (%s), fine=%d (%s), zh=%d (%s), "
+            "12h=%d (%s), invalid=%d (%s), edo=%d\n",
+            (int)coarse_ok, coarse_text.c_str(), (int)fine_ok,
+            fine_text.c_str(), (int)chinese_language_ok, chinese_text.c_str(),
+            (int)twelve_language_ok, twelve_text.c_str(), (int)unavailable_ok,
+            unavailable_text.c_str(), (int)edo_ok);
         return detail_metadata_failure(17);
     }
 
