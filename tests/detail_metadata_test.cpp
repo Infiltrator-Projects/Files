@@ -5,6 +5,7 @@
 #include <infiltratr/temporal_clock_resource.h>
 #include <infiltratr/temporal_posix.h>
 
+#include <cstdio>
 #include <cstring>
 #include <string>
 
@@ -17,12 +18,20 @@ using infiltrator::files::detail_modified_text;
 using infiltrator::files::detail_size_text;
 using infiltrator::files::detail_type_text;
 
+// Preserve named distinct failure codes and print one actionable diagnostic
+// when a temporal resource regression occurs on a headless CI runner.
+static int detail_metadata_failure(int code)
+{
+    std::fprintf(stderr, "detail-metadata assertion failed (code %d)\n", code);
+    return code;
+}
+
 int main()
 {
     const std::string invalid_utf8("%H:%M:%S\xff");
     if (!detail_locale_time_format_without_seconds(invalid_utf8, "").empty() ||
         !detail_locale_time_format_without_seconds("%r", invalid_utf8).empty()) {
-        return 18;
+        return detail_metadata_failure(18);
     }
     // Exact civil-time/branch checks must not depend on the runner's timezone.
     g_setenv("TZ", "UTC", TRUE);
@@ -34,7 +43,7 @@ int main()
                               detail_modified_text(directory) == "—";
     g_object_unref(directory);
     if (!directory_ok) {
-        return 1;
+        return detail_metadata_failure(1);
     }
 
     GFileInfo *file = g_file_info_new();
@@ -43,13 +52,13 @@ int main()
     g_file_info_set_display_name(file, "small.txt");
     if (detail_type_text(file) != "File") {
         g_object_unref(file);
-        return 2;
+        return detail_metadata_failure(2);
     }
 
     g_file_info_set_size(file, 1536);
     if (detail_size_text(file) != "1.5 KB") {
         g_object_unref(file);
-        return 3;
+        return detail_metadata_failure(3);
     }
 
     // Put the shared temporal policy in an isolated test config before the
@@ -62,7 +71,7 @@ int main()
             g_error_free(temp_error);
         }
         g_object_unref(file);
-        return 4;
+        return detail_metadata_failure(4);
     }
     g_setenv("XDG_CONFIG_HOME", config_home, TRUE);
 
@@ -70,14 +79,14 @@ int main()
     if (!infiltratr_temporal_policy_v3_default(&policy)) {
         g_free(config_home);
         g_object_unref(file);
-        return 5;
+        return detail_metadata_failure(5);
     }
     std::strcpy(policy.clock_mode, "standard-12");
     policy.show_seconds = false;
     if (infiltratr_temporal_posix_policy_save(&policy) != 0) {
         g_free(config_home);
         g_object_unref(file);
-        return 6;
+        return detail_metadata_failure(6);
     }
 
     g_file_info_set_attribute_uint64(file, G_FILE_ATTRIBUTE_TIME_MODIFIED, 46800U);
@@ -92,7 +101,7 @@ int main()
     if (modified.empty() || modified == "—" || !civil_ok) {
         g_free(config_home);
         g_object_unref(file);
-        return 7;
+        return detail_metadata_failure(7);
     }
 
     GFileInfo *larger = g_file_info_new();
@@ -110,7 +119,7 @@ int main()
         g_object_unref(larger);
         g_free(config_home);
         g_object_unref(file);
-        return 8;
+        return detail_metadata_failure(8);
     }
 
 
@@ -126,7 +135,7 @@ int main()
         g_object_unref(number10);
         g_free(config_home);
         g_object_unref(file);
-        return 35;
+        return detail_metadata_failure(35);
     }
     g_object_unref(number2);
     g_object_unref(number10);
@@ -145,14 +154,14 @@ int main()
         g_object_unref(larger);
         g_free(config_home);
         g_object_unref(file);
-        return 14;
+        return detail_metadata_failure(14);
     }
     g_file_info_set_attribute_uint32(larger, "time::modified-nsec", 100U);
     if (detail_compare_modified(file, larger) != 0) {
         g_object_unref(larger);
         g_free(config_home);
         g_object_unref(file);
-        return 15;
+        return detail_metadata_failure(15);
     }
     g_object_unref(larger);
 
@@ -162,7 +171,7 @@ int main()
     if (detail_type_text(file) != "Symbolic Link") {
         g_free(config_home);
         g_object_unref(file);
-        return 9;
+        return detail_metadata_failure(9);
     }
 
     // The locale-owned standard clock must still obey System Settings'
@@ -173,7 +182,7 @@ int main()
     if (infiltratr_temporal_posix_policy_save(&policy) != 0) {
         g_free(config_home);
         g_object_unref(file);
-        return 10;
+        return detail_metadata_failure(10);
     }
     g_file_info_set_attribute_uint64(file, G_FILE_ATTRIBUTE_TIME_MODIFIED, 46837U);
     const std::string standard_without_seconds = detail_modified_text(file);
@@ -181,7 +190,7 @@ int main()
     if (standard_local == nullptr) {
         g_free(config_home);
         g_object_unref(file);
-        return 11;
+        return detail_metadata_failure(11);
     }
     char *locale_clock = g_date_time_format(standard_local, "%X");
     char *locale_second = g_date_time_format(standard_local, "%S");
@@ -201,7 +210,7 @@ int main()
         still_uses_unmodified_locale_clock) {
         g_free(config_home);
         g_object_unref(file);
-        return 12;
+        return detail_metadata_failure(12);
     }
 
     // Exercise locale pattern reduction directly so qualification does not
@@ -228,7 +237,7 @@ int main()
     if (!locale_patterns_ok) {
         g_free(config_home);
         g_object_unref(file);
-        return 13;
+        return detail_metadata_failure(13);
     }
 
     // The shared calendar bridge receives the file's local civil date, while
@@ -239,7 +248,7 @@ int main()
     if (date_provider == nullptr) {
         g_free(config_home);
         g_object_unref(file);
-        return 16;
+        return detail_metadata_failure(16);
     }
     std::strcpy(policy.calendar, "chinese");
     std::strcpy(policy.clock_mode, "chinese-time");
@@ -296,7 +305,7 @@ int main()
         !unavailable_ok || !edo_ok) {
         g_free(config_home);
         g_object_unref(file);
-        return 17;
+        return detail_metadata_failure(17);
     }
 
     // All eleven extracted clocks require their installed modules. No
@@ -315,7 +324,7 @@ int main()
         if (infiltratr_temporal_posix_policy_save(&policy) != 0) {
             g_free(config_home);
             g_object_unref(file);
-            return 19;
+            return detail_metadata_failure(19);
         }
         const std::string visible = detail_modified_text(file);
         InfiltratrTemporalClockModule *resource =
@@ -338,7 +347,7 @@ int main()
         if (!valid) {
             g_free(config_home);
             g_object_unref(file);
-            return 19;
+            return detail_metadata_failure(19);
         }
     }
 
