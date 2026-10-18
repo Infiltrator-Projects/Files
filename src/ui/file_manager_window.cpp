@@ -151,13 +151,6 @@ FileManagerWindow::FileManagerWindow(GtkApplication *application)
 
 FileManagerWindow::~FileManagerWindow()
 {
-    // GTK DirectoryList owns an asynchronous file monitor. Explicitly stop
-    // monitoring and detach its directory before dropping the last model
-    // references: queued file-info completions must not outlive the window.
-    if (directory_list_ != nullptr) {
-        gtk_directory_list_set_monitored(directory_list_, FALSE);
-        gtk_directory_list_set_file(directory_list_, nullptr);
-    }
     // Stop external callbacks before any UI/model references owned by this object are released.
     if (search_timeout_ != 0U) g_source_remove(search_timeout_);
     mounted_places_monitor_.reset();
