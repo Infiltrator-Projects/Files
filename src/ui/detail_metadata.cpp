@@ -337,8 +337,8 @@ InfiltratrTemporalClockPresentation *clock_presentation_for_mode(
         decltype(&infiltratr_temporal_clock_presentation_free)>;
     // Detail formatting is a GTK main-thread operation. Reuse one validated
     // module across rows and repaints, changing it only when policy selects
-    // a different mode. The first five native-only clocks fail closed;
-    // newly extracted Julian clocks still have a portable compatibility path.
+    // a different mode. All eleven extracted clocks fail closed without
+    // their independently installed system resources; no compiled fallback.
     static Presentation presentation(nullptr,
         &infiltratr_temporal_clock_presentation_free);
     static std::string current_id;
