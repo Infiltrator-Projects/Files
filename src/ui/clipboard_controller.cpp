@@ -367,6 +367,7 @@ void ClipboardController::paste()
     }
 
     reading_external_clipboard_ = true;
+    clipboard_requested_destination_ = destination;
     clipboard_read_generation_ = clipboard_generation_;
     update_action_state();
     set_status("Reading file references from the clipboard…");
@@ -410,7 +411,7 @@ void ClipboardController::on_clipboard_stream_open(GObject *source_object,
     read->stream = stream;
     read->generation = self->clipboard_read_generation_;
     read->special = g_strcmp0(mime, "x-special/gnome-copied-files") == 0;
-    read->destination = self->current_destination();
+    read->destination = self->clipboard_requested_destination_;
     g_input_stream_read_all_async(stream, read->bytes.data(), read->bytes.size(),
                                   G_PRIORITY_DEFAULT, nullptr,
                                   &ClipboardController::on_clipboard_stream_read, read);
@@ -466,6 +467,14 @@ void ClipboardController::on_clipboard_text_read(GObject *source_object,
     GError *error = nullptr;
     char *text = gdk_clipboard_read_text_finish(GDK_CLIPBOARD(source_object), result, &error);
     self->reading_external_clipboard_ = false;
+    // The outstanding clipboard request owns a window reference, but Destroy
+    // has already revoked authority to start another filesystem mutation.
+    if (self->shutting_down_) {
+        g_free(text);
+        g_clear_error(&error);
+        g_object_unref(held_window);
+        return;
+    }
     self->update_action_state();
 
     if (self->clipboard_read_generation_ != self->clipboard_generation_) {
@@ -490,9 +499,9 @@ void ClipboardController::on_clipboard_text_read(GObject *source_object,
         return;
     }
 
-    const std::string destination = self->current_destination();
-    if (destination.empty()) {
-        self->set_status("Paste currently requires a local destination folder.");
+    const std::string destination = self->clipboard_requested_destination_;
+    if (destination.empty() || destination != self->current_destination()) {
+        self->set_status("The destination changed while reading the clipboard.");
         g_object_unref(held_window);
         return;
     }

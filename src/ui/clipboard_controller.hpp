@@ -109,6 +109,9 @@ private:
     bool busy_{false};
     bool restore_directory_monitor_{false};
     bool reading_external_clipboard_{false};
+    // Immutable destination selected when an external Paste request starts.
+    // Navigation during asynchronous clipboard I/O must not retarget mutation.
+    std::string clipboard_requested_destination_;
     bool shutting_down_{false};
     guint64 clipboard_generation_{0U};
     guint64 clipboard_read_generation_{0U};

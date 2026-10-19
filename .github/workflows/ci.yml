@@ -123,6 +123,13 @@ jobs:
           tmp=$(mktemp -d)
           trap 'rm -rf "$tmp"' EXIT
           dpkg-deb -x "$deb" "$tmp/root"
+          dpkg-deb -e "$deb" "$tmp/control"
+          test -x "$tmp/control/postinst"
+          grep -Fq '/usr/lib/files/ensure-extended-fonts' "$tmp/control/postinst"
+          test -x "$tmp/root/usr/lib/files/ensure-extended-fonts"
+          grep -Eq '(^|, )ca-certificates(,|$)' <<<"$dependencies"
+          grep -Eq '(^|, )fontconfig(,|$)' <<<"$dependencies"
+          grep -Fq 'curl | wget' <<<"$dependencies"
           test -x "$tmp/root/Programs/files"
           test ! -e "$tmp/root/usr/bin/files"
           test -f "$tmp/root/usr/share/applications/files.desktop"

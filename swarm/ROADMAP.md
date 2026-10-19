@@ -1,10 +1,10 @@
 # Files delivery queue
 
-Current release baseline: **Files 0.1.43** (18 October 2026). The following historical 0.1.27 package records implementation provenance; it is not the current version target. `docs/FEATURES.md` remains the product scope.
+This roadmap records delivery decisions, not the current release identity. Read the root `VERSION` and its exact GitHub tag for the authoritative release; entries below include historical tranches. `docs/FEATURES.md` remains the product scope.
 
 PR #15 was requalified, merged on 15 October, and is reflected in 0.1.43. In-window tabs, independent windows and several session actions exist; moving tabs between windows and normal-restart session restoration are not yet claimed. Earlier rejection of the initial candidate must not be confused with the final merge.
 
-Current safety candidate: PR #16 targets 0.1.44, covering bound destructive deletion, byte-level cross-volume verification, journal health and release publication. Do not mark it released until exact-head CI, integration and public publication have been observed.
+Historical safety candidate PR #16 targeted 0.1.44, covering bound destructive deletion, byte-level cross-volume verification, journal health and release publication. Its status must be assessed from the merged commit, exact-head CI and immutable release records, not this retained roadmap snapshot.
 
 1. **Maintainability and release hardening — 0.1.27 scope.** Make journal persistence match the documented failure/recovery contract; distinguish current-session work from earlier-session interruption evidence; serialize journal access; use Common exact POSIX I/O; recover safely from an incomplete tail; fail closed when no durable state path exists; consolidate duplicated UI build inventories; derive the exact Common commit from the gitlink; remove generated coordination debris; centralize release policy in `ci/release.sh`; pin artifact actions; provide a manual release-recovery path; and observe central catalogue/beta APT propagation. GJ-01/06/08/11.
 2. **Five documented session features + shell craft correction — requalified product tranche.** Implement open-current-location in a new window; tabs; open in new tab; close/reorder/duplicate/move tabs; and reopen recently closed tabs. Preserve a supplying mounted-place identity for inactive tabs, revalidate unavailable locations against the current mount snapshot, prevent pending restoration state from being overwritten by rapid switching, and keep all mode-aware colours under the theme authority. GJ-01/02/09/11/12.

@@ -133,7 +133,10 @@ wait_for_apt() {
 
     local catalogue='https://infiltrator-projects.github.io/Infiltrator-Repository/catalogue/apps.json'
     local packages="https://infiltrator-projects.github.io/Infiltrator-Repository/dists/beta/main/binary-${RELEASE_ARCHITECTURE}/Packages.gz"
-    local attempt cache_key catalogue_version apt_match
+    local attempt cache_key catalogue_version apt_match expected_sha256
+    # The APT index must identify the exact Debian bytes qualified by CI, not
+    # merely a second package carrying the same name and version.
+    expected_sha256=$(sha256sum "$RELEASE_DIRECTORY/$RELEASE_DEB" | awk '{print $1}')
 
     # The central repository has a five-minute scheduled recovery publisher.
     # Verification therefore needs a materially larger observation window than
@@ -150,15 +153,17 @@ wait_for_apt() {
         if curl -fsSL --retry 2 --retry-delay 1 \
             -H 'Cache-Control: no-cache' "${packages}?release=${cache_key}" 2>/dev/null \
             | gzip -dc 2>/dev/null \
-            | awk -v package='files' -v version="$RELEASE_VERSION" '
+            | awk -v package='files' -v version="$RELEASE_VERSION" \
+                  -v checksum="$expected_sha256" '
                 BEGIN { RS=""; FS="\n"; found=0 }
                 {
-                    p=""; v=""
+                    p=""; v=""; sha=""
                     for (i=1; i<=NF; ++i) {
                         if ($i ~ /^Package: /) { p=substr($i,10) }
                         if ($i ~ /^Version: /) { v=substr($i,10) }
+                        if ($i ~ /^SHA256: /) { sha=substr($i,9) }
                     }
-                    if (p == package && v == version) { found=1 }
+                    if (p == package && v == version && sha == checksum) { found=1 }
                 }
                 END { exit(found ? 0 : 1) }
             '; then

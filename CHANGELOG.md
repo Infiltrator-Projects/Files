@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.54 — 2026-10-19
+
+- Bind asynchronous external clipboard Paste to its requested destination and refuse text completion after the window has been destroyed, preventing navigation or shutdown from retargeting a file mutation.
+- Require beta APT's `SHA256` index entry to match the exact qualified Files Debian package, in addition to package identity, version and catalogue visibility.
+- Qualify Debian maintainer-script execution, Common-provided extended-font helper and declared runtime prerequisites during CI package inspection.
+- Reconcile the maintained Common integration ledger with the exact `1.19.66` gitlink and distinguish historical swarm roadmap entries from current release authority.
+
+
 ## 0.1.50 — 2026-10-18
 
 - Fix unreadable Day-mode text on the Recent sidebar menu button: style its GTK4 inner button, label and icon with the active Common theme, including hover and open states.
