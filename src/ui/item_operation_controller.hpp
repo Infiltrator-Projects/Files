@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "directory_mutation_guard.hpp"
+
 #include <gtk/gtk.h>
 
 #include <filesystem>
@@ -92,6 +94,7 @@ private:
     [[nodiscard]] static const char *kind_name(Kind kind) noexcept;
     [[nodiscard]] static bool kind_is_transfer(Kind kind) noexcept;
 
+    DirectoryMutationGuard mutation_guard_;
     GtkWindow *window_{nullptr};
     GtkDirectoryList *directory_list_{nullptr};
     GtkSingleSelection *selection_{nullptr};

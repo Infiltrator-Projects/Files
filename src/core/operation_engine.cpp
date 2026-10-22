@@ -103,24 +103,24 @@ OperationResult OperationEngine::create_empty_file(const std::filesystem::path &
         return failure(status_for_error(error), OperationPhase::Execute, destination,
                        "The new file could not be staged: " + error.message());
     }
-    const int flushed = ::fsync(fd);
-    const int saved_errno = errno;
-    const int closed = ::close(fd);
-    if (flushed != 0 || closed != 0) {
-        error = std::error_code(flushed != 0 ? saved_errno : errno, std::generic_category());
-        return failure(OperationStatus::VerificationFailure, OperationPhase::Verify,
-                       destination, "The new file could not be made durable: " + error.message());
-    }
-
     const auto private_path = staging.access_root() / "payload";
-    if (!destination_ownership::record_at(
-            staging.descriptor, "payload", private_path, owned, error)) {
+    // Record ownership while the descriptor is live, before any fallible flush
+    // or close. Every exit then has the same cleanup/retained-evidence contract.
+    const bool recorded = destination_ownership::record_fd(private_path, fd, owned, error);
+    int flushed = -1;
+    if (recorded) {
+        do { flushed = ::fsync(fd); } while (flushed != 0 && errno == EINTR);
+        if (flushed != 0) error = std::error_code(errno, std::generic_category());
+    }
+    const int closed = ::close(fd);
+    if (closed != 0 && !error) error = std::error_code(errno, std::generic_category());
+    if (!recorded || flushed != 0 || closed != 0) {
         std::error_code cleanup;
         std::vector<std::filesystem::path> retained;
         const bool cleaned = destination_ownership::cleanup_unpublished(
             staging, destination, owned, cleanup, &retained);
         return failure(OperationStatus::VerificationFailure, OperationPhase::Verify,
-                       destination, "The staged file identity could not be recorded." +
+                       destination, "The new file could not be made durable: " + error.message() +
                            (cleaned ? std::string{} : retained_paths_message(retained)),
                        !cleaned, std::move(retained));
     }

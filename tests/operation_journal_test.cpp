@@ -151,10 +151,23 @@ int main()
         corrupt << "103\tmalformed\tSTART\tcopy\tmissing-destination\n";
     }
     OperationJournal malformed(malformed_path);
-    if (malformed.interrupted_operations(interrupted)) {
+    if (malformed.interrupted_operations(interrupted) ||
+        !malformed.begin("copy", "/tmp/a", "/tmp/b").empty() ||
+        malformed.finish("unrecorded", "copy", result)) {
         fs::remove_all(root, cleanup_error);
         return 14;
     }
+
+    // A cached healthy revision must not hide an external same-size edit.
+    const fs::path edited_path = root / "state" / "edited.log";
+    OperationJournal edited(edited_path);
+    const auto edited_id = edited.begin("copy", "/tmp/a", "/tmp/b");
+    if (edited_id.empty()) return 16;
+    {
+        std::fstream corrupt(edited_path, std::ios::binary | std::ios::in | std::ios::out);
+        corrupt.put('!');
+    }
+    if (!edited.begin("copy", "/tmp/a", "/tmp/b").empty()) return 17;
 
     // The safety ceiling must reject a sparse oversized journal without
     // allocating its entire length or allowing new mutations.

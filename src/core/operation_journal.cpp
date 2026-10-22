@@ -151,6 +151,67 @@ std::vector<std::string> split_tabs(const std::string &line)
     return fields;
 }
 
+// Recovery inspection and mutation admission accept exactly the same frames.
+bool valid_record(const std::vector<std::string> &fields)
+{
+    const bool start = fields.size() == 6U && fields[2] == "START";
+    const bool end = fields.size() == 8U && fields[2] == "END";
+    if ((!start && !end) || !valid_record_time(fields[0]) ||
+        fields[1].empty() || fields[3].empty()) return false;
+    for (std::size_t index = 1U; index < fields.size(); ++index)
+        if (!valid_record_escape(fields[index])) return false;
+    return !end || ((fields[5] == "changed" || fields[5] == "unchanged") &&
+                    !fields[4].empty());
+}
+
+// One bounded checkpoint avoids rescanning a growing journal for every batch
+// item. It is trusted only under journal_mutex + flock and an exact inode,
+// size, mtime and ctime match. External append, replacement or in-place edits
+// invalidate it. No on-disk validation authority is introduced.
+struct ValidatedJournal {
+    struct stat status {};
+    bool valid{false};
+};
+ValidatedJournal validated_journal;
+
+bool same_journal_revision(const struct stat &left, const struct stat &right)
+{
+    return left.st_dev == right.st_dev && left.st_ino == right.st_ino &&
+           left.st_size == right.st_size &&
+           left.st_mtim.tv_sec == right.st_mtim.tv_sec &&
+           left.st_mtim.tv_nsec == right.st_mtim.tv_nsec &&
+           left.st_ctim.tv_sec == right.st_ctim.tv_sec &&
+           left.st_ctim.tv_nsec == right.st_ctim.tv_nsec;
+}
+
+bool validate_existing_records(const int descriptor, const struct stat &status)
+{
+    if (validated_journal.valid &&
+        same_journal_revision(validated_journal.status, status)) return true;
+    validated_journal.valid = false;
+    std::array<char, 4096> buffer{};
+    std::string line;
+    const auto size = static_cast<std::uint64_t>(status.st_size);
+    for (std::uint64_t offset = 0U; offset < size;) {
+        const auto count = static_cast<std::size_t>(
+            std::min<std::uint64_t>(buffer.size(), size - offset));
+        if (infiltratr_pread_full(descriptor, buffer.data(), count, offset) != 0)
+            return false;
+        for (std::size_t index = 0U; index < count; ++index) {
+            if (buffer[index] == '\n') {
+                if (!valid_record(split_tabs(line))) return false;
+                line.clear();
+            } else {
+                line.push_back(buffer[index]);
+            }
+        }
+        offset += count;
+    }
+    // The incomplete final frame is intentionally left to tail repair. A bad
+    // complete frame must fail admission before any journal bytes are changed.
+    return true;
+}
+
 bool lock_descriptor(const int descriptor, const int operation)
 {
     int result = 0;
@@ -339,7 +400,7 @@ std::string OperationJournal::unescape(const std::string_view value)
 
 bool OperationJournal::append_line(const std::string &line) const
 {
-    if (path_.empty()) {
+    if (path_.empty() || !valid_record(split_tabs(line))) {
         return false;
     }
 
@@ -361,9 +422,6 @@ bool OperationJournal::append_line(const std::string &line) const
 
     const bool locked = lock_descriptor(descriptor, LOCK_EX);
     bool ok = locked;
-    if (ok && ::fchmod(descriptor, 0600) != 0) {
-        ok = false;
-    }
     // Check the original size before tail repair. An oversized or corrupted
     // journal must not be silently truncated to zero by scanning for a newline.
     struct stat preflight_status {};
@@ -371,6 +429,11 @@ bool OperationJournal::append_line(const std::string &line) const
                preflight_status.st_size < 0 ||
                static_cast<std::uintmax_t>(preflight_status.st_size) >
                    kMaximumJournalBytes)) {
+        ok = false;
+    }
+    if (ok && (preflight_status.st_mode & 0777U) != 0600U &&
+        ::fchmod(descriptor, 0600) != 0) ok = false;
+    if (ok && !validate_existing_records(descriptor, preflight_status)) {
         ok = false;
     }
     if (ok && !discard_incomplete_tail(descriptor)) {
@@ -397,6 +460,9 @@ bool OperationJournal::append_line(const std::string &line) const
     if (ok && !sync_parent_directory(path_)) {
         ok = false;
     }
+
+    validated_journal.valid = ok &&
+        ::fstat(descriptor, &validated_journal.status) == 0;
 
     if (locked && !lock_descriptor(descriptor, LOCK_UN)) {
         ok = false;
@@ -520,29 +586,12 @@ bool OperationJournal::interrupted_operations(
     std::string line;
     while (std::getline(stream, line)) {
         const std::vector<std::string> fields = split_tabs(line);
-        const bool start = fields.size() == 6U && fields[2] == "START";
-        const bool end = fields.size() == 8U && fields[2] == "END";
-        if ((!start && !end) || !valid_record_time(fields[0])) {
+        if (!valid_record(fields)) {
             interrupted.clear();
             return false;
-        }
-        for (std::size_t index = 1; index < fields.size(); ++index) {
-            if (!valid_record_escape(fields[index])) {
-                interrupted.clear();
-                return false;
-            }
         }
         const std::string id = unescape(fields[1]);
-        if (id.empty() || fields[3].empty()) {
-            interrupted.clear();
-            return false;
-        }
-        if (end) {
-            if ((fields[5] != "changed" && fields[5] != "unchanged") ||
-                fields[4].empty()) {
-                interrupted.clear();
-                return false;
-            }
+        if (fields[2] == "END") {
             open.erase(id);
             continue;
         }
@@ -593,6 +642,7 @@ bool OperationJournal::mark_interrupted(const InterruptedOperation &operation) c
         operation.destination,
         "The previous Files session ended before this operation recorded completion. Inspect the source and destination before assuming either state is authoritative.",
         true,
+        {},
     };
     return finish(operation.operation_id, operation.kind, result);
 }

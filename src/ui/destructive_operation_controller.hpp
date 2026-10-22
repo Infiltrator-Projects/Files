@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "directory_mutation_guard.hpp"
+
 #include <gtk/gtk.h>
 
 #include <filesystem>
@@ -73,6 +75,7 @@ private:
                                              std::string &name,
                                              bool require_original) const;
 
+    DirectoryMutationGuard mutation_guard_;
     GtkWindow *window_{nullptr};
     GtkDirectoryList *directory_list_{nullptr};
     GtkSingleSelection *selection_{nullptr};

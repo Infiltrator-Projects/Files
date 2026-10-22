@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "directory_mutation_guard.hpp"
+
 #include "../core/batch_transfer_engine.hpp"
 
 #include <gtk/gtk.h>
@@ -63,6 +65,7 @@ private:
     void show_alert(const char *title, const std::string &detail) const;
     [[nodiscard]] std::vector<std::string> selected_sources() const;
 
+    DirectoryMutationGuard mutation_guard_;
     GtkWindow *window_{nullptr};
     GtkDirectoryList *directory_list_{nullptr};
     GtkMultiSelection *selection_{nullptr};

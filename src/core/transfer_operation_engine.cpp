@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "transfer_operation_engine.hpp"
 #include "aggregate_arithmetic.hpp"
+#include "copied_metadata.hpp"
 #include "destination_ownership.hpp"
 
 #include <algorithm>
@@ -455,38 +456,12 @@ bool copy_regular_file(const std::filesystem::path &source,
     return copy_regular_file_to_descriptor(source, output, control, error);
 }
 
-bool preserve_metadata(const std::filesystem::path &source,
-                       const std::filesystem::path &destination,
-                       std::error_code &error)
-{
-    error.clear();
-    const auto source_status = std::filesystem::status(source, error);
-    if (error) {
-        return false;
-    }
-
-    std::filesystem::permissions(destination,
-                                 source_status.permissions(),
-                                 std::filesystem::perm_options::replace,
-                                 error);
-    if (error) {
-        return false;
-    }
-
-    const auto modified = std::filesystem::last_write_time(source, error);
-    if (error) {
-        return false;
-    }
-    std::filesystem::last_write_time(destination, modified, error);
-    return !error;
-}
-
 OperationResult metadata_failure(const std::filesystem::path &destination,
                                  destination_ownership::OwnedOutputs &owned,
                                  const std::error_code &error,
                                  const bool unpublished,
                                  destination_ownership::ProtectedStaging &staging,
-                                 const char *reason = "The transfer could not preserve permissions or modification time: ")
+                                 const char *reason = "The transfer could not preserve and flush file metadata: ")
 {
     std::error_code cleanup_error;
     std::vector<std::filesystem::path> retained_paths;
@@ -547,8 +522,9 @@ OperationResult copy_exact(const std::filesystem::path &source,
                        "The selected item could not be inspected.");
     }
 
-    std::vector<std::pair<std::filesystem::path, std::filesystem::path>> file_metadata;
-    std::vector<std::pair<std::filesystem::path, std::filesystem::path>> directory_metadata;
+    std::vector<std::pair<std::filesystem::path, destination_ownership::OwnedOutput>> file_metadata;
+    std::vector<std::pair<std::filesystem::path, destination_ownership::OwnedOutput>> directory_metadata;
+    std::vector<std::pair<std::filesystem::path, destination_ownership::OwnedOutput>> link_metadata;
     destination_ownership::OwnedOutputs owned;
     destination_ownership::ProtectedStaging private_staging;
     bool unpublished = true;
@@ -560,12 +536,7 @@ OperationResult copy_exact(const std::filesystem::path &source,
             private_link = destination_ownership::create_private_symlink(
                 destination, target, private_staging, owned, error);
         }
-        if (!error && !private_link.empty()) {
-            if (hooks.publish_output(
-                    private_staging, private_link, destination, owned.front(), error)) {
-                unpublished = false;
-            }
-        }
+        if (!error && !private_link.empty()) link_metadata.emplace_back(source, owned.back());
         if (!error && control != nullptr) {
             control->add_item();
         }
@@ -575,7 +546,7 @@ OperationResult copy_exact(const std::filesystem::path &source,
             destination, private_staging, owned, private_file, error);
         if (output >= 0 &&
             copy_regular_file_to_descriptor(source, output, control, error)) {
-            file_metadata.emplace_back(source, private_file);
+            file_metadata.emplace_back(source, owned.back());
         } else if (control != nullptr && control->cancelled()) {
             std::error_code cleanup_error;
             std::vector<std::filesystem::path> retained_paths;
@@ -602,7 +573,7 @@ OperationResult copy_exact(const std::filesystem::path &source,
                            !cleaned,
                            std::move(retained_paths));
         }
-        directory_metadata.emplace_back(source, private_destination);
+        directory_metadata.emplace_back(source, owned.back());
         if (!error && control != nullptr) {
             control->add_item();
         }
@@ -629,7 +600,7 @@ OperationResult copy_exact(const std::filesystem::path &source,
                     (void)destination_ownership::record(target, owned, error);
                 }
                 if (!error) {
-                    directory_metadata.emplace_back(iterator->path(), target);
+                    directory_metadata.emplace_back(iterator->path(), owned.back());
                 }
                 if (!error && control != nullptr) {
                     control->add_item();
@@ -641,6 +612,7 @@ OperationResult copy_exact(const std::filesystem::path &source,
                 }
                 if (!error) {
                     (void)destination_ownership::record(target, owned, error);
+                    if (!error) link_metadata.emplace_back(iterator->path(), owned.back());
                 }
                 if (!error && control != nullptr) {
                     control->add_item();
@@ -660,7 +632,7 @@ OperationResult copy_exact(const std::filesystem::path &source,
                             destination, !cleaned, std::move(retained_paths));
                     }
                 } else {
-                    file_metadata.emplace_back(iterator->path(), target);
+                    file_metadata.emplace_back(iterator->path(), owned.back());
                 }
             } else {
                 error = std::make_error_code(std::errc::operation_not_supported);
@@ -721,13 +693,13 @@ OperationResult copy_exact(const std::filesystem::path &source,
     // make a correctly copied group-readable file unreadable to its new owner.
     FileContentEvidence content_evidence;
     for (const auto &entry : file_metadata) {
-        if (!identical_file_bytes(entry.first, entry.second, error)) {
+        if (!identical_file_bytes(entry.first, entry.second.path, error)) {
             return metadata_failure(destination, owned, error, unpublished,
                                     private_staging,
                                     "The transfer could not verify copied file contents: ");
         }
         if (completed_evidence != nullptr) {
-            const std::string digest = digest_file_bytes(entry.second, error);
+            const std::string digest = digest_file_bytes(entry.second.path, error);
             if (error) {
                 return metadata_failure(destination, owned, error, unpublished,
                                         private_staging,
@@ -738,21 +710,39 @@ OperationResult copy_exact(const std::filesystem::path &source,
         }
     }
 
+    for (const auto &entry : link_metadata) {
+        if (!preserve_copied_metadata(entry.first, entry.second, error))
+            return metadata_failure(destination, owned, error, unpublished, private_staging);
+    }
     for (const auto &entry : file_metadata) {
-        if (!preserve_metadata(entry.first, entry.second, error)) {
+        if (!preserve_copied_metadata(entry.first, entry.second, error)) {
             return metadata_failure(destination, owned, error, unpublished, private_staging);
         }
     }
     for (auto iterator = directory_metadata.rbegin(); iterator != directory_metadata.rend(); ++iterator) {
-        if (!preserve_metadata(iterator->first, iterator->second, error)) {
+        if (!preserve_copied_metadata(iterator->first, iterator->second, error)) {
             return metadata_failure(destination, owned, error, unpublished, private_staging);
         }
     }
 
-    if (!std::filesystem::is_symlink(source_status)) {
+    {
         const std::filesystem::path private_destination = owned.front().path;
-        if (!hooks.publish_tree(
-                private_staging, private_destination, destination, owned, error)) {
+        // Payload data/metadata and private directory entries precede public
+        // namespace publication. Source removal is never allowed to overtake
+        // the destination's file and parent-directory durability barriers.
+        if (!sync_copied_descriptor(private_staging.descriptor, error))
+            return metadata_failure(destination, owned, error, unpublished, private_staging);
+        if (control != nullptr && control->cancelled()) {
+            std::error_code cleanup_error;
+            std::vector<std::filesystem::path> retained_paths;
+            const bool cleaned = destination_ownership::cleanup_unpublished(
+                private_staging, destination, owned, cleanup_error, &retained_paths);
+            return cancelled_result(destination, !cleaned, std::move(retained_paths));
+        }
+        const bool published = std::filesystem::is_symlink(source_status)
+            ? hooks.publish_output(private_staging, private_destination, destination, owned.front(), error)
+            : hooks.publish_tree(private_staging, private_destination, destination, owned, error);
+        if (!published) {
             std::error_code cleanup_error;
             std::vector<std::filesystem::path> retained_paths;
             const auto status = error == std::errc::file_exists
@@ -782,6 +772,12 @@ OperationResult copy_exact(const std::filesystem::path &source,
                            std::move(retained_paths));
         }
         unpublished = false;
+    }
+    if (!sync_copy_publication(destination.parent_path(), error)) {
+        return failure(OperationStatus::VerificationFailure, OperationPhase::Verify,
+                       destination, "The copied destination could not be made durable: " +
+                           error.message() + " The source was left intact. Inspect the retained copy at “" +
+                           destination.string() + "”.", true, {destination});
     }
 
     if (!destination_ownership::verify_all(owned, error)) {
@@ -1355,6 +1351,15 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
                            source_recovery_message,
                        true,
                        std::move(retained_paths));
+    }
+
+    destination_ownership::release_staging(source_staging);
+    if (!sync_copy_publication(source.parent_path(), error)) {
+        return failure(OperationStatus::VerificationFailure, OperationPhase::Verify,
+                       decision.destination,
+                       "The copied destination is durable, but source removal could not be made durable: " +
+                           error.message() + " Inspect the destination at “" + decision.destination.string() + "”.",
+                       true, {decision.destination});
     }
 
     return OperationResult{OperationStatus::Success,

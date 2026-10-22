@@ -71,7 +71,7 @@ ClipboardController::ClipboardController(GtkWindow *window,
                                          GtkDirectoryList *directory_list,
                                          GtkMultiSelection *selection,
                                          GtkWidget *status_label)
-    : window_(window),
+    : mutation_guard_(window, directory_list), window_(window),
       directory_list_(directory_list),
       selection_(selection),
       status_label_(status_label)
@@ -140,7 +140,6 @@ ClipboardController::~ClipboardController()
 void ClipboardController::on_window_destroyed(GtkWidget *, gpointer user_data)
 {
     auto *self = static_cast<ClipboardController *>(user_data);
-    self->shutting_down_ = true;
     ++self->clipboard_generation_;
     if (self->clipboard_ != nullptr && self->clipboard_changed_handler_ != 0U) {
         g_signal_handler_disconnect(self->clipboard_, self->clipboard_changed_handler_);
@@ -292,7 +291,7 @@ void ClipboardController::on_location_changed(GObject *object,
 void ClipboardController::on_clipboard_changed(GdkClipboard *clipboard, gpointer data)
 {
     auto *self = static_cast<ClipboardController *>(data);
-    if (self->shutting_down_) return;
+    if (!self->mutation_guard_.alive()) return;
     if (gdk_clipboard_get_content(clipboard) == self->owned_content_) return;
     ++self->clipboard_generation_;
     self->mode_ = Mode::None;
@@ -303,7 +302,7 @@ void ClipboardController::on_clipboard_changed(GdkClipboard *clipboard, gpointer
 
 void ClipboardController::capture_selection(const Mode mode)
 {
-    if (shutting_down_ || busy_ || reading_external_clipboard_ || mode == Mode::None) {
+    if (!mutation_guard_.alive() || busy_ || reading_external_clipboard_ || mode == Mode::None) {
         return;
     }
 
@@ -326,7 +325,7 @@ void ClipboardController::capture_selection(const Mode mode)
 
 void ClipboardController::paste()
 {
-    if (shutting_down_ || busy_ || reading_external_clipboard_) {
+    if (!mutation_guard_.alive() || busy_ || reading_external_clipboard_) {
         return;
     }
 
@@ -395,7 +394,7 @@ void ClipboardController::on_clipboard_stream_open(GObject *source_object,
     GError *error = nullptr;
     GInputStream *stream = gdk_clipboard_read_finish(GDK_CLIPBOARD(source_object),
                                                       result, &mime, &error);
-    if (self->shutting_down_ || stream == nullptr || error != nullptr) {
+    if (!self->mutation_guard_.alive() || stream == nullptr || error != nullptr) {
         self->reading_external_clipboard_ = false;
         self->update_action_state();
         self->set_status("Could not read file references from the clipboard.");
@@ -426,7 +425,7 @@ void ClipboardController::on_clipboard_stream_read(GObject *source_object,
     const bool ok = g_input_stream_read_all_finish(G_INPUT_STREAM(source_object),
                                                     result, &n, &error);
     self->reading_external_clipboard_ = false;
-    if (self->shutting_down_) {
+    if (!self->mutation_guard_.alive()) {
         g_clear_error(&error);
         return;
     }
@@ -469,7 +468,7 @@ void ClipboardController::on_clipboard_text_read(GObject *source_object,
     self->reading_external_clipboard_ = false;
     // The outstanding clipboard request owns a window reference, but Destroy
     // has already revoked authority to start another filesystem mutation.
-    if (self->shutting_down_) {
+    if (!self->mutation_guard_.alive()) {
         g_free(text);
         g_clear_error(&error);
         g_object_unref(held_window);
@@ -536,15 +535,7 @@ void ClipboardController::paste_sources(const Mode mode,
         destination_parent,
     };
 
-    // GtkDirectoryList's native monitor queries changed files asynchronously.
-    // During our own filesystem mutation, those monitor callbacks can still be
-    // outstanding when the window is closed. Stop the native monitor before
-    // the worker starts and reload the current listing on completion; ordinary
-    // navigation/enumeration remains available throughout the transfer.
-    restore_directory_monitor_ = directory_list_ != nullptr &&
-        gtk_directory_list_get_monitored(directory_list_);
-    if (restore_directory_monitor_)
-        gtk_directory_list_set_monitored(directory_list_, FALSE);
+    mutation_guard_.begin();
 
     busy_ = true;
     update_action_state();
@@ -602,19 +593,11 @@ void ClipboardController::on_operation_finished(GObject *source_object,
     GError *error = nullptr;
     std::unique_ptr<OperationResult> operation(
         static_cast<OperationResult *>(g_task_propagate_pointer(task, &error)));
-    self->busy_ = false;
-    if (self->restore_directory_monitor_) {
-        self->restore_directory_monitor_ = false;
-        if (!self->shutting_down_ && self->directory_list_ != nullptr)
-            gtk_directory_list_set_monitored(self->directory_list_, TRUE);
-    }
-    // The GTask holds a reference to its GTK window, but an explicitly
-    // destroyed window may already have disposed all child widgets. Consume
-    // completion without accessing status/actions during shutdown.
-    if (self->shutting_down_) {
+    if (!self->mutation_guard_.finish()) {
         g_clear_error(&error);
         return;
     }
+    self->busy_ = false;
     self->update_action_state();
 
     if (error != nullptr) {
@@ -896,7 +879,7 @@ std::vector<std::string> ClipboardController::parse_local_file_references(
 
 void ClipboardController::update_action_state()
 {
-    if (shutting_down_) return;
+    if (!mutation_guard_.alive()) return;
     GtkBitset *selected = selection_ != nullptr
         ? gtk_selection_model_get_selection(GTK_SELECTION_MODEL(selection_))
         : nullptr;
@@ -921,6 +904,7 @@ void ClipboardController::update_action_state()
 
 void ClipboardController::set_status(const std::string &message) const
 {
+    if (!mutation_guard_.alive()) return;
     if (status_label_ != nullptr) {
         gtk_label_set_text(GTK_LABEL(status_label_), message.c_str());
     }
@@ -928,7 +912,7 @@ void ClipboardController::set_status(const std::string &message) const
 
 void ClipboardController::show_alert(const char *title, const std::string &detail) const
 {
-    if (window_ == nullptr) {
+    if (!mutation_guard_.alive() || window_ == nullptr) {
         return;
     }
     GtkAlertDialog *alert = gtk_alert_dialog_new("%s", title);

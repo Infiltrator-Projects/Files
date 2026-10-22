@@ -25,7 +25,7 @@ CreateFolderController::CreateFolderController(GtkWindow *window,
                                                GtkDirectoryList *directory_list,
                                                GtkSingleSelection *selection,
                                                GtkWidget *status_label)
-    : window_(window), directory_list_(directory_list), selection_(selection),
+    : mutation_guard_(window, directory_list), window_(window), directory_list_(directory_list), selection_(selection),
       status_label_(status_label)
 {
     if (window_ == nullptr || directory_list_ == nullptr || selection_ == nullptr) {
@@ -294,6 +294,7 @@ void CreateFolderController::submit_dialog()
         gtk_label_set_text(GTK_LABEL(status_label_), data->file ? "Creating file…" : "Creating folder…");
     }
 
+    mutation_guard_.begin();
     GTask *task = g_task_new(G_OBJECT(window_), nullptr,
                              &CreateFolderController::on_create_folder_finished, this);
     g_task_set_task_data(task, data, [](gpointer value) {
@@ -346,6 +347,10 @@ void CreateFolderController::on_create_folder_finished(GObject *source_object,
     GError *error = nullptr;
     std::unique_ptr<OperationResult> operation(
         static_cast<OperationResult *>(g_task_propagate_pointer(task, &error)));
+    if (!self->mutation_guard_.finish()) {
+        g_clear_error(&error);
+        return;
+    }
     self->set_busy(false);
 
     if (error != nullptr) {
@@ -385,12 +390,14 @@ void CreateFolderController::on_create_folder_finished(GObject *source_object,
 
 void CreateFolderController::set_busy(const bool busy)
 {
+    if (!mutation_guard_.alive()) return;
     busy_ = busy;
     update_action_state();
 }
 
 void CreateFolderController::update_action_state()
 {
+    if (!mutation_guard_.alive()) return;
     if (button_ == nullptr || directory_list_ == nullptr) {
         return;
     }
@@ -402,6 +409,7 @@ void CreateFolderController::update_action_state()
 
 void CreateFolderController::select_pending_item()
 {
+    if (!mutation_guard_.alive()) return;
     if (pending_selection_name_.empty() || directory_list_ == nullptr || selection_ == nullptr) {
         return;
     }
@@ -425,6 +433,7 @@ void CreateFolderController::select_pending_item()
 
 void CreateFolderController::update_status_count()
 {
+    if (!mutation_guard_.alive()) return;
     if (status_label_ == nullptr || directory_list_ == nullptr ||
         gtk_directory_list_is_loading(directory_list_)) {
         return;

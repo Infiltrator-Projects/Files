@@ -32,7 +32,7 @@ BatchItemOperationController::BatchItemOperationController(
     GtkDirectoryList *directory_list,
     GtkMultiSelection *selection,
     GtkWidget *status_label)
-    : window_(window), directory_list_(directory_list), selection_(selection),
+    : mutation_guard_(window, directory_list), window_(window), directory_list_(directory_list), selection_(selection),
       status_label_(status_label)
 {
     if (window_ == nullptr || directory_list_ == nullptr || selection_ == nullptr) {
@@ -227,6 +227,12 @@ void BatchItemOperationController::on_destination_chosen(GObject *source_object,
 
     GError *error = nullptr;
     GFile *folder = gtk_file_dialog_select_folder_finish(GTK_FILE_DIALOG(source_object), result, &error);
+    if (!self->mutation_guard_.alive()) {
+        g_clear_error(&error);
+        g_clear_object(&folder);
+        g_object_unref(held_window);
+        return;
+    }
     self->chooser_busy_ = false;
 
     if (error != nullptr) {
@@ -312,6 +318,11 @@ void BatchItemOperationController::on_conflict_chosen(GObject *source_object,
 
     GError *error = nullptr;
     const int choice = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source_object), result, &error);
+    if (!self->mutation_guard_.alive()) {
+        g_clear_error(&error);
+        g_object_unref(held_window);
+        return;
+    }
     self->chooser_busy_ = false;
 
     const BatchTransferKind kind = self->pending_kind_;
@@ -368,6 +379,7 @@ void BatchItemOperationController::start_operation(
         gtk_label_set_text(GTK_LABEL(status_label_), status.c_str());
     }
 
+    mutation_guard_.begin();
     GTask *task = g_task_new(G_OBJECT(window_), nullptr,
                              &BatchItemOperationController::on_operation_finished, this);
     g_task_set_task_data(task, data, [](gpointer value) {
@@ -416,6 +428,10 @@ void BatchItemOperationController::on_operation_finished(GObject *source_object,
     GError *error = nullptr;
     std::unique_ptr<OperationResult> operation(
         static_cast<OperationResult *>(g_task_propagate_pointer(task, &error)));
+    if (!self->mutation_guard_.finish()) {
+        g_clear_error(&error);
+        return;
+    }
     self->set_busy(false);
     self->current_control_.reset();
 
@@ -458,6 +474,7 @@ void BatchItemOperationController::on_operation_finished(GObject *source_object,
 
 void BatchItemOperationController::set_busy(const bool busy)
 {
+    if (!mutation_guard_.alive()) return;
     busy_ = busy;
     if (operation_box_ != nullptr) {
         gtk_widget_set_visible(operation_box_, busy);
@@ -481,7 +498,7 @@ void BatchItemOperationController::set_busy(const bool busy)
 gboolean BatchItemOperationController::on_progress_tick(gpointer user_data)
 {
     auto *self = static_cast<BatchItemOperationController *>(user_data);
-    if (!self->busy_) {
+    if (!self->mutation_guard_.alive() || !self->busy_) {
         self->progress_source_id_ = 0U;
         return G_SOURCE_REMOVE;
     }
@@ -491,6 +508,7 @@ gboolean BatchItemOperationController::on_progress_tick(gpointer user_data)
 
 void BatchItemOperationController::update_progress()
 {
+    if (!mutation_guard_.alive()) return;
     if (progress_bar_ == nullptr) {
         return;
     }
@@ -522,6 +540,7 @@ void BatchItemOperationController::update_progress()
 
 void BatchItemOperationController::update_action_state()
 {
+    if (!mutation_guard_.alive()) return;
     if (menu_button_ == nullptr) {
         return;
     }
@@ -584,6 +603,7 @@ std::vector<std::string> BatchItemOperationController::selected_sources() const
 
 void BatchItemOperationController::close_menu()
 {
+    if (!mutation_guard_.alive()) return;
     if (popover_ != nullptr) {
         gtk_popover_popdown(GTK_POPOVER(popover_));
     }

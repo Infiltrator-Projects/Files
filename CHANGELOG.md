@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.55 — 2026-10-23
+
+- Flush private copied data, metadata and directory entries before publication, and the destination parent before cross-volume source removal. Flush failures retain the original and report exact recovery paths; cancellation remains effective before publication.
+- Preserve bounded native extended attributes and POSIX ACLs for copied regular files/directories, remove destination-only inherited ACLs, and fail explicitly when required metadata cannot be preserved.
+- Share directory-monitor suspension and window/process lifetime across creation, rename, single/batch transfer, destructive and clipboard controllers. Closing the last window keeps active mutations alive until their durable results are consumed.
+- Use one journal-frame validator for recovery and mutation admission, reject malformed complete journals before append, and invalidate the bounded validation checkpoint after external edits.
+- Record empty-file payload ownership before flush/close so failures cannot leave unreported private residue.
+- Add transfer durability/metadata fault-injection and operation/window/application lifetime regressions; retain the explicit early-product scope and pinned Common revision.
+
 ## 0.1.54 — 2026-10-19
 
 - Bind asynchronous external clipboard Paste to its requested destination and refuse text completion after the window has been destroyed, preventing navigation or shutdown from retargeting a file mutation.

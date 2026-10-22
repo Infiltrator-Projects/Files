@@ -1,5 +1,7 @@
 # Files — Complete Feature Catalogue
 
+The 0.1.55 safety tranche adds copied-data/publication durability barriers, bounded native xattr/POSIX-ACL preservation with explicit refusal on loss, shared mutation-monitor/application lifetime, strict journal admission and exact empty-file failure evidence. It does not claim completion of the broader CORE or research catalogue.
+
 The 0.1.37 tranche adds independently created windows; folder-in-new-window;
 within-window tab duplicate/reorder and recently-closed recovery; parent-child
 selection; remembered view/hidden/sidebar preferences; naturally ordered names,

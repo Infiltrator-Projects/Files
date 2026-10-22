@@ -60,7 +60,7 @@ DestructiveOperationController::DestructiveOperationController(
     GtkDirectoryList *directory_list,
     GtkSingleSelection *selection,
     GtkWidget *status_label)
-    : window_(window), directory_list_(directory_list), selection_(selection),
+    : mutation_guard_(window, directory_list), window_(window), directory_list_(directory_list), selection_(selection),
       status_label_(status_label)
 {
     if (window_ == nullptr || directory_list_ == nullptr || selection_ == nullptr) {
@@ -295,6 +295,11 @@ void DestructiveOperationController::on_delete_confirmed(GObject *source_object,
 
     GError *error = nullptr;
     const int choice = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source_object), result, &error);
+    if (!self->mutation_guard_.alive()) {
+        g_clear_error(&error);
+        g_object_unref(held_window);
+        return;
+    }
     self->dialog_busy_ = false;
 
     const Kind kind = self->pending_kind_;
@@ -365,6 +370,11 @@ void DestructiveOperationController::on_restore_replace_chosen(GObject *source_o
 
     GError *error = nullptr;
     const int choice = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source_object), result, &error);
+    if (!self->mutation_guard_.alive()) {
+        g_clear_error(&error);
+        g_object_unref(held_window);
+        return;
+    }
     self->dialog_busy_ = false;
 
     const std::string trash_uri = self->pending_trash_uri_;
@@ -419,6 +429,7 @@ void DestructiveOperationController::start_operation(const Kind kind,
         gtk_label_set_text(GTK_LABEL(status_label_), busy_text(data->kind));
     }
 
+    mutation_guard_.begin();
     GTask *task = g_task_new(G_OBJECT(window_), nullptr,
                              &DestructiveOperationController::on_operation_finished, this);
     g_task_set_task_data(task, data, [](gpointer value) {
@@ -493,6 +504,10 @@ void DestructiveOperationController::on_operation_finished(GObject *source_objec
     GError *error = nullptr;
     std::unique_ptr<OperationResult> operation(
         static_cast<OperationResult *>(g_task_propagate_pointer(task, &error)));
+    if (!self->mutation_guard_.finish()) {
+        g_clear_error(&error);
+        return;
+    }
     self->busy_ = false;
     self->update_action_state();
 
@@ -533,6 +548,7 @@ void DestructiveOperationController::on_operation_finished(GObject *source_objec
 
 void DestructiveOperationController::update_action_state()
 {
+    if (!mutation_guard_.alive()) return;
     if (menu_button_ == nullptr) {
         return;
     }
@@ -568,6 +584,7 @@ void DestructiveOperationController::update_action_state()
 
 void DestructiveOperationController::close_menu()
 {
+    if (!mutation_guard_.alive()) return;
     if (popover_ != nullptr) {
         gtk_popover_popdown(GTK_POPOVER(popover_));
     }

@@ -207,6 +207,14 @@ At minimum, operations distinguish:
 
 The UI should not collapse these into a generic "something went wrong" state.
 
+### Native copy durability and metadata
+
+`copied_metadata` owns preservation of native regular-file/directory modes, modification times, enumerated extended attributes and POSIX ACLs on identity-bound private output descriptors. Non-ACL attributes are applied while outputs remain privately writable; ACLs are applied after chmod, with destination-only inherited ACLs removed. Linux attribute lists/values are bounded at 64 KiB and aggregate values at 4 MiB per object. Unreadable, unsupported, changing or oversized metadata fails the transfer explicitly. Symlinks with extended attributes are refused because Linux cannot apply them through an identity-bound O_PATH descriptor without following a separately observed pathname. Ownership and sparse allocation remain separate future policy.
+
+Copied file data and metadata, child directories and the private staging directory are flushed before atomic publication. The public destination parent is then flushed before a cross-volume move can quarantine/remove its original source. A pre-publication failure uses the existing exact retained-evidence path; a publication-barrier failure leaves the source intact and identifies the retained public copy. Source-parent synchronization follows successful source removal. A flush failure is a verification failure, never successful completion inferred from cached read-back. Cancellation is checked again after private durability and before publication.
+
+These barriers do not create snapshots of actively written source/destination objects, guarantee hardware honesty, or replace real-device power-loss qualification.
+
 ## 6. Recoverability and journal
 
 File Manager should maintain a user-visible operation history sufficient to explain recent mutations and expose reversible actions when they genuinely exist.
@@ -223,6 +231,8 @@ A journal entry may include:
 - an undo/restore token only where an actual reversible mechanism exists.
 
 The application must never manufacture an Undo button when no reliable reversal exists.
+
+Recovery scanning and append admission share one complete-frame validator. Under the process mutex and journal flock, malformed complete records block START/END appends before bytes are changed; incomplete final frames retain the established repair contract. A single bounded in-process validation checkpoint avoids quadratic rescanning during large batches. It is invalidated by any observed inode, size, mtime or ctime change and is never a separate persistent authority. Cooperating writers must honor the advisory lock; this is not continuous detection of arbitrary non-cooperating or physical storage corruption.
 
 ## 7. Search architecture
 
@@ -298,6 +308,12 @@ The following are asynchronous by default:
 Results merge incrementally into visible models using stable identities/generations so late worker results cannot corrupt a newly selected location.
 
 A failed background subsystem must fail open: the normal file manager remains usable.
+
+### Mutation, monitoring and application lifetime
+
+`DirectoryMutationGuard` provides the single UI-thread lease for each window's directory model. Creation, single/batch operations, destructive/recovery and clipboard controllers suspend the same native monitor before dispatching worker mutation. Overlapping operations increment one shared count; only the last completion can re-enable monitoring, which causes GTK to enumerate the resulting directory again. Removal from the GtkApplication permanently revokes UI authority and disables monitoring before GTK unrealizes the window; the later widget destroy signal supplies the disposal fallback. This distinction matters because pending GTasks can delay widget destruction. Results are still consumed and journalled without touching disposed controls. Pending clipboard/chooser completions and progress timers honor the same lifetime boundary.
+
+The first active lease holds the GtkApplication, and the last releases it after worker completion. A reference to a destroyed GtkWindow alone does not authorize the main loop to exit before outstanding mutation/journal work finishes. Browsing remains available during worker execution, and presentation remains separate from durable operation semantics.
 
 ## 10. Presentation model
 
@@ -388,4 +404,4 @@ The following remain open and must be decided through research/prototyping rathe
 
 ## Standalone shared typography resources
 
-Files pins Libraries/Common 1.19.57 and packages the small `InfiltratrEnsureExtendedFonts.sh` helper at `/usr/lib/files/ensure-extended-fonts`. Its Debian configure hook verifies or establishes all 23 shared MB Corpo/Daimler faces at `/System/Resources/Fonts` from the immutable InfiltratorOS font source; fonts are not owned by Files' package and are not removed with Files. The GTK4 theme chooses Text, Condensed and Title families by product task and uses Common's existing fallback contract on systems where the optional extended cache is unavailable at runtime. No file manager operation, filesystem identity or recovery policy depends on a typography resource.
+Files pins Libraries/Common 1.19.66 and packages the small `InfiltratrEnsureExtendedFonts.sh` helper at `/usr/lib/files/ensure-extended-fonts`. Its Debian configure hook verifies or establishes all 23 shared MB Corpo/Daimler faces at `/System/Resources/Fonts` from the immutable InfiltratorOS font source; fonts are not owned by Files' package and are not removed with Files. The GTK4 theme chooses Text, Condensed and Title families by product task and uses Common's existing fallback contract on systems where the optional extended cache is unavailable at runtime. No file manager operation, filesystem identity or recovery policy depends on a typography resource.

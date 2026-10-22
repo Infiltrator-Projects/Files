@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "directory_mutation_guard.hpp"
+
 #include "../core/batch_transfer_engine.hpp"
 
 #include <gtk/gtk.h>
@@ -92,6 +94,7 @@ private:
     [[nodiscard]] std::string current_destination() const;
     [[nodiscard]] std::vector<std::string> parse_local_file_references(const char *text) const;
 
+    DirectoryMutationGuard mutation_guard_;
     GtkWindow *window_{nullptr};
     GtkDirectoryList *directory_list_{nullptr};
     GtkMultiSelection *selection_{nullptr};
@@ -107,12 +110,10 @@ private:
     std::vector<std::string> sources_;
     PendingConflict pending_conflict_{};
     bool busy_{false};
-    bool restore_directory_monitor_{false};
     bool reading_external_clipboard_{false};
     // Immutable destination selected when an external Paste request starts.
     // Navigation during asynchronous clipboard I/O must not retarget mutation.
     std::string clipboard_requested_destination_;
-    bool shutting_down_{false};
     guint64 clipboard_generation_{0U};
     guint64 clipboard_read_generation_{0U};
     gulong selection_handler_{0U};

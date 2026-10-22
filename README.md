@@ -118,11 +118,12 @@ It currently provides:
 - replacement staging that verifies the replacement, restores the previous destination on a safe failure path and retains staged data rather than guessing after an uncertain move;
 - same-filesystem moves through filesystem rename semantics, with copy-then-remove fallback for cross-volume moves;
 - recursive directory transfer is assembled under descriptor-rooted protected staging and atomically published once complete, with symbolic links preserved as links;
-- ordinary copy and cross-volume move transfer paths that preserve regular-file and directory permissions and modification timestamps when the destination permits them;
+- ordinary copy and cross-volume move transfer paths that preserve regular-file and directory permissions, modification timestamps, extended attributes and POSIX ACLs when the destination permits them;
 - metadata preservation applied to directories after their children are written so directory modification times are not immediately destroyed by the copy itself;
-- explicit verification failure when copied contents exist but supported permission/timestamp metadata could not be preserved, rather than claiming perfect preservation;
+- explicit verification failure when supported metadata cannot be preserved or the copy cannot be made durable, retaining the original source and reporting exact recovery paths;
 - byte and item progress for single-item Copy/Move transfers, surfaced in the header without blocking the GTK main loop;
 - explicit transfer cancellation, checked during chunked file copy and directory traversal, with partial copy destinations removed where cleanup is safe;
+- copied files and metadata are flushed before publication, private directory entries are flushed before rename, and the public destination parent is flushed before cross-volume source removal;
 - cross-volume moves verify the complete copied output set, atomically quarantine the unchanged source, compare regular-file contents as well as the source shape with the published copy and only then remove it; remaining source data is restored after a deletion failure when the original name is still free;
 - cancellation remains effective during copy and traversal; a fully copied, metadata-preserved and identity-verified destination is the cross-volume move commit point and is reported as completed rather than as a late cancellation with duplicate data;
 - deterministic **Move to Trash** for one selected native item, available from the Trash action and the `Delete` key;
@@ -136,6 +137,7 @@ It currently provides:
 - a separate recovery/destructive operation layer for replacement rollback, Trash, restoration and permanent deletion so destructive policy does not inflate the ordinary operation engine;
 - an fsync-backed durable operation journal at the user's XDG state location, with a persisted START record before mutation and END record after the operation result; oversized logs (over 128 MiB) fail closed pending inspection/archival, rather than making an unbounded memory allocation;
 - fail-closed journalling for New Folder, Rename, Copy, Move, Keep Both, Replace, Trash, Restore, Permanent Delete and each item in a batch: if the START record cannot be persisted, that mutation is not started;
+- one shared complete-record validator for startup recovery and mutation admission, refusing new mutations on a malformed journal while preserving incomplete-tail repair;
 - startup inspection of journal START records with no matching END from a previous Files session;
 - conservative interrupted-operation closure as **verification failure**, never inferred success, while retaining the exact operation kind/source/destination for inspection;
 - an explicit warning/inspection surface when interrupted operations are found, including notification if the recovery END itself cannot be persisted;
@@ -143,11 +145,12 @@ It currently provides:
 - distinct handling for invalid requests, destination conflicts, permission failures, read-only locations, unsupported safe-operation capabilities, cancellation, execution failures and verification failures;
 - asynchronous execution of mutation work so filesystem operations do not block the GTK main loop;
 - monitored refresh and automatic selection of newly created, renamed, copied or moved single items when their result appears in the current view;
+- one window-owned directory-monitor lease shared by mutation controllers, with late completion isolated from disposed controls and active work holding the application until its durable result is consumed;
 - separate creation, single-item operation, batch operation, clipboard, drag/drop transport, destructive/recovery, journal-inspection and theme controllers; window-owned navigation, bookmark, rename-presentation and thumbnail bindings remain separate from the durable file mutation engines;
 - the full `InfiltratrCommon::Common` build dependency on InfiltratorOS/POSIX, making Common's POSIX/state/I/O contracts available to the non-UI layers as they are introduced; and
 - a hosted build/test gate on every main-branch update, including headless GTK window lifetime, interaction-surface and workspace/tab/bookmark/inline-rename checks, sorted selection, mount-row identity/focus and fresh-profile policy monitoring, mounted-place identity qualification, batch preflight/policy/progress/cancellation, interrupted-journal recovery and permission/timestamp preservation qualification.
 
-Metadata preservation is deliberately honest in the current implementation: permissions and modification timestamps are qualified for ordinary copy/cross-volume transfer paths, while ownership, ACLs, extended attributes, sparse-file preservation and symlink metadata remain future capability work. Multi-selection batch Copy/Move is present; destructive batch Trash/Delete is not yet claimed.
+Metadata preservation is deliberately bounded: regular-file and directory permissions, modification timestamps, enumerated native extended attributes and POSIX ACLs are qualified for ordinary copy/cross-volume transfers. Unsupported, unreadable, oversized or unpreservable attributes stop the transfer explicitly. Symbolic links with extended attributes are refused rather than followed or silently stripped. Ownership, sparse-file preservation and other symlink metadata remain future capability work. Multi-selection batch Copy/Move is present; destructive batch Trash/Delete is not yet claimed.
 
 The remaining parity work includes safe drag-move negotiation, moving tabs between windows, richer bookmark metadata, remote and provider-specific thumbnails, search, archives and richer file/object/capability handling; mounted/removable discovery is already part of the browsing foundation rather than a reason to add ad-hoc controls.
 

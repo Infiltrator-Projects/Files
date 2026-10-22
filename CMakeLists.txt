@@ -92,6 +92,7 @@ endfunction()
 
 add_library(infiltrator-files-core STATIC
     src/core/batch_transfer_engine.cpp
+    src/core/copied_metadata.cpp
     src/core/location.cpp
     src/core/mounted_places.cpp
     src/core/operation_engine.cpp
@@ -114,6 +115,7 @@ add_library(infiltrator-files-ui STATIC
     src/ui/create_folder_controller.cpp
     src/ui/destructive_operation_controller.cpp
     src/ui/detail_metadata.cpp
+    src/ui/directory_mutation_guard.cpp
     src/ui/drag_drop_controller.cpp
     src/ui/file_manager_window.cpp
     src/ui/interaction_controller.cpp
@@ -169,6 +171,16 @@ if(BUILD_TESTING)
             ENVIRONMENT "G_DEBUG=fatal-criticals;GTK_A11Y=none;GSETTINGS_BACKEND=memory"
             TIMEOUT 45)
 
+        add_executable(operation-lifetime-test tests/operation_lifetime_test.cpp)
+        target_link_libraries(operation-lifetime-test PRIVATE infiltrator-files-ui)
+        infiltrator_enable_warnings(operation-lifetime-test)
+        target_link_options(operation-lifetime-test PRIVATE "-Wl,--wrap=fsync")
+        add_test(NAME operation-lifetime COMMAND "${DBUS_RUN_SESSION_EXECUTABLE}" --
+            "${XVFB_RUN_EXECUTABLE}" -a $<TARGET_FILE:operation-lifetime-test>)
+        set_tests_properties(operation-lifetime PROPERTIES
+            ENVIRONMENT "G_DEBUG=fatal-criticals;GTK_A11Y=none;GSETTINGS_BACKEND=memory"
+            TIMEOUT 45)
+
         add_executable(workspace-navigation-test tests/workspace_navigation_test.cpp)
         target_link_libraries(workspace-navigation-test PRIVATE infiltrator-files-ui)
         infiltrator_enable_warnings(workspace-navigation-test)
@@ -207,6 +219,8 @@ if(BUILD_TESTING)
     infiltrator_add_core_test(transfer-operation-engine-test tests/transfer_operation_engine_test.cpp transfer-operation-engine)
     infiltrator_add_core_test(batch-transfer-engine-test tests/batch_transfer_engine_test.cpp batch-transfer-engine)
     infiltrator_add_core_test(operation-journal-test tests/operation_journal_test.cpp operation-journal)
+    infiltrator_add_core_test(transfer-safety-test tests/transfer_safety_test.cpp transfer-safety)
+    target_link_options(transfer-safety-test PRIVATE "-Wl,--wrap=fsync" "-Wl,--wrap=fsetxattr")
 endif()
 
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/BUILD-INFO"

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "directory_mutation_guard.hpp"
+
 #include <gtk/gtk.h>
 
 #include <string>
@@ -54,6 +56,7 @@ private:
     void show_alert(const char *title, const std::string &detail) const;
     [[nodiscard]] bool current_location_is(const std::string &uri) const;
 
+    DirectoryMutationGuard mutation_guard_;
     GtkWindow *window_{nullptr};
     GtkDirectoryList *directory_list_{nullptr};
     GtkSingleSelection *selection_{nullptr};
