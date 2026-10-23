@@ -101,7 +101,7 @@ It currently provides:
 - right-click item actions and one consolidated, height-bounded scrollable header overflow menu (with Copy/Cut/Paste accessible in the footer), sharing the same underlying operation controllers;
 - a read-only Properties surface for selected-item metadata;
 - system clipboard file-reference Copy/Cut/Paste (`Ctrl+C`/`Ctrl+X`/`Ctrl+V`) using the same batch transfer engine and collision decisions;
-- journalled drag-and-drop of local file selections onto native folders/sidebar destinations, with copy as the safe default and a negotiated in-process move through the same batch engine; external/ambiguous drops never request Files-owned source deletion;
+- journalled drag-and-drop of local file selections onto native folders/sidebar destinations, with copy as the default and explicit Shift+drag to negotiate an in-process move through the same batch engine; external/ambiguous drops never request Files-owned source deletion;
 - bounded asynchronous image thumbnails with a cache shared across view modes, version-aware invalidation and safe fallback to file icons; native images and GIO-readable non-native images (8 MiB cap) are supported, while video/document thumbnail providers are not enabled;
 - deterministic single-item **Copy to…** and **Move to…**, using a native folder picker for the destination;
 - isolated multi-item **Copy selected to…** and **Move selected to…** actions rather than expanding the proven single-item controller into a second state machine;

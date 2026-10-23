@@ -49,6 +49,7 @@ DragDropController::DragDropController(GtkWindow *window, GtkDirectoryList *dire
     GtkDropTarget *sidebar_drop = gtk_drop_target_new(GDK_TYPE_FILE_LIST,
         static_cast<GdkDragAction>(GDK_ACTION_COPY | GDK_ACTION_MOVE));
     g_signal_connect(sidebar_drop, "drop", G_CALLBACK(on_drop), this);
+    g_signal_connect(sidebar_drop, "motion", G_CALLBACK(on_motion), this);
     gtk_widget_add_controller(sidebar_, GTK_EVENT_CONTROLLER(sidebar_drop));
     g_object_weak_ref(G_OBJECT(window_), on_window_finalized, this);
 }
@@ -77,6 +78,7 @@ void DragDropController::register_view(GtkWidget *view)
     GtkDropTarget *drop = gtk_drop_target_new(GDK_TYPE_FILE_LIST,
         static_cast<GdkDragAction>(GDK_ACTION_COPY | GDK_ACTION_MOVE));
     g_signal_connect(drop, "drop", G_CALLBACK(on_drop), this);
+    g_signal_connect(drop, "motion", G_CALLBACK(on_motion), this);
     gtk_widget_add_controller(view, GTK_EVENT_CONTROLLER(drop));
 }
 std::vector<std::string> DragDropController::selected_paths(GtkWidget *view, double x, double y)
@@ -173,6 +175,18 @@ GFile *DragDropController::target_folder(GtkWidget *target, double x, double y) 
     }
     return G_FILE(g_object_ref(parent));
 }
+GdkDragAction DragDropController::on_motion(GtkDropTarget *target,
+                                            double, double, gpointer)
+{
+    GdkDrop *drop = gtk_drop_target_get_current_drop(target);
+    const bool local_drag = drop != nullptr && gdk_drop_get_drag(drop) != nullptr;
+    const bool supports_move = drop != nullptr &&
+        (gdk_drop_get_actions(drop) & GDK_ACTION_MOVE) != 0;
+    const bool shift = (gtk_event_controller_get_current_event_state(
+        GTK_EVENT_CONTROLLER(target)) & GDK_SHIFT_MASK) != 0;
+    return local_drag && supports_move && shift ? GDK_ACTION_MOVE : GDK_ACTION_COPY;
+}
+
 gboolean DragDropController::on_drop(GtkDropTarget *target, const GValue *value,
                                      double x, double y, gpointer data)
 {
@@ -209,7 +223,10 @@ gboolean DragDropController::on_drop(GtkDropTarget *target, const GValue *value,
     // Cross-application and ambiguous drops remain copy-only, preventing an
     // external drag source from deleting the originals after Files moves them.
     GdkDrop *drop = gtk_drop_target_get_current_drop(target);
-    const bool move = drop != nullptr && gdk_drop_get_actions(drop) == GDK_ACTION_MOVE &&
+    const bool shift = (gtk_event_controller_get_current_event_state(
+        GTK_EVENT_CONTROLLER(target)) & GDK_SHIFT_MASK) != 0;
+    const bool move = drop != nullptr && shift &&
+        (gdk_drop_get_actions(drop) & GDK_ACTION_MOVE) != 0 &&
         gdk_drop_get_drag(drop) != nullptr;
     const bool accepted = operations->transfer_from_drop(sources, destination, move);
     g_free(destination);

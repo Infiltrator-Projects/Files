@@ -2,7 +2,7 @@
 
 ## 0.1.58 — 2026-10-23
 
-- Add explicitly negotiated native drag moves through the journalled batch-transfer engine, refusing ambiguous/external drag source-deletion authority while retaining copy-only fallback.
+- Add explicit Shift+drag native moves through the journalled batch-transfer engine; only an in-process source and negotiated move can delete originals, while ordinary/external drops safely copy.
 - Decode bounded remote GIO image thumbnails off the UI thread (8 MiB maximum, four concurrent decodes), with normal icon fallback for unavailable providers.
 - Open bookmarked folders in a new tab or independent window from the bookmark options menu.
 - Refresh the current folder with F5 or Ctrl+R without a navigation-history step, preserving the selected filenames.

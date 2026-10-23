@@ -17,6 +17,7 @@ private:
     static void on_window_finalized(gpointer, GObject *);
     static GdkContentProvider *on_prepare(GtkDragSource *, double, double, gpointer);
     static gboolean on_drop(GtkDropTarget *, const GValue *, double, double, gpointer);
+    static GdkDragAction on_motion(GtkDropTarget *, double, double, gpointer);
     void register_view(GtkWidget *view);
     std::vector<std::string> selected_paths(GtkWidget *view, double x, double y);
     GFile *target_folder(GtkWidget *target, double x, double y) const;
