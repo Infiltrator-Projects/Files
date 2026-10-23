@@ -58,6 +58,9 @@ Product-level acceptance is defined in [`docs/PRODUCT-QUALITY.md`](docs/PRODUCT-
 
 ## Current implementation
 
+The 0.1.60 selection tranche adds pattern-based selection (visible filename `*`/`?` matching), selecting matching file types, opening multiple selected folders in tabs and copying all selected native paths or URIs as text. Tab opening preflights available capacity, and textual clipboard export rejects a partial or oversized result rather than silently truncating it. These five additive interactions do not claim the still-planned split pane, recursive/content search, archive workflow or permission editor.
+
+
 File modification timestamps use one shared temporal policy snapshot for both date and time. All 23 explicit clocks use Common's validated executable resource interface, including Roman temporal time, both Edo seasonal models, historical Nürnberg and location-aware Nürnberg. Clock resources own locale-sensitive wording, numerals and visible-tick scheduling. Normal host Gregorian dates work without modules. Thirty optional calendar providers use Common's executable resource ABI for enhanced UI-language presentation. Missing, invalid or incompatible resources remain visibly unavailable. Common 1.19.66 supplies discovery, validation, loading and policy integration; Files owns no duplicate calendar or clock-face implementation. The independently installed resource package survives consumer removal. Existing live policy monitoring refreshes visible labels; sorting continues to use raw filesystem timestamps.
 
 The executable is `files`, presented to the user as **Files**.

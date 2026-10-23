@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.60 — 2026-10-23
+
+- Select visible filenames by `*` / `?` pattern or by matching directory/content type.
+- Open a multi-selection of folders in separate tabs after whole-request capacity verification.
+- Copy multiple selected native paths or URIs as newline-delimited text, failing without changing the clipboard for remote-only native paths, unavailable metadata, selections over 4,096, or payloads over 1 MiB.
+- Exercise the five new actions against real GTK selection and clipboard models. Ordinary file-reference clipboard Copy/Cut and journalled mutation behaviour remain unchanged.
+
 ## 0.1.59 — 2026-10-23
 
 - Require an explicit Shift modifier and a same-process GTK drag for native Move, so offered drag-action flags cannot accidentally authorise source deletion. Prefer Copy on drag motion otherwise; route both through the qualified transfer engine.
