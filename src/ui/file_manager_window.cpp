@@ -147,6 +147,7 @@ FileManagerWindow::FileManagerWindow(GtkApplication *application)
     load_bookmarks();
     load_recents();
     load_preferences();
+    load_folder_views();
     apply_preferences();
     tabs_.push_back(TabState{});
     install_tab_drop();
@@ -1178,6 +1179,8 @@ void FileManagerWindow::navigate_to(GFile *file, const bool record_history)
 
     gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection_));
     hide_search();
+    if (const auto saved = folder_views_.find(location.uri); saved != folder_views_.end())
+        set_view_mode(saved->second);
     gtk_directory_list_set_file(directory_list_, file);
     if (record_history) record_recent(file);
     gtk_editable_set_text(GTK_EDITABLE(location_entry_), parse_name);
@@ -1248,6 +1251,20 @@ void FileManagerWindow::activate_position(const guint position)
     g_object_unref(info);
 }
 
+void FileManagerWindow::refresh_current_directory()
+{
+    if (current_location_ == nullptr || !current_location_available_ ||
+        directory_list_ == nullptr || !gtk_directory_list_get_monitored(directory_list_))
+        return;
+    // A refresh re-enumerates the same directory, never navigation history or
+    // file mutations. Retain selections by item name until the new snapshot arrives.
+    remember_tab();
+    if (active_tab_ < tabs_.size()) pending_tab_selection_ = tabs_[active_tab_].selected_names;
+    gtk_directory_list_set_file(directory_list_, nullptr);
+    gtk_directory_list_set_file(directory_list_, current_location_);
+    update_status();
+}
+
 void FileManagerWindow::set_view_mode(const ViewMode mode)
 {
     if (content_stack_ == nullptr) {
@@ -1260,7 +1277,9 @@ void FileManagerWindow::set_view_mode(const ViewMode mode)
         mode == ViewMode::Icons ? icon_view_button_ : compact_view_button_;
     if (GTK_IS_TOGGLE_BUTTON(active_button) &&
         !gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(active_button))) {
+        view_mode_programmatic_ = true;
         gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(active_button), TRUE);
+        view_mode_programmatic_ = false;
     }
     switch (mode) {
     case ViewMode::List:
@@ -1758,6 +1777,11 @@ gboolean FileManagerWindow::on_tab_key_pressed(GtkEventControllerKey *, guint ke
         self->show_search();
         return TRUE;
     }
+    if (keyval == GDK_KEY_F5 ||
+        ((modifiers & GDK_CONTROL_MASK) && (keyval == GDK_KEY_r || keyval == GDK_KEY_R))) {
+        self->refresh_current_directory();
+        return TRUE;
+    }
     if (!(modifiers & GDK_CONTROL_MASK)) return FALSE;
     if ((keyval == GDK_KEY_t || keyval == GDK_KEY_T) &&
         !(modifiers & GDK_SHIFT_MASK)) {
@@ -1786,7 +1810,9 @@ gboolean FileManagerWindow::on_tab_key_pressed(GtkEventControllerKey *, guint ke
         return TRUE;
     }
     if (keyval == GDK_KEY_1 || keyval == GDK_KEY_2 || keyval == GDK_KEY_3) {
-        self->set_view_mode(static_cast<ViewMode>(keyval - GDK_KEY_1));
+        const auto mode = static_cast<ViewMode>(keyval - GDK_KEY_1);
+        self->set_view_mode(mode);
+        self->remember_folder_view(mode);
         return TRUE;
     }
     if (keyval == GDK_KEY_h || keyval == GDK_KEY_H) {
@@ -1883,7 +1909,10 @@ void FileManagerWindow::on_view_mode_toggled(GtkToggleButton *button, gpointer u
     }
 
     auto *self = static_cast<FileManagerWindow *>(user_data);
-    self->set_view_mode(static_cast<ViewMode>(encoded - 1));
+    if (self->view_mode_programmatic_) return;
+    const auto mode = static_cast<ViewMode>(encoded - 1);
+    self->set_view_mode(mode);
+    self->remember_folder_view(mode);
 }
 
 

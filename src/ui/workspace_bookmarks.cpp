@@ -130,7 +130,8 @@ void FileManagerWindow::append_bookmark(const std::string &uri, const std::strin
     gtk_widget_set_tooltip_text(options, "Bookmark options");
     GtkWidget *popup = gtk_popover_new();
     GtkWidget *items = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    for (const char *verb : {"Rename label…", "Move up", "Move down", "Remove"}) {
+    for (const char *verb : {"Open in new tab", "Open in new window",
+                              "Rename label…", "Move up", "Move down", "Remove"}) {
         GtkWidget *action = gtk_button_new_with_label(verb);
         gtk_widget_add_css_class(action, "flat");
         g_object_set_data(G_OBJECT(action), "ifm-bookmark-row", row);
@@ -214,7 +215,22 @@ void FileManagerWindow::on_bookmark_action(GtkButton *button, gpointer data)
     if (it == self->bookmarks_.end()) return;
     const std::size_t index = static_cast<std::size_t>(it - self->bookmarks_.begin());
     const char *verb = gtk_button_get_label(button);
-    if (g_strcmp0(verb, "Rename label…") == 0) {
+    if (g_strcmp0(verb, "Open in new tab") == 0) {
+        GFile *target = g_file_new_for_uri(it->uri.c_str());
+        self->add_tab(target);
+        g_object_unref(target);
+    } else if (g_strcmp0(verb, "Open in new window") == 0) {
+        GtkApplication *app = gtk_window_get_application(self->native_window());
+        if (app != nullptr) {
+            GFile *target = g_file_new_for_uri(it->uri.c_str());
+            auto *other = new FileManagerWindow(app);
+            other->install_operation_surface();
+            new ThemeController(other->native_window());
+            other->present();
+            other->open_location(target);
+            g_object_unref(target);
+        }
+    } else if (g_strcmp0(verb, "Rename label…") == 0) {
         self->show_bookmark_label_dialog(it->uri);
     } else if (g_strcmp0(verb, "Remove") == 0) {
         self->remove_bookmark(index);

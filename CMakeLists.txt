@@ -130,6 +130,7 @@ add_library(infiltrator-files-ui STATIC
     src/ui/workspace_tabs.cpp
     src/ui/workspace_session.cpp
     src/ui/workspace_bookmarks.cpp
+    src/ui/workspace_folder_views.cpp
     src/ui/thumbnail_cache.cpp)
 target_include_directories(infiltrator-files-ui PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src")

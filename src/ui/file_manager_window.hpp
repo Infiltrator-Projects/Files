@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <map>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -42,6 +43,7 @@ public:
     void toggle_show_hidden();
     void toggle_folders_first();
     void toggle_sidebar();
+    void refresh_current_directory();
     [[nodiscard]] bool show_hidden() const noexcept { return show_hidden_; }
     [[nodiscard]] bool folders_first() const noexcept { return folders_first_; }
     [[nodiscard]] bool sidebar_visible() const noexcept { return sidebar_visible_; }
@@ -158,6 +160,9 @@ private:
     void add_tab(GFile *file);
     void load_preferences();
     void save_preferences() const;
+    void load_folder_views();
+    [[nodiscard]] bool save_folder_views() const;
+    void remember_folder_view(ViewMode mode);
     void apply_preferences();
     void notify_sort_changed();
     void activate_tab(std::size_t index);
@@ -217,6 +222,9 @@ private:
     std::vector<std::string> pending_tab_selection_;
     std::vector<BookmarkRow> bookmarks_;
     bool bookmarks_writable_{true};
+    std::map<std::string, ViewMode> folder_views_;
+    bool folder_views_writable_{true};
+    bool view_mode_programmatic_{false};
     GtkWidget *back_button_{nullptr};
     GtkWidget *forward_button_{nullptr};
     GtkWidget *up_button_{nullptr};
