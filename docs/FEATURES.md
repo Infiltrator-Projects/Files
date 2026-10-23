@@ -1,5 +1,8 @@
 # Files — Complete Feature Catalogue
 
+The 0.1.59 safety follow-up restricts journalled native drag moves to an explicit
+Shift-drag from the same process; all other compatible drops prefer Copy.
+
 The 0.1.58 tranche adds bounded GIO-backed thumbnails for images from non-native
 locations, safe in-process negotiated drag-move via the existing batch engine,
 bookmarks opening in new tabs/windows, explicit current-folder refresh and

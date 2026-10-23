@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.59 — 2026-10-23
+
+- Require an explicit Shift modifier and a same-process GTK drag for native Move, so offered drag-action flags cannot accidentally authorise source deletion. Prefer Copy on drag motion otherwise; route both through the qualified transfer engine.
+
 ## 0.1.58 — 2026-10-23
 
 - Add explicit Shift+drag native moves through the journalled batch-transfer engine; only an in-process source and negotiated move can delete originals, while ordinary/external drops safely copy.
