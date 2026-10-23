@@ -28,7 +28,7 @@ The 0.1.60 GTK interaction test qualifies pattern matching, matching-type select
 
 VERSION owns product identity. The Common gitlink owns its exact dependency commit. CMake's minimum Common API version expresses capability requirements independently of which compatible revision is selected.
 
-CI builds the product once, runs CTest, packages the same build, validates Debian package identity and dependencies, and inspects its executable and desktop entry. Debian and aggressive native installer qualification require `Exec=/Programs/files %U` and `MimeType=inode/directory;` in the package and installed desktop entry, matching the executable's `G_APPLICATION_HANDLES_OPEN` contract. SHA-256 sums accompany the preserved package.
+CI builds the product once, runs CTest, packages the same build, validates Debian package identity and dependencies, and inspects its executable and desktop entry. Release jobs run on pinned `ubuntu-24.04` GitHub-hosted runners because package preparation and aggressive installer qualification need unattended privileged APT and system installation. A self-hosted Linux runner cannot replace that environment until its admin config permits noninteractive `sudo` and the complete job qualifies without weakened assertions; `sudo` password prompts must never be worked around by embedding secrets in workflow scripts. Debian and aggressive native installer qualification require `Exec=/Programs/files %U` and `MimeType=inode/directory;` in the package and installed desktop entry, matching the executable's `G_APPLICATION_HANDLES_OPEN` contract. SHA-256 sums accompany the preserved package.
 
 ## Publication and maintenance
 

@@ -24,7 +24,11 @@ concurrency:
 
 jobs:
   build-test-package:
-    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-24.04"]' || '["self-hosted","Linux","X64","linux-native"]') }}
+    # Release qualification requires unattended APT/dpkg and system-package
+    # installation; GitHub-hosted Ubuntu provides a predictable rootless
+    # sudo contract. Self-hosted runners require separately qualified
+    # passwordless privilege elevation and dependency provisioning.
+    runs-on: ubuntu-24.04
     timeout-minutes: 50
     outputs:
       version: ${{ steps.release.outputs.version }}
@@ -206,7 +210,8 @@ jobs:
     needs: build-test-package
     permissions:
       contents: write
-    runs-on: [self-hosted, Linux, X64, linux-native]
+    # Verify publication on the same supported hosted distribution.
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     concurrency:
       group: publish-release-${{ github.repository }}

@@ -2,6 +2,8 @@
 
 ## 0.1.60 — 2026-10-23
 
+- Restore deterministic GitHub-hosted Ubuntu 24.04 release runners after organisation runner `BigBedroom-Linux-4` failed during `sudo apt-get update` with an interactive password request. Maintain the full dependency installation, installer execution, package integrity and publish checks rather than bypassing privileged operations.
+
 - Select visible filenames by `*` / `?` pattern or by matching directory/content type.
 - Open a multi-selection of folders in separate tabs after whole-request capacity verification.
 - Copy multiple selected native paths or URIs as newline-delimited text, failing without changing the clipboard for remote-only native paths, unavailable metadata, selections over 4,096, or payloads over 1 MiB.
