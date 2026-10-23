@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   build-test-package:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-24.04"]' || '["self-hosted","Linux","X64","linux-native"]') }}
     timeout-minutes: 50
     outputs:
       version: ${{ steps.release.outputs.version }}
@@ -206,7 +206,7 @@ jobs:
     needs: build-test-package
     permissions:
       contents: write
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64, linux-native]
     timeout-minutes: 25
     concurrency:
       group: publish-release-${{ github.repository }}
