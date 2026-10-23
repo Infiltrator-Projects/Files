@@ -74,6 +74,9 @@ private:
     void open_primary();
     void show_open_with();
     void show_properties();
+    void show_selection_pattern_dialog();
+    void select_same_type();
+    void copy_selected_text(bool uris);
 
     GtkWidget *create_action_button(GtkWidget *box,
                                     const char *label,

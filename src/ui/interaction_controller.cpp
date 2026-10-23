@@ -5,6 +5,7 @@
 #include "file_manager_window.hpp"
 
 #include <algorithm>
+#include <cstring>
 #include <string>
 #include <utility>
 #include <vector>
@@ -378,6 +379,8 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
                          ActionScope::MultiSelection, proxies);
     create_action_button(box, "Move selected to…", batch_move_target_,
                          ActionScope::MultiSelection, proxies);
+    add_command(box, "Open selected folders in tabs", "selected-tabs",
+                ActionScope::MultiSelection, proxies);
 
     add_separator(box);
     create_action_button(box, "Move to Trash", trash_target_,
@@ -390,6 +393,15 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
     add_separator(box);
     add_command(box, "Copy Path as Text", "copy-path", ActionScope::SingleSelection, proxies);
     add_command(box, "Copy URI as Text", "copy-uri", ActionScope::SingleSelection, proxies);
+    add_command(box, "Copy selected paths as text", "copy-selected-paths",
+                ActionScope::MultiSelection, proxies);
+    add_command(box, "Copy selected URIs as text", "copy-selected-uris",
+                ActionScope::MultiSelection, proxies);
+    add_separator(box);
+    add_command(box, "Select by filename pattern…", "select-pattern",
+                ActionScope::Always, proxies);
+    add_command(box, "Select same file type", "select-type",
+                ActionScope::SingleSelection, proxies);
     *properties_button = create_action_button(
         box, "Properties", nullptr, ActionScope::SingleSelection, proxies,
         G_CALLBACK(&InteractionController::on_properties_clicked));
@@ -522,6 +534,15 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
     else if (g_strcmp0(command, "toggle-hidden") == 0) window->toggle_show_hidden();
     else if (g_strcmp0(command, "folders-first") == 0) window->toggle_folders_first();
     else if (g_strcmp0(command, "toggle-sidebar") == 0) window->toggle_sidebar();
+    else if (g_strcmp0(command, "selected-tabs") == 0)
+        (void)window->open_selected_folders_in_tabs();
+    else if (g_strcmp0(command, "select-pattern") == 0)
+        self->show_selection_pattern_dialog();
+    else if (g_strcmp0(command, "select-type") == 0)
+        self->select_same_type();
+    else if (g_strcmp0(command, "copy-selected-paths") == 0 ||
+             g_strcmp0(command, "copy-selected-uris") == 0)
+        self->copy_selected_text(g_strcmp0(command, "copy-selected-uris") == 0);
     else if (g_strcmp0(command, "copy-path") == 0 ||
              g_strcmp0(command, "copy-uri") == 0) {
         auto *info = G_FILE_INFO(gtk_single_selection_get_selected_item(self->primary_selection_));
@@ -547,6 +568,157 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
     }
     self->update_action_state();
     self->close_popovers();
+}
+
+
+void InteractionController::show_selection_pattern_dialog()
+{
+    if (window_ == nullptr || selection_ == nullptr) return;
+    GtkWidget *dialog = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(dialog), "Select by filename pattern");
+    gtk_window_set_transient_for(GTK_WINDOW(dialog), window_);
+    gtk_window_set_destroy_with_parent(GTK_WINDOW(dialog), TRUE);
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 380, -1);
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    gtk_widget_set_margin_start(box, 18);
+    gtk_widget_set_margin_end(box, 18);
+    gtk_widget_set_margin_top(box, 18);
+    gtk_widget_set_margin_bottom(box, 18);
+    gtk_window_set_child(GTK_WINDOW(dialog), box);
+    gtk_box_append(GTK_BOX(box), gtk_label_new("Select visible filenames matching * and ?"));
+    GtkWidget *entry = gtk_entry_new();
+    gtk_entry_set_max_length(GTK_ENTRY(entry), 256);
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "*.pdf");
+    gtk_box_append(GTK_BOX(box), entry);
+    GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_set_halign(actions, GTK_ALIGN_END);
+    gtk_box_append(GTK_BOX(box), actions);
+    GtkWidget *cancel = gtk_button_new_with_label("Cancel");
+    GtkWidget *apply = gtk_button_new_with_label("Select matches");
+    gtk_box_append(GTK_BOX(actions), cancel);
+    gtk_box_append(GTK_BOX(actions), apply);
+    g_object_set_data(G_OBJECT(dialog), "ifm-pattern-entry", entry);
+    g_object_set_data(G_OBJECT(dialog), "ifm-pattern-controller", this);
+    g_signal_connect_swapped(cancel, "clicked", G_CALLBACK(gtk_window_destroy), dialog);
+    g_signal_connect(apply, "clicked", G_CALLBACK(+[](GtkButton *, gpointer data) {
+        auto *win = GTK_WINDOW(data);
+        auto *self = static_cast<InteractionController *>(
+            g_object_get_data(G_OBJECT(win), "ifm-pattern-controller"));
+        auto *input = GTK_EDITABLE(g_object_get_data(G_OBJECT(win), "ifm-pattern-entry"));
+        if (self == nullptr || input == nullptr || self->selection_ == nullptr) return;
+        const char *pattern = gtk_editable_get_text(input);
+        if (pattern == nullptr || *pattern == '\0' ||
+            !g_utf8_validate(pattern, -1, nullptr)) return;
+        GListModel *model = gtk_multi_selection_get_model(self->selection_);
+        if (model == nullptr) return;
+        GtkBitset *mask = gtk_bitset_new_empty();
+        GtkBitset *matches = gtk_bitset_new_empty();
+        const guint count = g_list_model_get_n_items(model);
+        for (guint i = 0U; i < count; ++i) {
+            gtk_bitset_add(mask, i);
+            auto *info = G_FILE_INFO(g_list_model_get_item(model, i));
+            if (info != nullptr) {
+                const char *name = g_file_info_get_name(info);
+                if (name != nullptr && g_pattern_match_simple(pattern, name))
+                    gtk_bitset_add(matches, i);
+                g_object_unref(info);
+            }
+        }
+        const guint selected = static_cast<guint>(gtk_bitset_get_size(matches));
+        gtk_selection_model_set_selection(GTK_SELECTION_MODEL(self->selection_), matches, mask);
+        gtk_bitset_unref(mask);
+        gtk_bitset_unref(matches);
+        if (self->status_label_ != nullptr) {
+            const std::string status = std::to_string(selected) + " filenames selected";
+            gtk_label_set_text(GTK_LABEL(self->status_label_), status.c_str());
+        }
+        gtk_window_destroy(win);
+    }), dialog);
+    gtk_window_present(GTK_WINDOW(dialog));
+}
+
+void InteractionController::select_same_type()
+{
+    if (selection_ == nullptr || primary_selection_ == nullptr) return;
+    auto *source = G_FILE_INFO(gtk_single_selection_get_selected_item(primary_selection_));
+    if (source == nullptr) return;
+    const GFileType kind = g_file_info_get_file_type(source);
+    const char *type = g_file_info_get_content_type(source);
+    const std::string match_type = type != nullptr ? type : "";
+    GListModel *model = gtk_multi_selection_get_model(selection_);
+    if (model == nullptr) return;
+    GtkBitset *mask = gtk_bitset_new_empty();
+    GtkBitset *matches = gtk_bitset_new_empty();
+    const guint count = g_list_model_get_n_items(model);
+    for (guint i = 0U; i < count; ++i) {
+        gtk_bitset_add(mask, i);
+        auto *info = G_FILE_INFO(g_list_model_get_item(model, i));
+        if (info != nullptr) {
+            const char *candidate = g_file_info_get_content_type(info);
+            if (g_file_info_get_file_type(info) == kind &&
+                (kind == G_FILE_TYPE_DIRECTORY || (kind == G_FILE_TYPE_REGULAR &&
+                  !match_type.empty() && g_strcmp0(candidate, match_type.c_str()) == 0)))
+                gtk_bitset_add(matches, i);
+            g_object_unref(info);
+        }
+    }
+    gtk_selection_model_set_selection(GTK_SELECTION_MODEL(selection_), matches, mask);
+    gtk_bitset_unref(mask);
+    gtk_bitset_unref(matches);
+}
+
+void InteractionController::copy_selected_text(const bool uris)
+{
+    if (selection_ == nullptr || directory_list_ == nullptr || window_ == nullptr) return;
+    GFile *parent = gtk_directory_list_get_file(directory_list_);
+    GListModel *model = gtk_multi_selection_get_model(selection_);
+    if (parent == nullptr || model == nullptr) return;
+    GtkBitset *bits = gtk_selection_model_get_selection(GTK_SELECTION_MODEL(selection_));
+    const guint total = static_cast<guint>(gtk_bitset_get_size(bits));
+    if (total == 0U || total > 4096U) {
+        gtk_bitset_unref(bits);
+        if (status_label_ != nullptr)
+            gtk_label_set_text(GTK_LABEL(status_label_), "Select up to 4096 items to copy as text.");
+        return;
+    }
+    std::string output;
+    GtkBitsetIter iter;
+    guint index = 0U;
+    bool complete = true;
+    for (gboolean valid = gtk_bitset_iter_init_first(&iter, bits, &index);
+         valid; valid = gtk_bitset_iter_next(&iter, &index)) {
+        auto *info = G_FILE_INFO(g_list_model_get_item(model, index));
+        const char *name = info != nullptr ? g_file_info_get_name(info) : nullptr;
+        if (name == nullptr || *name == '\0') {
+            complete = false;
+        } else {
+            GFile *item = g_file_get_child(parent, name);
+            char *value = uris ? g_file_get_uri(item) : g_file_get_path(item);
+            if (value == nullptr || output.size() + strlen(value) + 1U > 1048576U) {
+                complete = false;
+            } else {
+                output += value;
+                output += '\n';
+            }
+            g_free(value);
+            g_object_unref(item);
+        }
+        if (info != nullptr) g_object_unref(info);
+        if (!complete) break;
+    }
+    gtk_bitset_unref(bits);
+    if (!complete) {
+        if (status_label_ != nullptr) gtk_label_set_text(GTK_LABEL(status_label_),
+            uris ? "Selected URIs exceed the text limit." :
+                   "Selection includes non-native paths or exceeds the text limit.");
+        return;
+    }
+    GdkClipboard *clipboard = gdk_display_get_clipboard(
+        gtk_widget_get_display(GTK_WIDGET(window_)));
+    if (clipboard != nullptr) gdk_clipboard_set_text(clipboard, output.c_str());
+    if (status_label_ != nullptr) gtk_label_set_text(GTK_LABEL(status_label_),
+        uris ? "Selected URIs copied as text" : "Selected native paths copied as text");
 }
 
 
