@@ -155,7 +155,8 @@ dpkg-deb -x "$deb" "$inspect"
 test -x "$inspect/Programs/files"
 test ! -e "$inspect/usr/bin/files"
 test -f "$inspect/usr/share/applications/files.desktop"
-grep -Fxq 'Exec=/Programs/files' "$inspect/usr/share/applications/files.desktop"
+grep -Fxq 'Exec=/Programs/files %U' "$inspect/usr/share/applications/files.desktop"
+grep -Fxq 'MimeType=inode/directory;' "$inspect/usr/share/applications/files.desktop"
 test -f "$inspect/usr/share/doc/files/BUILD-INFO"
 grep -Fxq 'Profile: aggressive' "$inspect/usr/share/doc/files/BUILD-INFO"
 grep -Fxq 'PGO: trained two-pass profile' "$inspect/usr/share/doc/files/BUILD-INFO"
@@ -167,7 +168,8 @@ run_root /usr/bin/apt-get -o DPkg::Lock::Timeout=300 install -y "$deb"
 
 test -x /Programs/files
 test ! -e /usr/bin/files
-grep -Fxq 'Exec=/Programs/files' /usr/share/applications/files.desktop
+grep -Fxq 'Exec=/Programs/files %U' /usr/share/applications/files.desktop
+grep -Fxq 'MimeType=inode/directory;' /usr/share/applications/files.desktop
 grep -Fxq 'Profile: aggressive' /usr/share/doc/files/BUILD-INFO
 grep -Fxq 'PGO: trained two-pass profile' /usr/share/doc/files/BUILD-INFO
 

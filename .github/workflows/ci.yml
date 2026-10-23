@@ -133,7 +133,8 @@ jobs:
           test -x "$tmp/root/Programs/files"
           test ! -e "$tmp/root/usr/bin/files"
           test -f "$tmp/root/usr/share/applications/files.desktop"
-          grep -Fxq 'Exec=/Programs/files' "$tmp/root/usr/share/applications/files.desktop"
+          grep -Fxq 'Exec=/Programs/files %U' "$tmp/root/usr/share/applications/files.desktop"
+          grep -Fxq 'MimeType=inode/directory;' "$tmp/root/usr/share/applications/files.desktop"
           test -f "$tmp/root/usr/share/doc/files/BUILD-INFO"
           grep -Fxq 'Profile: release' "$tmp/root/usr/share/doc/files/BUILD-INFO"
 
@@ -174,7 +175,8 @@ jobs:
           test -x /Programs/files
           test ! -e /usr/bin/files
           test ! -e /System/Programs
-          grep -Fxq 'Exec=/Programs/files' /usr/share/applications/files.desktop
+          grep -Fxq 'Exec=/Programs/files %U' /usr/share/applications/files.desktop
+          grep -Fxq 'MimeType=inode/directory;' /usr/share/applications/files.desktop
           grep -Fxq 'Profile: aggressive' /usr/share/doc/files/BUILD-INFO
           grep -Fxq 'PGO: trained two-pass profile' /usr/share/doc/files/BUILD-INFO
           grep -Fq -- '-O3' /usr/share/doc/files/BUILD-INFO

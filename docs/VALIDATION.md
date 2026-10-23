@@ -28,7 +28,7 @@ The 0.1.57 local build passed all 17 application test executables. Eleven ran th
 
 VERSION owns product identity. The Common gitlink owns its exact dependency commit. CMake's minimum Common API version expresses capability requirements independently of which compatible revision is selected.
 
-CI builds the product once, runs CTest, packages the same build, validates Debian package identity and dependencies, and inspects its executable and desktop entry. SHA-256 sums accompany the preserved package.
+CI builds the product once, runs CTest, packages the same build, validates Debian package identity and dependencies, and inspects its executable and desktop entry. Debian and aggressive native installer qualification require `Exec=/Programs/files %U` and `MimeType=inode/directory;` in the package and installed desktop entry, matching the executable's `G_APPLICATION_HANDLES_OPEN` contract. SHA-256 sums accompany the preserved package.
 
 ## Publication and maintenance
 

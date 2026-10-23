@@ -2,6 +2,7 @@
 
 ## 0.1.57 — 2026-10-23
 
+- Qualify the URI-aware desktop launcher (`Exec=/Programs/files %U`, `MimeType=inode/directory;`) in both Debian and native-installer package/installation checks; reconcile shipped workspace and batch-removal capabilities with the README.
 - Share progress and safe-boundary cancellation across single/batch transfers, clipboard Paste and drag/drop; honour cancellation while measuring trees and replacing conflicts, and refresh Cut ownership after partial completion.
 - Open command-line paths/URIs asynchronously, reveal file arguments in their parent folder, and resolve typed relative paths against the current location.
 - Move tabs between windows or into a new window while retaining history, selection and view mode; reject stale tab/window drag identities.
