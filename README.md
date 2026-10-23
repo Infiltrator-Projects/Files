@@ -67,7 +67,7 @@ It currently provides:
 - Home, Desktop, Documents, Downloads, Computer and Trash entry points;
 - live mounted local/removable places discovered through GIO, with shadowed implementation mounts excluded and each place opening at GIO's user-facing default location;
 - mounted-place availability tracking that distinguishes the most-specific supplying mount for nested mounts, reports a neutral unavailable state when that source disappears and only auto-restores the current view when GIO provides matching root-and-UUID evidence;
-- Back, Forward and Up navigation;
+- Back, Forward and Up navigation; refresh the current folder with F5 or Ctrl+R while preserving selected files and navigation history;
 - breadcrumb navigation with `Ctrl+L` to switch into the editable path/URI field;
 - multiple location tabs with independent Back/Forward history, selection restoration and view-mode choice; `Ctrl+T` creates a tab and `Ctrl+W` closes it;
 - independent windows (`Ctrl+N`), opening a selected folder in a new window, duplicating tabs (`Ctrl+Shift+D`), reopening closed tabs (`Ctrl+Shift+T`), and reordering tabs within a window (`Ctrl+Shift+PageUp/PageDown`);
@@ -75,14 +75,14 @@ It currently provides:
 - normal-startup restoration of the last normally closed window's tabs, bounded histories, selection, view modes and window geometry; saved browsing state never resumes file operations;
 - asynchronous opening of command-line paths/URIs, revealing file arguments in their parent folder, and resolving typed relative paths against the current folder;
 - parent navigation that reselects the folder the user just left, plus `Alt+Left/Right/Up/Home` and `Ctrl+1/2/3` navigation/view shortcuts;
-- remembered global view mode and persisted Show Hidden Files (`Ctrl+H`), Folders First and sidebar visibility (`Ctrl+B`) settings, saved only when changed;
+- remembered global view mode plus durable per-folder Detail/Visual/Compact choices (up to 128 folders), and persisted Show Hidden Files (`Ctrl+H`), Folders First and sidebar visibility (`Ctrl+B`) settings;
 - resizable/reorderable detail columns, predictable name sorting, natural numeric filenames, and GTK rubber-band selection;
 - read-only Properties values for allocated space, POSIX mode and numeric owner/group IDs where the provider exposes them;
 - Copy Path as Text (`Ctrl+Shift+C`) and Copy URI as Text actions, with clipboard ownership checks to prevent stale Cut/Copy operations;
 - a simplified title bar focused on location/navigation, icon-only view switching in the status strip, restrained tabs and sidebar, clear selection/empty-folder states;
 - a Common-only visual treatment of Night/Day browse surfaces, cyan active-location and focus cues, denser row and sidebar spacing, legible secondary metadata and MB Corpo brand typography;
 - an explicitly measured compact Details-row layout and fully palette-styled Day/Night view-mode buttons, with header and tab rail treated as one navigation surface;
-- persistent user bookmarks pinned to the sidebar, with editable labels, drag ordering and Move up/Move down/Remove controls; successful changes propagate to other open windows and do not rename targets;
+- persistent user bookmarks pinned to the sidebar, with editable labels, drag ordering, new-tab/new-window opening and Move up/Move down/Remove controls; successful edits propagate to other open windows and do not rename targets;
 - asynchronous, monitored directory enumeration through GTK/GIO;
 - a virtualised GTK 4 list presentation rather than one widget per directory entry;
 - shared-model **Detail/List**, **Visual/Icons** and **Compact** browse presentations with common selection and activation semantics;
@@ -101,8 +101,8 @@ It currently provides:
 - right-click item actions and one consolidated, height-bounded scrollable header overflow menu (with Copy/Cut/Paste accessible in the footer), sharing the same underlying operation controllers;
 - a read-only Properties surface for selected-item metadata;
 - system clipboard file-reference Copy/Cut/Paste (`Ctrl+C`/`Ctrl+X`/`Ctrl+V`) using the same batch transfer engine and collision decisions;
-- copy-only drag-and-drop of local file selections onto browseable local folders or sidebar destinations, with journalled mutation; the source deliberately does not negotiate external drag-move deletion;
-- bounded asynchronous image thumbnails with a cache shared across view modes, version-aware invalidation and safe fallback to file icons; remote, video and document thumbnail providers are not yet enabled;
+- journalled drag-and-drop of local file selections onto native folders/sidebar destinations, with copy as the safe default and a negotiated in-process move through the same batch engine; external/ambiguous drops never request Files-owned source deletion;
+- bounded asynchronous image thumbnails with a cache shared across view modes, version-aware invalidation and safe fallback to file icons; native images and GIO-readable non-native images (8 MiB cap) are supported, while video/document thumbnail providers are not enabled;
 - deterministic single-item **Copy to…** and **Move to…**, using a native folder picker for the destination;
 - isolated multi-item **Copy selected to…** and **Move selected to…** actions rather than expanding the proven single-item controller into a second state machine;
 - full-batch collision preflight before mutation when no batch conflict policy has yet been chosen, so a detected destination conflict does not allow earlier non-conflicting items to be silently transferred first;
@@ -156,7 +156,7 @@ It currently provides:
 
 Metadata preservation is deliberately bounded: regular-file and directory permissions, modification timestamps, enumerated native extended attributes and POSIX ACLs are qualified for ordinary copy/cross-volume transfers. Unsupported, unreadable, oversized or unpreservable attributes stop the transfer explicitly. Symbolic links with extended attributes are refused rather than followed or silently stripped. Ownership, sparse-file preservation and other symlink metadata remain future capability work. Multi-selection batch Copy/Move and native multi-item Trash/confirmed permanent Delete are present, with cancellation between selected items; non-native batch removal remains outside this tranche.
 
-The remaining parity work includes safe drag-move negotiation, split view, richer bookmark metadata beyond labels and ordering, remote and provider-specific thumbnails, recursive/content search, archives, permission editing and richer file/object/capability handling; mounted/removable discovery is already part of the browsing foundation rather than a reason to add ad-hoc controls.
+The remaining parity work includes full split view, richer bookmark metadata beyond labels and ordering, video/document and provider-specific thumbnail plugins, recursive/content search, archives, permission editing and richer file/object/capability handling; mounted/removable discovery is already part of the browsing foundation rather than a reason to add ad-hoc controls.
 
 Semantic/context indexing and InfiltratorFS-specific capability providers are also deliberately absent from this early executable. Ordinary file-manager correctness comes first.
 

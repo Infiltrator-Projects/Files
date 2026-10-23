@@ -20,6 +20,19 @@ struct FileManagerWindowTestAccess {
     static std::size_t history(FileManagerWindow &w) { return w.history_.size(); }
     static GtkMultiSelection *selection(FileManagerWindow &w) { return w.selection_; }
     static void icons(FileManagerWindow &w) { w.set_view_mode(FileManagerWindow::ViewMode::Icons); }
+    static void choose_list(FileManagerWindow &w) {
+        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(w.list_view_button_), TRUE);
+    }
+    static void choose_icons(FileManagerWindow &w) {
+        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(w.icon_view_button_), TRUE);
+    }
+    static void refresh(FileManagerWindow &w) { w.refresh_current_directory(); }
+    static void bookmark_action(FileManagerWindow &w, guint index, const char *verb) {
+        auto *button = GTK_BUTTON(g_object_ref_sink(gtk_button_new_with_label(verb)));
+        g_object_set_data(G_OBJECT(button), "ifm-bookmark-row", w.bookmarks_.at(index).row);
+        g_signal_emit_by_name(button, "clicked");
+        g_object_unref(button);
+    }
     static bool is_icons(FileManagerWindow &w) { return w.view_mode_ == FileManagerWindow::ViewMode::Icons; }
     static void activate(FileManagerWindow &w, std::size_t i) { w.activate_tab(i); }
     static void close(FileManagerWindow &w) { w.close_tab(w.active_tab_); }
@@ -284,6 +297,61 @@ int main()
         std::ofstream(session_path, std::ios::binary | std::ios::trunc) << std::string(1024U * 1024U + 1U, 'x');
         require(!restored->restore_previous_session() && at(*restored, a),
                 "Oversized session files must be refused before parsing");
+        // Remember a folder's explicit view choice across navigation and an
+        // independently created window. Programmatic restore must not mutate it.
+        open(*restored, a);
+        FileManagerWindowTestAccess::choose_list(*restored);
+        FileManagerWindowTestAccess::choose_icons(*restored);
+        open(*restored, b);
+        FileManagerWindowTestAccess::choose_list(*restored);
+        open(*restored, a);
+        require(FileManagerWindowTestAccess::is_icons(*restored),
+                "Explicit folder view must survive navigation to another location");
+        auto *another = window(app);
+        open(*another, a);
+        require(FileManagerWindowTestAccess::is_icons(*another),
+                "Folder view must load from durable state in another window");
+        open(*another, b);
+        require(!FileManagerWindowTestAccess::is_icons(*another),
+                "Independent folder view choice must survive across windows");
+        gtk_window_destroy(another->native_window());
+
+        // Refresh must not introduce a history step or lose a selected file.
+        open(*restored, a / "file with spaces.txt");
+        const auto before_refresh = FileManagerWindowTestAccess::history(*restored);
+        FileManagerWindowTestAccess::refresh(*restored);
+        await([&] { return !FileManagerWindowTestAccess::loading(*restored); });
+        require(FileManagerWindowTestAccess::history(*restored) == before_refresh &&
+                selected(*restored, "file with spaces.txt"),
+                "Refresh must re-enumerate without replacing navigation or selection");
+
+        require(FileManagerWindowTestAccess::bookmarks(*restored) == 1U,
+                "The saved bookmark must be available to workspace actions");
+        const auto tabs_before = FileManagerWindowTestAccess::count(*restored);
+        FileManagerWindowTestAccess::bookmark_action(*restored, 0U, "Open in new tab");
+        await([&] { return !FileManagerWindowTestAccess::loading(*restored); });
+        require(FileManagerWindowTestAccess::count(*restored) == tabs_before + 1U &&
+                at(*restored, b),
+                "Bookmark new-tab action must navigate independently of the prior tab");
+        const guint windows_before = g_list_length(gtk_application_get_windows(app));
+        FileManagerWindowTestAccess::bookmark_action(*restored, 0U, "Open in new window");
+        require(g_list_length(gtk_application_get_windows(app)) == windows_before + 1U,
+                "Bookmark new-window action must create an application window");
+        for (GList *node = gtk_application_get_windows(app); node != nullptr; node = node->next) {
+            if (node->data != restored->native_window()) {
+                gtk_window_destroy(GTK_WINDOW(node->data));
+                break;
+            }
+        }
+        // Invalid saved preferences must fail closed, never replace the file.
+        const auto views_path = profile / "folder-views.ini";
+        std::ofstream(views_path, std::ios::binary | std::ios::trunc) << "invalid folder views";
+        FileManagerWindowTestAccess::choose_icons(*restored);
+        std::ifstream views(views_path);
+        std::string preserved;
+        std::getline(views, preserved);
+        require(preserved == "invalid folder views",
+                "Malformed per-folder views must not be overwritten");
         gtk_window_destroy(restored->native_window());
         while (g_main_context_iteration(nullptr, FALSE)) {}
     } catch (const std::exception &error) {

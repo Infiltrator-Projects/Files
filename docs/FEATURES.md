@@ -1,5 +1,12 @@
 # Files — Complete Feature Catalogue
 
+The 0.1.58 tranche adds bounded GIO-backed thumbnails for images from non-native
+locations, safe in-process negotiated drag-move via the existing batch engine,
+bookmarks opening in new tabs/windows, explicit current-folder refresh and
+durably remembered per-folder view modes. Remote transfer workflows, dual-pane
+browsing, recursive/content search, archives and permission editing remain
+future qualified capabilities, not implied by these bounded additions.
+
 The 0.1.57 tranche adds shared progress/cancellation for clipboard and drag
 transfers; asynchronous command-line path/URI opening and relative typed paths;
 cross-window tab movement; restoration of the last normally closed window's

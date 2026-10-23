@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.58 — 2026-10-23
+
+- Add explicitly negotiated native drag moves through the journalled batch-transfer engine, refusing ambiguous/external drag source-deletion authority while retaining copy-only fallback.
+- Decode bounded remote GIO image thumbnails off the UI thread (8 MiB maximum, four concurrent decodes), with normal icon fallback for unavailable providers.
+- Open bookmarked folders in a new tab or independent window from the bookmark options menu.
+- Refresh the current folder with F5 or Ctrl+R without a navigation-history step, preserving the selected filenames.
+- Persist up to 128 explicit per-folder Detail/Visual/Compact presentation choices with atomic writes and fail-closed corrupt-state handling, while leaving tabs and global fallback functional.
+- Add workspace tests for navigation, multi-window view preferences, bookmark actions, refresh and malformed preference refusal; the full intended dual-pane, search, archive and permission work remains pending.
+
 ## 0.1.57 — 2026-10-23
 
 - Qualify the URI-aware desktop launcher (`Exec=/Programs/files %U`, `MimeType=inode/directory;`) in both Debian and native-installer package/installation checks; reconcile shipped workspace and batch-removal capabilities with the README.
