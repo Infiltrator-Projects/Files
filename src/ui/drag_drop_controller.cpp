@@ -46,7 +46,8 @@ DragDropController::DragDropController(GtkWindow *window, GtkDirectoryList *dire
             if (view != nullptr) register_view(view);
         }
     }
-    GtkDropTarget *sidebar_drop = gtk_drop_target_new(GDK_TYPE_FILE_LIST, GDK_ACTION_COPY);
+    GtkDropTarget *sidebar_drop = gtk_drop_target_new(GDK_TYPE_FILE_LIST,
+        static_cast<GdkDragAction>(GDK_ACTION_COPY | GDK_ACTION_MOVE));
     g_signal_connect(sidebar_drop, "drop", G_CALLBACK(on_drop), this);
     gtk_widget_add_controller(sidebar_, GTK_EVENT_CONTROLLER(sidebar_drop));
     g_object_weak_ref(G_OBJECT(window_), on_window_finalized, this);
@@ -65,10 +66,16 @@ void DragDropController::on_window_finalized(gpointer data, GObject *)
 void DragDropController::register_view(GtkWidget *view)
 {
     GtkDragSource *drag = gtk_drag_source_new();
-    gtk_drag_source_set_actions(drag, GDK_ACTION_COPY);
+    gtk_drag_source_set_actions(drag,
+        static_cast<GdkDragAction>(GDK_ACTION_COPY | GDK_ACTION_MOVE));
+    // The destination's operation engine owns source deletion, including
+    // recovery. GTK must never delete drag data as a second operation.
+    g_signal_connect(drag, "drag-end", G_CALLBACK(+[](GtkDragSource *,
+        GdkDrag *, gboolean, gpointer) {}), nullptr);
     g_signal_connect(drag, "prepare", G_CALLBACK(on_prepare), this);
     gtk_widget_add_controller(view, GTK_EVENT_CONTROLLER(drag));
-    GtkDropTarget *drop = gtk_drop_target_new(GDK_TYPE_FILE_LIST, GDK_ACTION_COPY);
+    GtkDropTarget *drop = gtk_drop_target_new(GDK_TYPE_FILE_LIST,
+        static_cast<GdkDragAction>(GDK_ACTION_COPY | GDK_ACTION_MOVE));
     g_signal_connect(drop, "drop", G_CALLBACK(on_drop), this);
     gtk_widget_add_controller(view, GTK_EVENT_CONTROLLER(drop));
 }
@@ -198,7 +205,13 @@ gboolean DragDropController::on_drop(GtkDropTarget *target, const GValue *value,
         g_free(path);
     }
     g_slist_free(files);
-    const bool accepted = operations->transfer_from_drop(sources, destination);
+    // A move is legal only for an unambiguously negotiated same-process drag.
+    // Cross-application and ambiguous drops remain copy-only, preventing an
+    // external drag source from deleting the originals after Files moves them.
+    GdkDrop *drop = gtk_drop_target_get_current_drop(target);
+    const bool move = drop != nullptr && gdk_drop_get_actions(drop) == GDK_ACTION_MOVE &&
+        gdk_drop_get_drag(drop) != nullptr;
+    const bool accepted = operations->transfer_from_drop(sources, destination, move);
     g_free(destination);
     return accepted ? TRUE : FALSE;
 }

@@ -512,11 +512,13 @@ void ClipboardController::on_clipboard_text_read(GObject *source_object,
 }
 
 bool ClipboardController::transfer_from_drop(const std::vector<std::string> &sources,
-                                             const std::string &destination)
+                                             const std::string &destination, const bool move)
 {
     if (!mutation_guard_.alive() || busy_ || reading_external_clipboard_ || window_ == nullptr ||
         sources.empty() || destination.empty()) return false;
-    paste_sources(Mode::Copy, sources, destination, BatchConflictPolicy::Fail);
+    // The durable batch engine owns moving and source deletion. The drag
+    // transport must never perform a second, unjournalled deletion.
+    paste_sources(move ? Mode::Cut : Mode::Copy, sources, destination, BatchConflictPolicy::Fail);
     return true;
 }
 

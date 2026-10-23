@@ -21,7 +21,7 @@ public:
                         GtkWidget *status_label);
     ~ClipboardController();
     [[nodiscard]] bool transfer_from_drop(const std::vector<std::string> &sources,
-                                          const std::string &destination);
+                                          const std::string &destination, bool move = false);
 
     ClipboardController(const ClipboardController &) = delete;
     ClipboardController &operator=(const ClipboardController &) = delete;
