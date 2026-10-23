@@ -130,6 +130,48 @@ bool FileManagerWindow::move_active_tab_to(FileManagerWindow &destination)
     return active_tab_ < tabs_.size() && move_tab_to(destination, tabs_[active_tab_].id);
 }
 
+guint FileManagerWindow::open_selected_folders_in_tabs()
+{
+    if (selection_ == nullptr || current_location_ == nullptr) return 0U;
+    GListModel *model = gtk_multi_selection_get_model(selection_);
+    if (model == nullptr) return 0U;
+    GtkBitset *chosen = gtk_selection_model_get_selection(GTK_SELECTION_MODEL(selection_));
+    GtkBitsetIter iter;
+    guint position = 0U;
+    std::vector<GFile *> folders;
+    for (gboolean valid = gtk_bitset_iter_init_first(&iter, chosen, &position);
+         valid; valid = gtk_bitset_iter_next(&iter, &position)) {
+        auto *info = G_FILE_INFO(g_list_model_get_item(model, position));
+        if (info != nullptr) {
+            if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY) {
+                const char *name = g_file_info_get_name(info);
+                if (name != nullptr && *name != '\0')
+                    folders.push_back(g_file_get_child(current_location_, name));
+            }
+            g_object_unref(info);
+        }
+    }
+    gtk_bitset_unref(chosen);
+    // Check whole-request capacity before any tab becomes visible.
+    if (folders.size() > 128U - std::min(tabs_.size(), 128U)) {
+        for (GFile *folder : folders) g_object_unref(folder);
+        gtk_label_set_text(GTK_LABEL(status_label_),
+                           "Too many folders for the available tab capacity.");
+        return 0U;
+    }
+    const guint opened = static_cast<guint>(folders.size());
+    for (GFile *folder : folders) {
+        add_tab(folder);
+        g_object_unref(folder);
+    }
+    if (opened > 0U) {
+        const std::string status = std::to_string(opened) +
+            (opened == 1U ? " folder opened in a tab" : " folders opened in tabs");
+        gtk_label_set_text(GTK_LABEL(status_label_), status.c_str());
+    }
+    return opened;
+}
+
 void FileManagerWindow::move_active_tab_to_new_window()
 {
     auto *app = gtk_window_get_application(native_window());

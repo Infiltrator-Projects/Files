@@ -44,6 +44,7 @@ public:
     void toggle_folders_first();
     void toggle_sidebar();
     void refresh_current_directory();
+    [[nodiscard]] guint open_selected_folders_in_tabs();
     [[nodiscard]] bool show_hidden() const noexcept { return show_hidden_; }
     [[nodiscard]] bool folders_first() const noexcept { return folders_first_; }
     [[nodiscard]] bool sidebar_visible() const noexcept { return sidebar_visible_; }
