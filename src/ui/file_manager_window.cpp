@@ -1259,9 +1259,14 @@ void FileManagerWindow::refresh_current_directory()
     // A refresh re-enumerates the same directory, never navigation history or
     // file mutations. Retain selections by item name until the new snapshot arrives.
     remember_tab();
-    if (active_tab_ < tabs_.size()) pending_tab_selection_ = tabs_[active_tab_].selected_names;
+    const auto selected = active_tab_ < tabs_.size()
+        ? tabs_[active_tab_].selected_names : std::vector<std::string>{};
+    // The intermediate empty model must not consume the pending selection.
+    refreshing_directory_ = true;
     gtk_directory_list_set_file(directory_list_, nullptr);
     gtk_directory_list_set_file(directory_list_, current_location_);
+    pending_tab_selection_ = selected;
+    refreshing_directory_ = false;
     update_status();
 }
 
@@ -1312,6 +1317,7 @@ void FileManagerWindow::update_navigation_state()
 
 void FileManagerWindow::update_status()
 {
+    if (refreshing_directory_) return;
     if (directory_list_ == nullptr) {
         return;
     }

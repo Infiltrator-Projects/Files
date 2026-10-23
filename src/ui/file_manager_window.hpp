@@ -225,6 +225,7 @@ private:
     std::map<std::string, ViewMode> folder_views_;
     bool folder_views_writable_{true};
     bool view_mode_programmatic_{false};
+    bool refreshing_directory_{false};
     GtkWidget *back_button_{nullptr};
     GtkWidget *forward_button_{nullptr};
     GtkWidget *up_button_{nullptr};

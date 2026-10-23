@@ -30,7 +30,7 @@ struct FileManagerWindowTestAccess {
     static void bookmark_action(FileManagerWindow &w, guint index, const char *verb) {
         auto *button = GTK_BUTTON(g_object_ref_sink(gtk_button_new_with_label(verb)));
         g_object_set_data(G_OBJECT(button), "ifm-bookmark-row", w.bookmarks_.at(index).row);
-        g_signal_emit_by_name(button, "clicked");
+        FileManagerWindow::on_bookmark_action(button, &w);
         g_object_unref(button);
     }
     static bool is_icons(FileManagerWindow &w) { return w.view_mode_ == FileManagerWindow::ViewMode::Icons; }
