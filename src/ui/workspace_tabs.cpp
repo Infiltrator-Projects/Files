@@ -153,7 +153,7 @@ guint FileManagerWindow::open_selected_folders_in_tabs()
     }
     gtk_bitset_unref(chosen);
     // Check whole-request capacity before any tab becomes visible.
-    if (folders.size() > 128U - std::min(tabs_.size(), 128U)) {
+    if (tabs_.size() > 128U || folders.size() > 128U - tabs_.size()) {
         for (GFile *folder : folders) g_object_unref(folder);
         gtk_label_set_text(GTK_LABEL(status_label_),
                            "Too many folders for the available tab capacity.");
