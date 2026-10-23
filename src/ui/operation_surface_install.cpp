@@ -23,7 +23,7 @@ void FileManagerWindow::install_operation_surface()
     // controller dependencies from leaking through FileManagerWindow's header.
     new CreateFolderController(GTK_WINDOW(window_), directory_list_, primary_selection_, status_label_);
     new ItemOperationController(GTK_WINDOW(window_), directory_list_, primary_selection_, status_label_);
-    new DestructiveOperationController(GTK_WINDOW(window_), directory_list_, primary_selection_, status_label_);
+    new DestructiveOperationController(GTK_WINDOW(window_), directory_list_, primary_selection_, status_label_, selection_);
     new BatchItemOperationController(GTK_WINDOW(window_), directory_list_, selection_, status_label_);
     new JournalRecoveryController(GTK_WINDOW(window_), status_label_);
 

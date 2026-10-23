@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "batch_item_operation_controller.hpp"
 
-#include <algorithm>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -32,7 +31,8 @@ BatchItemOperationController::BatchItemOperationController(
     GtkDirectoryList *directory_list,
     GtkMultiSelection *selection,
     GtkWidget *status_label)
-    : mutation_guard_(window, directory_list), window_(window), directory_list_(directory_list), selection_(selection),
+    : mutation_guard_(window, directory_list),
+      progress_view_(window, mutation_guard_, status_label, "Batch operation progress"), window_(window), directory_list_(directory_list), selection_(selection),
       status_label_(status_label)
 {
     if (window_ == nullptr || directory_list_ == nullptr || selection_ == nullptr) {
@@ -70,18 +70,6 @@ BatchItemOperationController::BatchItemOperationController(
         gtk_menu_button_set_popover(GTK_MENU_BUTTON(menu_button_), popover_);
         gtk_header_bar_pack_end(GTK_HEADER_BAR(titlebar), menu_button_);
 
-        operation_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-        progress_bar_ = gtk_progress_bar_new();
-        gtk_widget_set_size_request(progress_bar_, 150, -1);
-        gtk_widget_set_tooltip_text(progress_bar_, "Batch operation progress");
-        cancel_button_ = gtk_button_new_from_icon_name("process-stop-symbolic");
-        gtk_widget_set_tooltip_text(cancel_button_, "Cancel at the next safe boundary");
-        gtk_box_append(GTK_BOX(operation_box_), progress_bar_);
-        gtk_box_append(GTK_BOX(operation_box_), cancel_button_);
-        gtk_widget_set_visible(operation_box_, FALSE);
-        gtk_header_bar_pack_end(GTK_HEADER_BAR(titlebar), operation_box_);
-        g_signal_connect(cancel_button_, "clicked",
-                         G_CALLBACK(&BatchItemOperationController::on_cancel_clicked), this);
     }
 
     selection_handler_ = g_signal_connect(selection_, "selection-changed",
@@ -97,10 +85,6 @@ BatchItemOperationController::BatchItemOperationController(
 
 BatchItemOperationController::~BatchItemOperationController()
 {
-    if (progress_source_id_ != 0U) {
-        g_source_remove(progress_source_id_);
-        progress_source_id_ = 0U;
-    }
     if (current_control_) {
         current_control_->request_cancel();
     }
@@ -143,23 +127,6 @@ void BatchItemOperationController::on_move_clicked(GtkButton *button, gpointer u
     auto *self = static_cast<BatchItemOperationController *>(user_data);
     self->close_menu();
     self->choose_destination(BatchTransferKind::Move);
-}
-
-void BatchItemOperationController::on_cancel_clicked(GtkButton *button, gpointer user_data)
-{
-    (void)button;
-    auto *self = static_cast<BatchItemOperationController *>(user_data);
-    if (!self->current_control_) {
-        return;
-    }
-    self->current_control_->request_cancel();
-    if (self->cancel_button_ != nullptr) {
-        gtk_widget_set_sensitive(self->cancel_button_, FALSE);
-    }
-    if (self->status_label_ != nullptr) {
-        gtk_label_set_text(GTK_LABEL(self->status_label_),
-                           "Cancellation requested; stopping the batch at the next safe boundary…");
-    }
 }
 
 void BatchItemOperationController::on_selection_changed(GtkSelectionModel *model,
@@ -428,6 +395,7 @@ void BatchItemOperationController::on_operation_finished(GObject *source_object,
     GError *error = nullptr;
     std::unique_ptr<OperationResult> operation(
         static_cast<OperationResult *>(g_task_propagate_pointer(task, &error)));
+    self->progress_view_.finish();
     if (!self->mutation_guard_.finish()) {
         g_clear_error(&error);
         return;
@@ -476,66 +444,9 @@ void BatchItemOperationController::set_busy(const bool busy)
 {
     if (!mutation_guard_.alive()) return;
     busy_ = busy;
-    if (operation_box_ != nullptr) {
-        gtk_widget_set_visible(operation_box_, busy);
-    }
-    if (cancel_button_ != nullptr) {
-        gtk_widget_set_sensitive(cancel_button_, busy && current_control_ != nullptr);
-    }
-    if (progress_bar_ != nullptr && busy) {
-        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(progress_bar_), 0.0);
-    }
-
-    if (busy && progress_source_id_ == 0U) {
-        progress_source_id_ = g_timeout_add(100, &BatchItemOperationController::on_progress_tick, this);
-    } else if (!busy && progress_source_id_ != 0U) {
-        g_source_remove(progress_source_id_);
-        progress_source_id_ = 0U;
-    }
+    if (busy) progress_view_.start(current_control_);
+    else progress_view_.finish();
     update_action_state();
-}
-
-gboolean BatchItemOperationController::on_progress_tick(gpointer user_data)
-{
-    auto *self = static_cast<BatchItemOperationController *>(user_data);
-    if (!self->mutation_guard_.alive() || !self->busy_) {
-        self->progress_source_id_ = 0U;
-        return G_SOURCE_REMOVE;
-    }
-    self->update_progress();
-    return G_SOURCE_CONTINUE;
-}
-
-void BatchItemOperationController::update_progress()
-{
-    if (!mutation_guard_.alive()) return;
-    if (progress_bar_ == nullptr) {
-        return;
-    }
-    if (!current_control_) {
-        gtk_progress_bar_pulse(GTK_PROGRESS_BAR(progress_bar_));
-        return;
-    }
-
-    const TransferProgress progress = current_control_->progress();
-    double fraction = 0.0;
-    bool determinate = false;
-    if (progress.bytes_total > 0U) {
-        fraction = static_cast<double>(progress.bytes_done) /
-                   static_cast<double>(progress.bytes_total);
-        determinate = true;
-    } else if (progress.items_total > 0U) {
-        fraction = static_cast<double>(progress.items_done) /
-                   static_cast<double>(progress.items_total);
-        determinate = true;
-    }
-
-    if (determinate) {
-        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(progress_bar_),
-                                      std::clamp(fraction, 0.0, 1.0));
-    } else {
-        gtk_progress_bar_pulse(GTK_PROGRESS_BAR(progress_bar_));
-    }
 }
 
 void BatchItemOperationController::update_action_state()

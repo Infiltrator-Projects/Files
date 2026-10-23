@@ -244,7 +244,7 @@ void ThemeController::apply_theme()
     std::ostringstream css;
     const std::string scope = "." + scope_class_;
     const auto rule = [&](const char *selector, const std::string &declarations) {
-        css << scope << " " << selector << " { " << declarations << " }\n";
+        css << scope << " " << selector << " { " << declarations << "; }\n";
     };
     const auto rules = [&](std::initializer_list<const char *> selectors,
                            const std::string &declarations) {

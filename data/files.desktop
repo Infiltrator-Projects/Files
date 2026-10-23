@@ -2,9 +2,10 @@
 Type=Application
 Name=Files
 Comment=Browse and manage files with Files
-Exec=/Programs/files
+Exec=/Programs/files %U
 Icon=system-file-manager
 Terminal=false
 Categories=System;FileTools;FileManager;
 Keywords=files;folders;filesystem;manager;
 StartupNotify=true
+MimeType=inode/directory;

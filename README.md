@@ -7,7 +7,7 @@ Files is a clean-sheet file-management project for InfiltratorOS.
 **Current source version:** authoritative in [`VERSION`](VERSION)\
 **Shared foundation:** exact Libraries gitlink, linked through the full Common target on InfiltratorOS/POSIX\
 **Desktop implementation:** C++20 + GTK 4/GIO\
-**Status:** early implementation; deterministic browsing and mutation foundation with multi-selection batch transfer, interruption inspection and verified metadata preservation
+**Status:** early implementation; deterministic browsing and mutation foundation with multi-selection transfers/removal, session restoration, interruption inspection and verified metadata preservation
 
 The project does not exist to reproduce Nemo, Dolphin, Explorer, Finder or another existing file manager. Mature products, standards and current research are evidence. The project chooses the strongest justified mechanisms and owns its own interaction, operation and recovery semantics.
 
@@ -71,6 +71,9 @@ It currently provides:
 - breadcrumb navigation with `Ctrl+L` to switch into the editable path/URI field;
 - multiple location tabs with independent Back/Forward history, selection restoration and view-mode choice; `Ctrl+T` creates a tab and `Ctrl+W` closes it;
 - independent windows (`Ctrl+N`), opening a selected folder in a new window, duplicating tabs (`Ctrl+Shift+D`), reopening closed tabs (`Ctrl+Shift+T`), and reordering tabs within a window (`Ctrl+Shift+PageUp/PageDown`);
+- dragging tabs between open windows or moving the active tab into a new window, preserving history, selection and view mode while refusing stale drags;
+- normal-startup restoration of the last normally closed window's tabs, bounded histories, selection, view modes and window geometry; saved browsing state never resumes file operations;
+- asynchronous opening of command-line paths/URIs, revealing file arguments in their parent folder, and resolving typed relative paths against the current folder;
 - parent navigation that reselects the folder the user just left, plus `Alt+Left/Right/Up/Home` and `Ctrl+1/2/3` navigation/view shortcuts;
 - remembered global view mode and persisted Show Hidden Files (`Ctrl+H`), Folders First and sidebar visibility (`Ctrl+B`) settings, saved only when changed;
 - resizable/reorderable detail columns, predictable name sorting, natural numeric filenames, and GTK rubber-band selection;
@@ -79,7 +82,7 @@ It currently provides:
 - a simplified title bar focused on location/navigation, icon-only view switching in the status strip, restrained tabs and sidebar, clear selection/empty-folder states;
 - a Common-only visual treatment of Night/Day browse surfaces, cyan active-location and focus cues, denser row and sidebar spacing, legible secondary metadata and MB Corpo brand typography;
 - an explicitly measured compact Details-row layout and fully palette-styled Day/Night view-mode buttons, with header and tab rail treated as one navigation surface;
-- persistent user bookmarks pinned to the sidebar, with pin/unpin and Move up/Move down/Remove controls, separate from transient mounted devices;
+- persistent user bookmarks pinned to the sidebar, with editable labels, drag ordering and Move up/Move down/Remove controls; successful changes propagate to other open windows and do not rename targets;
 - asynchronous, monitored directory enumeration through GTK/GIO;
 - a virtualised GTK 4 list presentation rather than one widget per directory entry;
 - shared-model **Detail/List**, **Visual/Icons** and **Compact** browse presentations with common selection and activation semantics;
@@ -105,7 +108,7 @@ It currently provides:
 - full-batch collision preflight before mutation when no batch conflict policy has yet been chosen, so a detected destination conflict does not allow earlier non-conflicting items to be silently transferred first;
 - compatible batch-conflict choices for **Skip Conflicts**, **Keep Both** and **Replace Conflicts**, with one selected policy applied consistently to conflicts in that batch;
 - per-item durable START/END journal records inside batch operations, so interrupted work remains attributable to individual source/destination mutations;
-- aggregate byte/item progress and safe-boundary cancellation for multi-item Copy/Move batches;
+- shared byte/item progress and safe-boundary cancellation for single/multi-item Copy/Move, clipboard Paste and local drag/drop, including preparation and conflict replacement;
 - explicit single-item destination-conflict choices for **Skip**, **Keep Both** and **Replace** rather than implicit overwrite behaviour;
 - deterministic Keep Both naming such as `name (copy).ext`, `name (copy 2).ext` and subsequent unique names while preserving file extensions;
 - destination names are claimed at the mutation boundary with no-replace semantics, so a competing writer is reported as a conflict rather than overwritten after preflight;
@@ -126,7 +129,7 @@ It currently provides:
 - copied files and metadata are flushed before publication, private directory entries are flushed before rename, and the public destination parent is flushed before cross-volume source removal;
 - cross-volume moves verify the complete copied output set, atomically quarantine the unchanged source, compare regular-file contents as well as the source shape with the published copy and only then remove it; remaining source data is restored after a deletion failure when the original name is still free;
 - cancellation remains effective during copy and traversal; a fully copied, metadata-preserved and identity-verified destination is the cross-volume move commit point and is reported as completed rather than as a late cancellation with duplicate data;
-- deterministic **Move to Trash** for one selected native item, available from the Trash action and the `Delete` key;
+- deterministic **Move to Trash** for one or multiple selected native items, available from the Trash action and the `Delete` key; batch Trash and confirmed permanent deletion journal each item and permit cancellation between items;
 - permanent deletion through identity-bound quarantine, retaining exact evidence on a failed or partial recursive removal;
 - **Restore** from the Trash namespace to the original local path when the platform exposes the original location;
 - explicit restore-collision handling with staged replacement rather than deleting the existing destination first;

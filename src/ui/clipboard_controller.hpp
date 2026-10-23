@@ -2,6 +2,7 @@
 #pragma once
 
 #include "directory_mutation_guard.hpp"
+#include "transfer_progress_view.hpp"
 
 #include "../core/batch_transfer_engine.hpp"
 
@@ -95,6 +96,7 @@ private:
     [[nodiscard]] std::vector<std::string> parse_local_file_references(const char *text) const;
 
     DirectoryMutationGuard mutation_guard_;
+    TransferProgressView progress_view_;
     GtkWindow *window_{nullptr};
     GtkDirectoryList *directory_list_{nullptr};
     GtkMultiSelection *selection_{nullptr};

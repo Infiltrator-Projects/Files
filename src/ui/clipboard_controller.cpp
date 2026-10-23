@@ -30,6 +30,7 @@ struct ClipboardTaskData {
     int policy{0};
     std::vector<std::string> sources;
     std::string destination_parent;
+    std::shared_ptr<TransferControl> control;
 };
 
 bool tooltip_equals(GtkWidget *widget, const char *expected)
@@ -71,7 +72,8 @@ ClipboardController::ClipboardController(GtkWindow *window,
                                          GtkDirectoryList *directory_list,
                                          GtkMultiSelection *selection,
                                          GtkWidget *status_label)
-    : mutation_guard_(window, directory_list), window_(window),
+    : mutation_guard_(window, directory_list),
+      progress_view_(window, mutation_guard_, status_label, "Clipboard transfer progress"), window_(window),
       directory_list_(directory_list),
       selection_(selection),
       status_label_(status_label)
@@ -528,13 +530,16 @@ void ClipboardController::paste_sources(const Mode mode,
         return;
     }
 
+    auto control = std::make_shared<TransferControl>();
     auto *data = new ClipboardTaskData{
         static_cast<int>(mode),
         static_cast<int>(policy),
         sources,
         destination_parent,
+        control,
     };
 
+    progress_view_.start(control);
     busy_ = true;
     update_action_state();
     set_status(mode == Mode::Cut ? "Moving clipboard items…" : "Copying clipboard items…");
@@ -573,7 +578,7 @@ void ClipboardController::on_operation_thread(GTask *task,
         sources,
         data->destination_parent,
         kind,
-        static_cast<BatchConflictPolicy>(data->policy)));
+        static_cast<BatchConflictPolicy>(data->policy), data->control.get()));
     g_task_return_pointer(task, operation, [](gpointer value) {
         delete static_cast<OperationResult *>(value);
     });
@@ -591,6 +596,7 @@ void ClipboardController::on_operation_finished(GObject *source_object,
     GError *error = nullptr;
     std::unique_ptr<OperationResult> operation(
         static_cast<OperationResult *>(g_task_propagate_pointer(task, &error)));
+    self->progress_view_.finish();
     if (!self->mutation_guard_.finish()) {
         g_clear_error(&error);
         return;
@@ -619,7 +625,7 @@ void ClipboardController::on_operation_finished(GObject *source_object,
     }
 
     self->set_status(operation->message);
-    if (operation->ok() && mode == Mode::Cut) {
+    if (mode == Mode::Cut) {
         self->refresh_cut_state_after_paste(data->sources);
     }
     if (!operation->ok() && operation->status != OperationStatus::Cancelled) {

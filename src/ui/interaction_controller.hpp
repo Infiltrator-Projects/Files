@@ -26,6 +26,7 @@ private:
         Always,
         SingleSelection,
         MultiSelection,
+        AnySelection,
     };
 
     struct ProxyAction {

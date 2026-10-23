@@ -91,6 +91,7 @@ function(infiltrator_enable_warnings target)
 endfunction()
 
 add_library(infiltrator-files-core STATIC
+    src/core/batch_removal_engine.cpp
     src/core/batch_transfer_engine.cpp
     src/core/copied_metadata.cpp
     src/core/location.cpp
@@ -121,8 +122,14 @@ add_library(infiltrator-files-ui STATIC
     src/ui/interaction_controller.cpp
     src/ui/item_operation_controller.cpp
     src/ui/journal_recovery_controller.cpp
+    src/ui/location_open.cpp
     src/ui/operation_surface_install.cpp
+    src/ui/presentation_store.cpp
     src/ui/theme_controller.cpp
+    src/ui/transfer_progress_view.cpp
+    src/ui/workspace_tabs.cpp
+    src/ui/workspace_session.cpp
+    src/ui/workspace_bookmarks.cpp
     src/ui/thumbnail_cache.cpp)
 target_include_directories(infiltrator-files-ui PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -190,6 +197,15 @@ if(BUILD_TESTING)
             ENVIRONMENT "G_DEBUG=fatal-criticals;GTK_A11Y=none;GSETTINGS_BACKEND=memory"
             TIMEOUT 45)
 
+        add_executable(workspace-features-test tests/workspace_features_test.cpp)
+        target_link_libraries(workspace-features-test PRIVATE infiltrator-files-ui)
+        infiltrator_enable_warnings(workspace-features-test)
+        add_test(NAME workspace-features COMMAND "${DBUS_RUN_SESSION_EXECUTABLE}" --
+            "${XVFB_RUN_EXECUTABLE}" -a $<TARGET_FILE:workspace-features-test>)
+        set_tests_properties(workspace-features PROPERTIES
+            ENVIRONMENT "G_DEBUG=fatal-criticals;GTK_A11Y=none;GSETTINGS_BACKEND=memory"
+            TIMEOUT 45)
+
         # Theme integration checks the real GTK colour cascade under Xvfb,
         # including per-window Day/Night isolation and root startup.
         add_executable(theme-presentation-test tests/theme_presentation_test.cpp)
@@ -218,6 +234,7 @@ if(BUILD_TESTING)
     infiltrator_add_core_test(recovery-operation-engine-test tests/recovery_operation_engine_test.cpp recovery-operation-engine)
     infiltrator_add_core_test(transfer-operation-engine-test tests/transfer_operation_engine_test.cpp transfer-operation-engine)
     infiltrator_add_core_test(batch-transfer-engine-test tests/batch_transfer_engine_test.cpp batch-transfer-engine)
+    infiltrator_add_core_test(batch-removal-engine-test tests/batch_removal_engine_test.cpp batch-removal-engine)
     infiltrator_add_core_test(operation-journal-test tests/operation_journal_test.cpp operation-journal)
     infiltrator_add_core_test(transfer-safety-test tests/transfer_safety_test.cpp transfer-safety)
     target_link_options(transfer-safety-test PRIVATE "-Wl,--wrap=fsync" "-Wl,--wrap=fsetxattr")

@@ -43,11 +43,15 @@ bool path_present(const std::filesystem::path &path, std::error_code &error)
 bool measure_item(const std::filesystem::path &source,
                   std::uintmax_t &bytes,
                   std::uintmax_t &items,
-                  std::error_code &error)
+                  std::error_code &error, TransferControl *control)
 {
     bytes = 0;
     items = 0;
     error.clear();
+    if (control != nullptr && control->cancelled()) {
+        error = std::make_error_code(std::errc::operation_canceled);
+        return false;
+    }
 
     const auto status = std::filesystem::symlink_status(source, error);
     if (error) {
@@ -73,6 +77,10 @@ bool measure_item(const std::filesystem::path &source,
     for (std::filesystem::recursive_directory_iterator iterator(source, error), end;
          !error && iterator != end;
          iterator.increment(error)) {
+        if (control != nullptr && control->cancelled()) {
+            error = std::make_error_code(std::errc::operation_canceled);
+            return false;
+        }
         if (!checked_add_uintmax(1U, items)) {
             error = std::make_error_code(std::errc::value_too_large);
             return false;
@@ -165,7 +173,10 @@ OperationResult BatchTransferEngine::execute(
         PlannedItem item;
         item.source = source;
         item.destination = destination_parent / source.filename();
-        if (!measure_item(source, item.bytes, item.items, error)) {
+        if (!measure_item(source, item.bytes, item.items, error, control)) {
+            if (error == std::errc::operation_canceled)
+                return failure(OperationStatus::Cancelled, OperationPhase::Preflight, {},
+                               "Batch operation cancelled during preparation.");
             return failure(OperationEngine::status_for_error(error),
                            OperationPhase::Preflight,
                            item.destination,
@@ -242,11 +253,8 @@ OperationResult BatchTransferEngine::execute(
                                  item.destination_exists;
         if (use_replace) {
             operation = kind == BatchTransferKind::Copy
-                            ? recovery.replace_copy(item.source, destination_parent)
-                            : recovery.replace_move(item.source, destination_parent);
-            if (operation.ok()) {
-                advance_unchanged_progress(control, item);
-            }
+                            ? recovery.replace_copy(item.source, destination_parent, control)
+                            : recovery.replace_move(item.source, destination_parent, control);
         } else {
             ConflictPolicy item_policy = ConflictPolicy::Fail;
             if (conflict_policy == BatchConflictPolicy::Skip) {

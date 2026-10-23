@@ -1,5 +1,15 @@
 # Files — Complete Feature Catalogue
 
+The 0.1.57 tranche adds shared progress/cancellation for clipboard and drag
+transfers; asynchronous command-line path/URI opening and relative typed paths;
+cross-window tab movement; restoration of the last normally closed window's
+tabs/history/selection/view; bookmark labels and drag ordering; and multi-item
+native Trash/permanent deletion with per-item journals and cancellation between
+items. These supersede the corresponding historical limitations below. Session
+restoration does not reconstruct all windows or resume mutations. Recursive/content
+search, archives, permission editing, complete remote transfer workflows and the
+remaining catalogue still require implementation and qualification.
+
 The 0.1.55 safety tranche adds copied-data/publication durability barriers, bounded native xattr/POSIX-ACL preservation with explicit refusal on loss, shared mutation-monitor/application lifetime, strict journal admission and exact empty-file failure evidence. It does not claim completion of the broader CORE or research catalogue.
 
 The 0.1.37 tranche adds independently created windows; folder-in-new-window;
@@ -22,7 +32,7 @@ qualification work. Durable rename/copy/move continue through the shared operati
 engines and journal; the drag/drop transport does not implement its own mutation.
 
 
-**Catalogue updated:** 18 October 2026
+**Catalogue updated:** 23 October 2026
 **Scope:** intended product capability, not only the current 0.1.0 implementation
 
 This document is the authoritative feature catalogue for Files (Files). It exists so implementation does not drift into a sequence of locally convenient UI changes. Every substantial feature should map back to one of these product capabilities or cause this catalogue to be deliberately amended.

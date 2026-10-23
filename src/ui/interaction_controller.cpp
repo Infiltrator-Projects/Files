@@ -348,7 +348,7 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
         if (self->window_ != nullptr) {
             auto *window = static_cast<FileManagerWindow *>(
                 g_object_get_data(G_OBJECT(self->window_), "ifm-window-controller"));
-            if (window != nullptr) window->open_primary_directory_in_new_tab();
+            if (window != nullptr) (void)window->open_primary_directory_in_new_tab();
         }
         self->close_popovers();
     }), this);
@@ -358,6 +358,7 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
     if (&proxies == &overflow_proxies_) {
         add_command(box, "New Window", "new-window", ActionScope::Always, proxies);
         add_command(box, "Duplicate Tab", "duplicate-tab", ActionScope::Always, proxies);
+        add_command(box, "Move Tab to New Window", "detach-tab", ActionScope::Always, proxies);
         add_command(box, "Reopen Closed Tab", "reopen-tab", ActionScope::Always, proxies);
     }
     create_action_button(box, "New Folder", new_folder_target_,
@@ -380,11 +381,11 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
 
     add_separator(box);
     create_action_button(box, "Move to Trash", trash_target_,
-                         ActionScope::SingleSelection, proxies);
+                         ActionScope::AnySelection, proxies);
     create_action_button(box, "Restore", restore_target_,
                          ActionScope::SingleSelection, proxies);
     create_action_button(box, "Delete Permanently…", delete_target_,
-                         ActionScope::SingleSelection, proxies);
+                         ActionScope::AnySelection, proxies);
 
     add_separator(box);
     add_command(box, "Copy Path as Text", "copy-path", ActionScope::SingleSelection, proxies);
@@ -516,6 +517,7 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
         (void)window->open_primary_directory_in_new_window();
     }
     else if (g_strcmp0(command, "duplicate-tab") == 0) window->duplicate_active_tab();
+    else if (g_strcmp0(command, "detach-tab") == 0) window->move_active_tab_to_new_window();
     else if (g_strcmp0(command, "reopen-tab") == 0) window->reopen_closed_tab();
     else if (g_strcmp0(command, "toggle-hidden") == 0) window->toggle_show_hidden();
     else if (g_strcmp0(command, "folders-first") == 0) window->toggle_folders_first();
@@ -873,6 +875,9 @@ void InteractionController::update_action_state()
                 break;
             case ActionScope::MultiSelection:
                 visible = count > 1U;
+                break;
+            case ActionScope::AnySelection:
+                visible = count > 0U;
                 break;
             }
 

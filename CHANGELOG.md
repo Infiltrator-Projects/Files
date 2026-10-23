@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.57 — 2026-10-23
+
+- Share progress and safe-boundary cancellation across single/batch transfers, clipboard Paste and drag/drop; honour cancellation while measuring trees and replacing conflicts, and refresh Cut ownership after partial completion.
+- Open command-line paths/URIs asynchronously, reveal file arguments in their parent folder, and resolve typed relative paths against the current location.
+- Move tabs between windows or into a new window while retaining history, selection and view mode; reject stale tab/window drag identities.
+- Restore the last normally closed window's bounded browsing session on ordinary startup, validating all saved state before replacing the current workspace; never restore transient operations.
+- Add bookmark labels and drag ordering with legacy import, atomic private persistence and propagation to other open windows.
+- Apply Trash and confirmed permanent deletion to multiple selected native siblings, journalling each item and allowing cancellation between items; refuse late confirmation after window closure.
+- Add workspace integration and destructive batch regressions. Keep the broader feature catalogue explicitly unfinished.
+
 ## 0.1.56 — 2026-10-23
 
 - Refuse queued clipboard conflict choices after their originating window is removed from the application.

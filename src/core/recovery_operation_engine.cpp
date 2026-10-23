@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "recovery_operation_engine.hpp"
+#include "transfer_operation_engine.hpp"
 #include "destination_ownership.hpp"
 
 #include <gio/gio.h>
@@ -224,13 +225,14 @@ void append_missing_retained_guidance(
 
 OperationResult RecoveryOperationEngine::replace_copy(
     const std::filesystem::path &source,
-    const std::filesystem::path &destination_parent) const
+    const std::filesystem::path &destination_parent,
+    TransferControl *control) const
 {
-    OperationEngine ordinary;
-    const auto copy_item = [this, &ordinary](const std::filesystem::path &item,
+    TransferOperationEngine transfer;
+    const auto copy_item = [this, &transfer, control](const std::filesystem::path &item,
                                               const std::filesystem::path &parent) {
         return hooks_.copy_item != nullptr ? hooks_.copy_item(item, parent)
-                                           : ordinary.copy_item(item, parent);
+                                           : transfer.copy_item(item, parent, ConflictPolicy::Fail, control);
     };
     OperationResult initial = copy_item(source, destination_parent);
     if (initial.status != OperationStatus::DestinationConflict) {
@@ -256,6 +258,9 @@ OperationResult RecoveryOperationEngine::replace_copy(
 
     destination_ownership::OwnedOutput staged;
     std::filesystem::path staging_quarantine;
+    if (control != nullptr && control->cancelled())
+        return result(OperationStatus::Cancelled, OperationPhase::Preflight, destination,
+                      "Replacement cancelled before changing the destination.");
     if (!stage_destination(destination, backup, staged, error, &staging_quarantine)) {
         return result(OperationEngine::status_for_error(error),
                       OperationPhase::Execute,
@@ -307,13 +312,14 @@ OperationResult RecoveryOperationEngine::replace_copy(
 
 OperationResult RecoveryOperationEngine::replace_move(
     const std::filesystem::path &source,
-    const std::filesystem::path &destination_parent) const
+    const std::filesystem::path &destination_parent,
+    TransferControl *control) const
 {
-    OperationEngine ordinary;
-    const auto move_item = [this, &ordinary](const std::filesystem::path &item,
+    TransferOperationEngine transfer;
+    const auto move_item = [this, &transfer, control](const std::filesystem::path &item,
                                               const std::filesystem::path &parent) {
         return hooks_.move_item != nullptr ? hooks_.move_item(item, parent)
-                                           : ordinary.move_item(item, parent);
+                                           : transfer.move_item(item, parent, ConflictPolicy::Fail, control);
     };
     OperationResult initial = move_item(source, destination_parent);
     if (initial.status != OperationStatus::DestinationConflict) {
@@ -339,6 +345,9 @@ OperationResult RecoveryOperationEngine::replace_move(
 
     destination_ownership::OwnedOutput staged;
     std::filesystem::path staging_quarantine;
+    if (control != nullptr && control->cancelled())
+        return result(OperationStatus::Cancelled, OperationPhase::Preflight, destination,
+                      "Replacement cancelled before changing the destination.");
     if (!stage_destination(destination, backup, staged, error, &staging_quarantine)) {
         return result(OperationEngine::status_for_error(error),
                       OperationPhase::Execute,

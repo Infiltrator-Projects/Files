@@ -27,6 +27,9 @@ public:
     FileManagerWindow &operator=(const FileManagerWindow &) = delete;
 
     void present();
+    // Resolve asynchronously: open folders, or reveal a file in its parent.
+    void open_location(GFile *file);
+    [[nodiscard]] bool restore_previous_session();
     void install_operation_surface();
     [[nodiscard]] bool open_primary_directory_in_new_tab();
     [[nodiscard]] bool open_primary_directory_in_new_window();
@@ -34,6 +37,8 @@ public:
     void duplicate_active_tab();
     void reopen_closed_tab();
     void move_active_tab(int delta);
+    void move_active_tab_to_new_window();
+    [[nodiscard]] bool move_active_tab_to(FileManagerWindow &destination);
     void toggle_show_hidden();
     void toggle_folders_first();
     void toggle_sidebar();
@@ -52,18 +57,28 @@ private:
     };
 
     struct TabState {
+        std::uint64_t id{next_tab_id()};
         std::vector<Location> history;
         std::size_t index{0};
         std::string uri;
         std::vector<std::string> selected_names;
         ViewMode view{ViewMode::List};
-        GtkWidget *button{nullptr};
-        GtkWidget *label{nullptr};
     };
+
+    static std::uint64_t next_tab_id() noexcept;
+    static GType tab_drag_type();
+    void install_tab_drag(GtkWidget *button, std::uint64_t id);
+    void install_tab_drop();
+    void display_active_tab();
+    [[nodiscard]] bool save_session();
+    void remove_tab(std::size_t index, bool remember_closed);
+    [[nodiscard]] bool move_tab_to(FileManagerWindow &destination, std::uint64_t id);
 
     struct BookmarkRow {
         std::string uri;
         GtkWidget *row{nullptr};
+        std::string label;
+        GtkWidget *caption{nullptr};
     };
 
     struct MountedPlaceRow {
@@ -77,7 +92,12 @@ private:
     static void on_tab_add_clicked(GtkButton *button, gpointer user_data);
     static gboolean on_tab_key_pressed(GtkEventControllerKey *controller, guint keyval,
                                        guint keycode, GdkModifierType state, gpointer user_data);
-    struct FilterState { bool show_hidden{false}; std::string query; };
+    struct FilterState {
+        bool show_hidden{false};
+        std::string query;
+        std::vector<std::string> revealed_names;
+    };
+    static void on_location_inspected(GObject *source, GAsyncResult *result, gpointer data);
     static gboolean filter_visible(gpointer item, gpointer user_data);
     static void on_search_changed(GtkSearchEntry *entry, gpointer user_data);
     static gboolean on_search_timeout(gpointer user_data);
@@ -152,8 +172,13 @@ private:
     void show_search();
     void hide_search();
     void load_bookmarks();
-    void save_bookmarks() const;
-    void append_bookmark(const std::string &uri);
+    bool save_bookmarks() const;
+    void append_bookmark(const std::string &uri, const std::string &label = {});
+    void reload_bookmarks();
+    void show_bookmark_label_dialog(const std::string &uri);
+    bool rename_bookmark(const std::string &uri, const std::string &label);
+    static GType bookmark_drag_type();
+    void install_bookmark_drag(GtkWidget *row);
     void remove_bookmark(std::size_t index);
     void reorder_bookmarks();
     void update_bookmark_button();
@@ -191,6 +216,7 @@ private:
     std::size_t active_tab_{0};
     std::vector<std::string> pending_tab_selection_;
     std::vector<BookmarkRow> bookmarks_;
+    bool bookmarks_writable_{true};
     GtkWidget *back_button_{nullptr};
     GtkWidget *forward_button_{nullptr};
     GtkWidget *up_button_{nullptr};
@@ -220,6 +246,8 @@ private:
         std::make_shared<std::atomic_bool>(true)};
     GtkSingleSelection *primary_selection_{nullptr};
     GFile *current_location_{nullptr};
+    GCancellable *location_request_{nullptr};
+    guint64 navigation_generation_{0U};
     GFileMonitor *temporal_policy_monitor_{nullptr};
     std::unordered_set<GtkWidget *> modified_cells_;
     std::vector<Location> history_;

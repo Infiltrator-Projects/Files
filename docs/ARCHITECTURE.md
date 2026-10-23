@@ -317,6 +317,30 @@ The first active lease holds the GtkApplication, and the last releases it after 
 
 ## 10. Presentation model
 
+### Workspace persistence and interaction ownership
+
+`workspace_tabs`, `workspace_session` and `workspace_bookmarks` implement cohesive
+presentation responsibilities over the existing window model. Typed in-process
+drag payloads carry stable tab/bookmark identities and weak window references;
+closed windows or removed entries revoke their authority. Tab movement retains
+the existing history, selection and view state rather than reinterpreting files.
+
+`presentation_store` uses Common's bounded text reader and private atomic writer
+for versioned presentation files (1 MiB maximum). Session restore validates the
+entire input before replacing tabs, bounds histories/selections and enumerates
+only the active location asynchronously. Normal shutdown saves the last window's
+workspace; multiple windows and in-flight operations are not reconstructed.
+Bookmark edits commit one durable file before other open windows reload it;
+unreadable existing bookmark state disables writes rather than overwriting it.
+
+`TransferProgressView` owns only progress widgets and a UI timer. Controllers
+retain worker, cancellation-control and mutation-admission ownership. Replacement
+and tree measurement consume the same cancellation token as ordinary transfer.
+`BatchRemovalEngine` preflights distinct native siblings, then invokes the existing
+recovery engine under a separate durable START/END for each item. Cancellation
+between items reports the completed count; an individual recursive delete remains
+indivisible for cancellation and retains its existing quarantine/recovery contract.
+
 The production UI should be selected after prototyping, not inferred directly from current file managers.
 
 The architecture nevertheless assumes several information roles:

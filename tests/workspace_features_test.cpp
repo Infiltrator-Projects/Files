@@ -1,0 +1,293 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#include "../src/ui/file_manager_window.hpp"
+
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <stdexcept>
+
+namespace infiltrator::files {
+struct FileManagerWindowTestAccess {
+    static void navigate(FileManagerWindow &w, const std::filesystem::path &path) {
+        GFile *file = g_file_new_for_path(path.c_str());
+        w.navigate_to(file, true); g_object_unref(file);
+    }
+    static void back(FileManagerWindow &w) { w.navigate_history(-1); }
+    static bool loading(FileManagerWindow &w) { return gtk_directory_list_is_loading(w.directory_list_); }
+    static bool opening(FileManagerWindow &w) { return w.location_request_ != nullptr; }
+    static std::size_t count(FileManagerWindow &w) { return w.tabs_.size(); }
+    static std::size_t history(FileManagerWindow &w) { return w.history_.size(); }
+    static GtkMultiSelection *selection(FileManagerWindow &w) { return w.selection_; }
+    static void icons(FileManagerWindow &w) { w.set_view_mode(FileManagerWindow::ViewMode::Icons); }
+    static bool is_icons(FileManagerWindow &w) { return w.view_mode_ == FileManagerWindow::ViewMode::Icons; }
+    static void activate(FileManagerWindow &w, std::size_t i) { w.activate_tab(i); }
+    static void close(FileManagerWindow &w) { w.close_tab(w.active_tab_); }
+    static GFile *resolve(FileManagerWindow &w, const char *value) { return w.file_from_location_text(value); }
+    static GFile *location(FileManagerWindow &w) { return w.current_location_; }
+    static GtkWidget *status(FileManagerWindow &w) { return w.status_label_; }
+    static GtkWidget *active_button(FileManagerWindow &w) {
+        GtkWidget *group = gtk_widget_get_first_child(w.tab_strip_);
+        for (std::size_t i = 0; i < w.active_tab_ && group != nullptr; ++i)
+            group = gtk_widget_get_next_sibling(group);
+        return group != nullptr ? gtk_widget_get_first_child(group) : nullptr;
+    }
+    static GtkWidget *strip(FileManagerWindow &w) { return w.tab_strip_; }
+    static GType drag_type() { return FileManagerWindow::tab_drag_type(); }
+    static GType bookmark_type() { return FileManagerWindow::bookmark_drag_type(); }
+    static std::size_t bookmarks(FileManagerWindow &w) { return w.bookmarks_.size(); }
+    static GtkWidget *bookmark_row(FileManagerWindow &w, std::size_t i) { return w.bookmarks_[i].row; }
+    static std::string bookmark_label(FileManagerWindow &w, std::size_t i) { return w.bookmarks_[i].label; }
+    static std::string bookmark_uri(FileManagerWindow &w, std::size_t i) { return w.bookmarks_[i].uri; }
+    static void label_dialog(FileManagerWindow &w, const std::string &uri) { w.show_bookmark_label_dialog(uri); }
+    static void remove_bookmark(FileManagerWindow &w, std::size_t i) { w.remove_bookmark(i); }
+    static bool label(FileManagerWindow &w, const std::string &uri, const std::string &label) {
+        return w.rename_bookmark(uri, label);
+    }
+};
+}
+using namespace infiltrator::files;
+namespace fs = std::filesystem;
+namespace {
+void require(bool value, const char *message) { if (!value) throw std::runtime_error(message); }
+void await(const std::function<bool()> &ready) {
+    const auto deadline = g_get_monotonic_time() + 5 * G_TIME_SPAN_SECOND;
+    while (!ready() && g_get_monotonic_time() < deadline) {
+        while (g_main_context_iteration(nullptr, FALSE)) {}
+        g_usleep(1000);
+    }
+    require(ready(), "Timed out waiting for workspace state");
+}
+bool at(FileManagerWindow &w, const fs::path &path) {
+    GFile *expected = g_file_new_for_path(path.c_str());
+    const bool equal = g_file_equal(FileManagerWindowTestAccess::location(w), expected);
+    g_object_unref(expected); return equal;
+}
+void open(FileManagerWindow &w, const fs::path &path) {
+    GFile *file = g_file_new_for_path(path.c_str());
+    w.open_location(file); g_object_unref(file);
+    await([&] { return !FileManagerWindowTestAccess::opening(w) &&
+                       !FileManagerWindowTestAccess::loading(w); });
+}
+bool selected(FileManagerWindow &w, const char *name) {
+    auto *selection = FileManagerWindowTestAccess::selection(w);
+    auto *model = gtk_multi_selection_get_model(selection);
+    for (guint i = 0; i < g_list_model_get_n_items(model); ++i) {
+        auto *info = G_FILE_INFO(g_list_model_get_item(model, i));
+        const bool match = g_strcmp0(g_file_info_get_name(info), name) == 0 &&
+            gtk_selection_model_is_selected(GTK_SELECTION_MODEL(selection), i);
+        g_object_unref(info);
+        if (match) return true;
+    }
+    return false;
+}
+GObject *controller(GtkWidget *widget, GType type) {
+    GListModel *controllers = gtk_widget_observe_controllers(widget);
+    GObject *found = nullptr;
+    for (guint i = 0; i < g_list_model_get_n_items(controllers); ++i) {
+        auto *candidate = G_OBJECT(g_list_model_get_item(controllers, i));
+        if (G_TYPE_CHECK_INSTANCE_TYPE(candidate, type)) { found = candidate; break; }
+        g_object_unref(candidate);
+    }
+    g_object_unref(controllers);
+    return found;
+}
+void prepare(FileManagerWindow &source, GValue &value) {
+    GObject *drag = controller(FileManagerWindowTestAccess::active_button(source), GTK_TYPE_DRAG_SOURCE);
+    require(drag != nullptr, "Tabs must have a real GTK drag source");
+    GdkContentProvider *provider = nullptr;
+    g_signal_emit_by_name(drag, "prepare", 0.0, 0.0, &provider);
+    g_object_unref(drag);
+    require(provider != nullptr, "Tab drag must offer an in-process payload");
+    g_value_init(&value, FileManagerWindowTestAccess::drag_type());
+    require(gdk_content_provider_get_value(provider, &value, nullptr), "Tab payload must round trip");
+    g_object_unref(provider);
+}
+bool drop(FileManagerWindow &destination, const GValue &value) {
+    GObject *target = controller(FileManagerWindowTestAccess::strip(destination), GTK_TYPE_DROP_TARGET);
+    require(target != nullptr, "Tab rail must have a GTK drop target");
+    gboolean accepted = FALSE;
+    g_signal_emit_by_name(target, "drop", &value, 0.0, 0.0, &accepted);
+    g_object_unref(target); return accepted;
+}
+FileManagerWindow *window(GtkApplication *app) {
+    auto *created = new FileManagerWindow(app);
+    created->present(); return created;
+}
+std::string file_uri(const fs::path &path) {
+    GFile *file = g_file_new_for_path(path.c_str());
+    char *text = g_file_get_uri(file);
+    const std::string uri(text); g_free(text); g_object_unref(file); return uri;
+}
+GtkWidget *find(GtkWidget *root, const std::function<bool(GtkWidget *)> &matches) {
+    if (root == nullptr) return nullptr;
+    if (matches(root)) return root;
+    for (auto *child = gtk_widget_get_first_child(root); child != nullptr;
+         child = gtk_widget_get_next_sibling(child))
+        if (auto *result = find(child, matches)) return result;
+    return nullptr;
+}
+}
+int main()
+{
+    char *temporary = g_dir_make_tmp("files-workspace-features-XXXXXX", nullptr);
+    if (temporary == nullptr) return 2;
+    const fs::path root(temporary); g_free(temporary);
+    g_setenv("XDG_CONFIG_HOME", (root / "config").c_str(), TRUE);
+    g_setenv("XDG_STATE_HOME", (root / "state").c_str(), TRUE);
+    gtk_init();
+    auto *app = gtk_application_new("org.infiltrator.Files.WorkspaceFeatures", G_APPLICATION_NON_UNIQUE);
+    require(g_application_register(G_APPLICATION(app), nullptr, nullptr), "Cannot register application");
+    try {
+        const auto a = root / "a", b = root / "b";
+        fs::create_directories(a / "child"); fs::create_directories(b);
+        std::ofstream(a / "file with spaces.txt") << "payload";
+        std::ofstream(a / ".hidden") << "hidden";
+        const auto profile = root / "config" / "infiltrator" / "files";
+        fs::create_directories(profile);
+        std::ofstream(profile / "bookmarks") << file_uri(a) << '\n' << file_uri(b) << '\n';
+        auto *source = window(app);
+        require(FileManagerWindowTestAccess::bookmarks(*source) == 2U,
+                "Legacy URI bookmarks must be imported without losing their order");
+        FileManagerWindowTestAccess::label_dialog(*source, file_uri(a));
+        GtkWindow *label_dialog = nullptr;
+        auto *toplevels = gtk_window_get_toplevels();
+        for (guint i = 0; i < g_list_model_get_n_items(toplevels); ++i) {
+            auto *candidate = GTK_WINDOW(g_list_model_get_item(toplevels, i));
+            if (g_strcmp0(gtk_window_get_title(candidate), "Rename Bookmark") == 0) {
+                label_dialog = candidate; break;
+            }
+            g_object_unref(candidate);
+        }
+        require(label_dialog != nullptr, "Bookmark label editing must expose a real dialog");
+        auto *entry = find(GTK_WIDGET(label_dialog), [](GtkWidget *w) { return GTK_IS_ENTRY(w); });
+        auto *save = find(GTK_WIDGET(label_dialog), [](GtkWidget *w) {
+            return GTK_IS_BUTTON(w) && g_strcmp0(gtk_button_get_label(GTK_BUTTON(w)), "Save Label") == 0;
+        });
+        require(entry != nullptr && save != nullptr, "Bookmark dialog must expose its entry and save action");
+        gtk_editable_set_text(GTK_EDITABLE(entry), "Project Photos");
+        g_signal_emit_by_name(save, "clicked");
+        g_object_unref(label_dialog);
+        require(FileManagerWindowTestAccess::bookmark_label(*source, 0U) == "Project Photos" &&
+                fs::exists(a / "file with spaces.txt") && fs::exists(profile / "bookmarks.ini"),
+                "Renaming a bookmark must persist only its label and leave the target unchanged");
+        require(!FileManagerWindowTestAccess::label(*source, file_uri(a), "bad\nlabel"),
+                "Bookmark labels must refuse control characters");
+        open(*source, a);
+        require(at(*source, a), "Opening a directory must browse it");
+        GFile *relative = FileManagerWindowTestAccess::resolve(*source, "child/..");
+        GFile *expected = g_file_new_for_path(a.c_str());
+        require(g_file_equal(relative, expected), "Relative paths must resolve from the browsed folder");
+        g_object_unref(relative); g_object_unref(expected);
+        open(*source, a / "file with spaces.txt");
+        require(at(*source, a) && selected(*source, "file with spaces.txt"),
+                "Opening a file must reveal and select its exact filename");
+        open(*source, a / ".hidden");
+        require(selected(*source, ".hidden") && !source->show_hidden(),
+                "Explicitly opened hidden files must be revealed without changing the saved preference");
+        open(*source, root / "missing");
+        require(at(*source, a) && std::string(gtk_label_get_text(GTK_LABEL(
+                    FileManagerWindowTestAccess::status(*source)))).find("could not be opened") != std::string::npos,
+                "An invalid open request must retain the previous location and explain failure");
+        GFile *superseded = g_file_new_for_path(a.c_str());
+        source->open_location(superseded); g_object_unref(superseded);
+        FileManagerWindowTestAccess::navigate(*source, b);
+        await([&] { return !FileManagerWindowTestAccess::loading(*source); });
+        while (g_main_context_iteration(nullptr, FALSE)) {}
+        require(at(*source, b), "A superseded metadata callback must never retarget navigation");
+        open(*source, a / "file with spaces.txt");
+        FileManagerWindowTestAccess::icons(*source);
+        const auto history = FileManagerWindowTestAccess::history(*source);
+        source->duplicate_active_tab();
+        require(FileManagerWindowTestAccess::count(*source) == 2U &&
+                FileManagerWindowTestAccess::history(*source) == history &&
+                selected(*source, "file with spaces.txt"),
+                "Duplicate Tab must preserve history, selection and the current history index");
+        auto *destination = window(app);
+        require(FileManagerWindowTestAccess::bookmark_label(*destination, 0U) == "Project Photos",
+                "Bookmark labels must survive creating a new window");
+        GValue bookmark_payload = G_VALUE_INIT;
+        auto *bookmark_drag = controller(FileManagerWindowTestAccess::bookmark_row(*source, 0U), GTK_TYPE_DRAG_SOURCE);
+        require(bookmark_drag != nullptr, "Bookmarks must offer a drag source");
+        GdkContentProvider *bookmark_provider = nullptr;
+        g_signal_emit_by_name(bookmark_drag, "prepare", 0.0, 0.0, &bookmark_provider);
+        g_object_unref(bookmark_drag);
+        g_value_init(&bookmark_payload, FileManagerWindowTestAccess::bookmark_type());
+        require(bookmark_provider != nullptr && gdk_content_provider_get_value(bookmark_provider, &bookmark_payload, nullptr),
+                "Bookmark drag must offer an internal, lifetime-bound payload");
+        g_object_unref(bookmark_provider);
+        auto *bookmark_target = controller(FileManagerWindowTestAccess::bookmark_row(*source, 1U), GTK_TYPE_DROP_TARGET);
+        require(bookmark_target != nullptr, "Bookmarks must expose reorder drop targets");
+        gboolean reordered = FALSE;
+        g_signal_emit_by_name(bookmark_target, "drop", &bookmark_payload, 0.0, 1000.0, &reordered);
+        g_object_unref(bookmark_target);
+        require(reordered && FileManagerWindowTestAccess::bookmark_uri(*source, 1U) == file_uri(a) &&
+                FileManagerWindowTestAccess::bookmark_uri(*destination, 1U) == file_uri(a) &&
+                FileManagerWindowTestAccess::bookmark_label(*destination, 1U) == "Project Photos",
+                "Drag reorder must persist labels and update the other open windows");
+        FileManagerWindowTestAccess::remove_bookmark(*source, 1U);
+        bookmark_target = controller(FileManagerWindowTestAccess::bookmark_row(*source, 0U), GTK_TYPE_DROP_TARGET);
+        reordered = FALSE;
+        g_signal_emit_by_name(bookmark_target, "drop", &bookmark_payload, 0.0, 0.0, &reordered);
+        g_object_unref(bookmark_target);
+        require(!reordered && FileManagerWindowTestAccess::bookmarks(*destination) == 1U,
+                "Removing a bookmark must revoke an old drag and update every window");
+        g_value_unset(&bookmark_payload);
+        GValue payload = G_VALUE_INIT;
+        prepare(*source, payload);
+        require(drop(*destination, payload), "A tab must move between independent application windows");
+        g_value_unset(&payload);
+        await([&] { return !FileManagerWindowTestAccess::loading(*destination); });
+        require(FileManagerWindowTestAccess::count(*source) == 1U &&
+                FileManagerWindowTestAccess::count(*destination) == 2U && at(*destination, a) &&
+                selected(*destination, "file with spaces.txt") &&
+                FileManagerWindowTestAccess::is_icons(*destination) &&
+                FileManagerWindowTestAccess::history(*destination) == history,
+                "Moving a tab must retain its full browsing state and leave the other tabs intact");
+        FileManagerWindowTestAccess::back(*destination);
+        require(at(*destination, b) && at(*source, a), "Moved and original histories must be independent");
+
+        // Close/reopen is deliberately a new identity: an old drag is no
+        // longer authorised to move the reopened tab at the same index.
+        prepare(*destination, payload);
+        FileManagerWindowTestAccess::close(*destination);
+        destination->reopen_closed_tab();
+        require(!drop(*source, payload), "A stale drag must not move a subsequently reopened tab");
+        g_value_unset(&payload);
+        prepare(*source, payload);
+        gtk_window_destroy(source->native_window());
+        require(!drop(*destination, payload), "A closed source window must revoke a pending drag");
+        g_value_unset(&payload);
+
+        auto *last = window(app);
+        GFile *pending = g_file_new_for_path(a.c_str());
+        last->open_location(pending); g_object_unref(pending);
+        gtk_window_destroy(last->native_window());
+        while (g_main_context_iteration(nullptr, FALSE)) {}
+        open(*destination, a / "file with spaces.txt");
+        const auto saved_history = FileManagerWindowTestAccess::history(*destination);
+        gtk_window_destroy(destination->native_window());
+        while (g_main_context_iteration(nullptr, FALSE)) {}
+        const auto session_path = root / "config" / "infiltrator" / "files" / "session.ini";
+        require(fs::exists(session_path), "Closing the last window must persist browsing state");
+        auto *restored = window(app);
+        require(restored->restore_previous_session(), "A normal close must yield a restorable session");
+        await([&] { return !FileManagerWindowTestAccess::loading(*restored); });
+        require(FileManagerWindowTestAccess::count(*restored) == 2U && at(*restored, a) &&
+                selected(*restored, "file with spaces.txt") && FileManagerWindowTestAccess::is_icons(*restored) &&
+                FileManagerWindowTestAccess::history(*restored) == saved_history,
+                "Restart must restore tabs, active location, selection, view and navigation history");
+        std::ofstream(session_path, std::ios::binary | std::ios::trunc) << "[Session]\nversion=999\n";
+        require(!restored->restore_previous_session() && at(*restored, a) &&
+                FileManagerWindowTestAccess::count(*restored) == 2U,
+                "Malformed session state must not partially replace the current workspace");
+        std::ofstream(session_path, std::ios::binary | std::ios::trunc) << std::string(1024U * 1024U + 1U, 'x');
+        require(!restored->restore_previous_session() && at(*restored, a),
+                "Oversized session files must be refused before parsing");
+        gtk_window_destroy(restored->native_window());
+        while (g_main_context_iteration(nullptr, FALSE)) {}
+    } catch (const std::exception &error) {
+        std::cerr << error.what() << '\n'; return 1;
+    }
+    g_object_unref(app); fs::remove_all(root); return 0;
+}

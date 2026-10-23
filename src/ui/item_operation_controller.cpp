@@ -7,7 +7,6 @@
 #include "../core/recovery_operation_engine.hpp"
 #include "../core/transfer_operation_engine.hpp"
 
-#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
@@ -53,7 +52,8 @@ ItemOperationController::ItemOperationController(GtkWindow *window,
                                                  GtkDirectoryList *directory_list,
                                                  GtkSingleSelection *selection,
                                                  GtkWidget *status_label)
-    : mutation_guard_(window, directory_list), window_(window), directory_list_(directory_list), selection_(selection),
+    : mutation_guard_(window, directory_list),
+      progress_view_(window, mutation_guard_, status_label, "File operation progress"), window_(window), directory_list_(directory_list), selection_(selection),
       status_label_(status_label)
 {
     if (window_ == nullptr || directory_list_ == nullptr || selection_ == nullptr) {
@@ -97,18 +97,6 @@ ItemOperationController::ItemOperationController(GtkWindow *window,
         gtk_menu_button_set_popover(GTK_MENU_BUTTON(menu_button_), popover_);
         gtk_header_bar_pack_end(GTK_HEADER_BAR(titlebar), menu_button_);
 
-        operation_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-        progress_bar_ = gtk_progress_bar_new();
-        gtk_widget_set_size_request(progress_bar_, 150, -1);
-        gtk_widget_set_tooltip_text(progress_bar_, "File operation progress");
-        cancel_operation_button_ = gtk_button_new_from_icon_name("process-stop-symbolic");
-        gtk_widget_set_tooltip_text(cancel_operation_button_, "Cancel at the next safe boundary");
-        gtk_box_append(GTK_BOX(operation_box_), progress_bar_);
-        gtk_box_append(GTK_BOX(operation_box_), cancel_operation_button_);
-        gtk_widget_set_visible(operation_box_, FALSE);
-        gtk_header_bar_pack_end(GTK_HEADER_BAR(titlebar), operation_box_);
-        g_signal_connect(cancel_operation_button_, "clicked",
-                         G_CALLBACK(&ItemOperationController::on_cancel_operation_clicked), this);
     }
 
     GtkEventController *keys = gtk_event_controller_key_new();
@@ -129,10 +117,6 @@ ItemOperationController::ItemOperationController(GtkWindow *window,
 ItemOperationController::~ItemOperationController()
 {
     if (window_ != nullptr) g_object_set_data(G_OBJECT(window_), "ifm-item-controller", nullptr);
-    if (progress_source_id_ != 0U) {
-        g_source_remove(progress_source_id_);
-        progress_source_id_ = 0U;
-    }
     if (current_control_) {
         current_control_->request_cancel();
     }
@@ -217,23 +201,6 @@ void ItemOperationController::on_move_clicked(GtkButton *button, gpointer user_d
     auto *self = static_cast<ItemOperationController *>(user_data);
     self->close_menu();
     self->choose_destination(Kind::Move);
-}
-
-void ItemOperationController::on_cancel_operation_clicked(GtkButton *button, gpointer user_data)
-{
-    (void)button;
-    auto *self = static_cast<ItemOperationController *>(user_data);
-    if (!self->current_control_) {
-        return;
-    }
-    self->current_control_->request_cancel();
-    if (self->cancel_operation_button_ != nullptr) {
-        gtk_widget_set_sensitive(self->cancel_operation_button_, FALSE);
-    }
-    if (self->status_label_ != nullptr) {
-        gtk_label_set_text(GTK_LABEL(self->status_label_),
-                           "Cancellation requested; stopping at the next safe boundary…");
-    }
 }
 
 gboolean ItemOperationController::on_key_pressed(GtkEventControllerKey *controller,
@@ -687,10 +654,10 @@ void ItemOperationController::on_operation_thread(GTask *task,
                                        data->control.get());
         break;
     case Kind::ReplaceCopy:
-        operation = recovery.replace_copy(data->source_path, data->destination_parent);
+        operation = recovery.replace_copy(data->source_path, data->destination_parent, data->control.get());
         break;
     case Kind::ReplaceMove:
-        operation = recovery.replace_move(data->source_path, data->destination_parent);
+        operation = recovery.replace_move(data->source_path, data->destination_parent, data->control.get());
         break;
     }
 
@@ -731,6 +698,7 @@ void ItemOperationController::on_operation_finished(GObject *source_object,
     GError *error = nullptr;
     std::unique_ptr<OperationResult> operation(
         static_cast<OperationResult *>(g_task_propagate_pointer(task, &error)));
+    self->progress_view_.finish();
     if (!self->mutation_guard_.finish()) {
         g_clear_error(&error);
         return;
@@ -786,66 +754,9 @@ void ItemOperationController::set_busy(const bool busy)
 {
     if (!mutation_guard_.alive()) return;
     busy_ = busy;
-    if (operation_box_ != nullptr) {
-        gtk_widget_set_visible(operation_box_, busy);
-    }
-    if (cancel_operation_button_ != nullptr) {
-        gtk_widget_set_sensitive(cancel_operation_button_, busy && current_control_ != nullptr);
-    }
-    if (progress_bar_ != nullptr && busy) {
-        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(progress_bar_), 0.0);
-    }
-
-    if (busy && progress_source_id_ == 0U) {
-        progress_source_id_ = g_timeout_add(100, &ItemOperationController::on_progress_tick, this);
-    } else if (!busy && progress_source_id_ != 0U) {
-        g_source_remove(progress_source_id_);
-        progress_source_id_ = 0U;
-    }
+    if (busy) progress_view_.start(current_control_);
+    else progress_view_.finish();
     update_action_state();
-}
-
-gboolean ItemOperationController::on_progress_tick(gpointer user_data)
-{
-    auto *self = static_cast<ItemOperationController *>(user_data);
-    if (!self->mutation_guard_.alive() || !self->busy_) {
-        self->progress_source_id_ = 0U;
-        return G_SOURCE_REMOVE;
-    }
-    self->update_progress();
-    return G_SOURCE_CONTINUE;
-}
-
-void ItemOperationController::update_progress()
-{
-    if (!mutation_guard_.alive()) return;
-    if (progress_bar_ == nullptr) {
-        return;
-    }
-    if (!current_control_) {
-        gtk_progress_bar_pulse(GTK_PROGRESS_BAR(progress_bar_));
-        return;
-    }
-
-    const TransferProgress progress = current_control_->progress();
-    double fraction = 0.0;
-    bool determinate = false;
-    if (progress.bytes_total > 0U) {
-        fraction = static_cast<double>(progress.bytes_done) /
-                   static_cast<double>(progress.bytes_total);
-        determinate = true;
-    } else if (progress.items_total > 0U) {
-        fraction = static_cast<double>(progress.items_done) /
-                   static_cast<double>(progress.items_total);
-        determinate = true;
-    }
-
-    if (determinate) {
-        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(progress_bar_),
-                                      std::clamp(fraction, 0.0, 1.0));
-    } else {
-        gtk_progress_bar_pulse(GTK_PROGRESS_BAR(progress_bar_));
-    }
 }
 
 void ItemOperationController::update_action_state()

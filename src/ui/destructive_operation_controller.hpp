@@ -2,6 +2,7 @@
 #pragma once
 
 #include "directory_mutation_guard.hpp"
+#include "transfer_progress_view.hpp"
 
 #include <gtk/gtk.h>
 
@@ -15,7 +16,8 @@ public:
     DestructiveOperationController(GtkWindow *window,
                                    GtkDirectoryList *directory_list,
                                    GtkSingleSelection *selection,
-                                   GtkWidget *status_label);
+                                   GtkWidget *status_label,
+                                   GtkMultiSelection *multi_selection = nullptr);
     ~DestructiveOperationController();
 
     DestructiveOperationController(const DestructiveOperationController &) = delete;
@@ -28,6 +30,8 @@ private:
         RestoreReplace,
         DeletePath,
         DeleteUri,
+        BatchTrash,
+        BatchDelete,
     };
 
     static void on_window_finalized(gpointer user_data, GObject *where_object_was);
@@ -65,6 +69,8 @@ private:
                          const std::string &source_path,
                          const std::string &trash_uri,
                          const std::string &original_path);
+    void start_batch(Kind kind, const std::vector<std::string> &sources);
+    [[nodiscard]] std::vector<std::string> selected_native_sources() const;
     void update_action_state();
     void close_menu();
     void show_alert(const char *title, const std::string &detail) const;
@@ -76,9 +82,12 @@ private:
                                              bool require_original) const;
 
     DirectoryMutationGuard mutation_guard_;
+    TransferProgressView progress_view_;
     GtkWindow *window_{nullptr};
     GtkDirectoryList *directory_list_{nullptr};
     GtkSingleSelection *selection_{nullptr};
+    GtkMultiSelection *multi_selection_{nullptr};
+    gulong multi_handler_{0U};
     GtkWidget *status_label_{nullptr};
     GtkWidget *menu_button_{nullptr};
     GtkWidget *popover_{nullptr};
@@ -93,6 +102,7 @@ private:
     std::string pending_source_path_;
     std::string pending_trash_uri_;
     std::string pending_original_path_;
+    std::vector<std::string> pending_sources_;
 };
 
 } // namespace infiltrator::files

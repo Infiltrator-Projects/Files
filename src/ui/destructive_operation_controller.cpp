@@ -3,6 +3,7 @@
 
 #include "../core/operation_journal.hpp"
 #include "../core/recovery_operation_engine.hpp"
+#include "../core/batch_removal_engine.hpp"
 
 #include <memory>
 #include <string>
@@ -17,6 +18,8 @@ struct DestructiveTaskData {
     std::string trash_uri;
     std::string original_path;
     std::string journal_id;
+    std::vector<std::string> sources;
+    std::shared_ptr<TransferControl> control;
 };
 
 const char *kind_name(const int kind)
@@ -59,8 +62,10 @@ DestructiveOperationController::DestructiveOperationController(
     GtkWindow *window,
     GtkDirectoryList *directory_list,
     GtkSingleSelection *selection,
-    GtkWidget *status_label)
-    : mutation_guard_(window, directory_list), window_(window), directory_list_(directory_list), selection_(selection),
+    GtkWidget *status_label, GtkMultiSelection *multi_selection)
+    : mutation_guard_(window, directory_list),
+      progress_view_(window, mutation_guard_, status_label, "Removal progress"),
+      window_(window), directory_list_(directory_list), selection_(selection), multi_selection_(multi_selection),
       status_label_(status_label)
 {
     if (window_ == nullptr || directory_list_ == nullptr || selection_ == nullptr) {
@@ -69,6 +74,13 @@ DestructiveOperationController::DestructiveOperationController(
 
     g_object_ref(directory_list_);
     g_object_ref(selection_);
+    if (multi_selection_ != nullptr) {
+        g_object_ref(multi_selection_);
+        multi_handler_ = g_signal_connect(multi_selection_, "selection-changed",
+            G_CALLBACK(+[](GtkSelectionModel *, guint, guint, gpointer data) {
+                static_cast<DestructiveOperationController *>(data)->update_action_state();
+            }), this);
+    }
 
     GtkWidget *titlebar = gtk_window_get_titlebar(window_);
     if (GTK_IS_HEADER_BAR(titlebar)) {
@@ -124,6 +136,10 @@ DestructiveOperationController::DestructiveOperationController(
 
 DestructiveOperationController::~DestructiveOperationController()
 {
+    if (multi_selection_ != nullptr) {
+        if (multi_handler_ != 0U) g_signal_handler_disconnect(multi_selection_, multi_handler_);
+        g_object_unref(multi_selection_);
+    }
     if (directory_list_ != nullptr) {
         if (location_handler_ != 0U) {
             g_signal_handler_disconnect(directory_list_, location_handler_);
@@ -218,6 +234,9 @@ void DestructiveOperationController::move_selected_to_trash()
         return;
     }
 
+    const auto sources = selected_native_sources();
+    if (sources.size() > 1U) { start_batch(Kind::BatchTrash, sources); return; }
+
     std::string source_path;
     std::string name;
     if (!selected_local_source(source_path, name)) {
@@ -252,6 +271,7 @@ void DestructiveOperationController::confirm_permanent_delete()
     pending_source_path_.clear();
     pending_trash_uri_.clear();
     pending_original_path_.clear();
+    pending_sources_.clear();
 
     if (current_location_is_trash()) {
         if (!selected_trash_source(pending_trash_uri_, pending_original_path_, name, false)) {
@@ -259,10 +279,13 @@ void DestructiveOperationController::confirm_permanent_delete()
         }
         pending_kind_ = Kind::DeleteUri;
     } else {
-        if (!selected_local_source(pending_source_path_, name)) {
+        pending_sources_ = selected_native_sources();
+        if (pending_sources_.size() > 1U) {
+            pending_kind_ = Kind::BatchDelete;
+            name = std::to_string(pending_sources_.size()) + " selected items";
+        } else if (!selected_local_source(pending_source_path_, name)) {
             return;
-        }
-        pending_kind_ = Kind::DeletePath;
+        } else pending_kind_ = Kind::DeletePath;
     }
 
     dialog_busy_ = true;
@@ -306,6 +329,7 @@ void DestructiveOperationController::on_delete_confirmed(GObject *source_object,
     const std::string source_path = self->pending_source_path_;
     const std::string trash_uri = self->pending_trash_uri_;
     const std::string original_path = self->pending_original_path_;
+    const auto sources = std::move(self->pending_sources_);
     self->pending_source_path_.clear();
     self->pending_trash_uri_.clear();
     self->pending_original_path_.clear();
@@ -321,7 +345,8 @@ void DestructiveOperationController::on_delete_confirmed(GObject *source_object,
     }
 
     if (choice == 1) {
-        self->start_operation(kind, source_path, trash_uri, original_path);
+        if (kind == Kind::BatchDelete) self->start_batch(kind, sources);
+        else self->start_operation(kind, source_path, trash_uri, original_path);
     } else {
         self->update_action_state();
     }
@@ -400,6 +425,49 @@ void DestructiveOperationController::on_restore_replace_chosen(GObject *source_o
     g_object_unref(held_window);
 }
 
+std::vector<std::string> DestructiveOperationController::selected_native_sources() const
+{
+    std::vector<std::string> sources;
+    if (multi_selection_ == nullptr) return sources;
+    GFile *parent = gtk_directory_list_get_file(directory_list_);
+    if (parent == nullptr || !g_file_is_native(parent)) return sources;
+    GListModel *model = gtk_multi_selection_get_model(multi_selection_);
+    if (model == nullptr) return sources;
+    GtkBitset *bits = gtk_selection_model_get_selection(GTK_SELECTION_MODEL(multi_selection_));
+    GtkBitsetIter iterator;
+    guint position = 0U;
+    for (gboolean valid = gtk_bitset_iter_init_first(&iterator, bits, &position);
+         valid; valid = gtk_bitset_iter_next(&iterator, &position)) {
+        auto *info = G_FILE_INFO(g_list_model_get_item(model, position));
+        const char *name = info != nullptr ? g_file_info_get_name(info) : nullptr;
+        GFile *child = name != nullptr ? g_file_get_child(parent, name) : nullptr;
+        char *path = child != nullptr ? g_file_get_path(child) : nullptr;
+        const bool available = path != nullptr;
+        if (available) sources.emplace_back(path);
+        g_free(path); g_clear_object(&child); g_clear_object(&info);
+        if (!available) { sources.clear(); break; }
+    }
+    gtk_bitset_unref(bits);
+    return sources;
+}
+
+void DestructiveOperationController::start_batch(const Kind kind, const std::vector<std::string> &sources)
+{
+    if (busy_ || sources.size() < 2U || !mutation_guard_.begin()) return;
+    auto control = std::make_shared<TransferControl>();
+    control->set_total(0U, sources.size());
+    auto *data = new DestructiveTaskData{static_cast<int>(kind), {}, {}, {}, {}, sources, control};
+    busy_ = true;
+    progress_view_.start(control);
+    update_action_state();
+    gtk_label_set_text(GTK_LABEL(status_label_), kind == Kind::BatchTrash
+                       ? "Moving selected items to Trash…" : "Permanently deleting selected items…");
+    GTask *task = g_task_new(G_OBJECT(window_), nullptr, on_operation_finished, this);
+    g_task_set_task_data(task, data, +[](gpointer value) { delete static_cast<DestructiveTaskData *>(value); });
+    g_task_run_in_thread(task, on_operation_thread);
+    g_object_unref(task);
+}
+
 void DestructiveOperationController::start_operation(const Kind kind,
                                                      const std::string &source_path,
                                                      const std::string &trash_uri,
@@ -423,7 +491,7 @@ void DestructiveOperationController::start_operation(const Kind kind,
     }
 
     auto *data = new DestructiveTaskData{
-        kind_value, source_path, trash_uri, original_path, journal_id};
+        kind_value, source_path, trash_uri, original_path, journal_id, {}, {}};
     busy_ = true;
     update_action_state();
     if (status_label_ != nullptr) {
@@ -447,6 +515,17 @@ void DestructiveOperationController::on_operation_thread(GTask *task,
     (void)source_object;
     (void)cancellable;
     const auto *data = static_cast<const DestructiveTaskData *>(task_data);
+    if (data->kind == static_cast<int>(Kind::BatchTrash) ||
+        data->kind == static_cast<int>(Kind::BatchDelete)) {
+        std::vector<std::filesystem::path> sources(data->sources.begin(), data->sources.end());
+        BatchRemovalEngine batch;
+        auto *operation = new OperationResult(batch.execute(sources,
+            data->kind == static_cast<int>(Kind::BatchTrash) ? BatchRemovalKind::Trash : BatchRemovalKind::PermanentDelete,
+            [control = data->control] { return control->cancelled(); },
+            [control = data->control] { control->add_item(); }));
+        g_task_return_pointer(task, operation, +[](gpointer value) { delete static_cast<OperationResult *>(value); });
+        return;
+    }
     RecoveryOperationEngine engine;
 
     OperationResult operation;
@@ -466,6 +545,9 @@ void DestructiveOperationController::on_operation_thread(GTask *task,
     case Kind::DeleteUri:
         operation = engine.delete_uri(data->trash_uri);
         break;
+    case Kind::BatchTrash:
+    case Kind::BatchDelete:
+        break; // Handled above by the per-item journalled batch engine.
     }
 
     OperationJournal journal;
@@ -504,6 +586,7 @@ void DestructiveOperationController::on_operation_finished(GObject *source_objec
     GError *error = nullptr;
     std::unique_ptr<OperationResult> operation(
         static_cast<OperationResult *>(g_task_propagate_pointer(task, &error)));
+    self->progress_view_.finish();
     if (!self->mutation_guard_.finish()) {
         g_clear_error(&error);
         return;
@@ -536,7 +619,7 @@ void DestructiveOperationController::on_operation_finished(GObject *source_objec
         gtk_label_set_text(GTK_LABEL(self->status_label_), operation->message.c_str());
     }
 
-    if (!operation->ok()) {
+    if (!operation->ok() && operation->status != OperationStatus::Cancelled) {
         self->show_alert(operation->status == OperationStatus::VerificationFailure
                              ? "Operation completed with a verification problem"
                              : operation->status == OperationStatus::UnsupportedCapability
@@ -564,7 +647,7 @@ void DestructiveOperationController::update_action_state()
     } else {
         std::string path;
         std::string name;
-        has_selection = selected_local_source(path, name);
+        has_selection = selected_local_source(path, name) || !selected_native_sources().empty();
     }
 
     const bool enabled = !busy_ && !dialog_busy_ && has_selection;

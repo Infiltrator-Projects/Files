@@ -138,6 +138,30 @@ int main()
         return 11;
     }
 
+    TransferControl replace_control;
+    const auto replaced = engine.execute(sources, root / "destination", BatchTransferKind::Copy,
+                                         BatchConflictPolicy::Replace, &replace_control);
+    const auto progress = replace_control.progress();
+    if (!replaced.ok() || !replaced.changed || progress.bytes_total != 11U ||
+        progress.bytes_done != progress.bytes_total || progress.items_total != 2U ||
+        progress.items_done != progress.items_total) return 12;
+
+    TransferControl replacement_cancel(+[](TransferControl &control,
+                                           const infiltrator::files::TransferProgress &p) noexcept {
+        if (p.bytes_done != 0U) control.request_cancel();
+    });
+    write_text(root / "destination" / "alpha.txt", "old alpha");
+    write_text(root / "destination" / "beta.txt", "old beta");
+    const auto stopped = engine.execute(sources, root / "destination", BatchTransferKind::Copy,
+                                        BatchConflictPolicy::Replace, &replacement_cancel);
+    std::ifstream old_alpha(root / "destination" / "alpha.txt");
+    std::ifstream old_beta(root / "destination" / "beta.txt");
+    if (stopped.status != OperationStatus::Cancelled || !stopped.changed ||
+        stopped.retained_paths.size() != 1U || !fs::exists(stopped.retained_paths.front()) ||
+        std::string(std::istreambuf_iterator<char>(old_alpha), {}) != "old alpha" ||
+        std::string(std::istreambuf_iterator<char>(old_beta), {}) != "old beta" ||
+        !fs::exists(alpha) || !fs::exists(beta) || !journal.interrupted_operations().empty()) return 13;
+
     fs::remove_all(root, cleanup_error);
     return 0;
 }

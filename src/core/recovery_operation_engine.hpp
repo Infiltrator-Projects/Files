@@ -8,6 +8,8 @@
 
 namespace infiltrator::files {
 
+class TransferControl;
+
 struct RecoveryOperationHooks {
     using ItemOperation = OperationResult (*)(const std::filesystem::path &,
                                                const std::filesystem::path &);
@@ -26,9 +28,11 @@ public:
     }
 
     [[nodiscard]] OperationResult replace_copy(const std::filesystem::path &source,
-                                               const std::filesystem::path &destination_parent) const;
+                                               const std::filesystem::path &destination_parent,
+                                               TransferControl *control = nullptr) const;
     [[nodiscard]] OperationResult replace_move(const std::filesystem::path &source,
-                                               const std::filesystem::path &destination_parent) const;
+                                               const std::filesystem::path &destination_parent,
+                                               TransferControl *control = nullptr) const;
 
     [[nodiscard]] OperationResult trash_item(const std::filesystem::path &source) const;
     [[nodiscard]] OperationResult restore_item(std::string_view trash_uri,

@@ -3,6 +3,7 @@
 #include "../src/ui/create_folder_controller.hpp"
 #include "../src/ui/item_operation_controller.hpp"
 #include "../src/ui/directory_mutation_guard.hpp"
+#include "../src/ui/clipboard_controller.hpp"
 
 #include <atomic>
 #include <thread>
@@ -17,6 +18,7 @@ struct FileManagerWindowTestAccess {
     static GtkDirectoryList *directory(FileManagerWindow &window) { return window.directory_list_; }
     static GtkSingleSelection *selection(FileManagerWindow &window) { return window.primary_selection_; }
     static GtkWidget *status(FileManagerWindow &window) { return window.status_label_; }
+    static GtkMultiSelection *multi(FileManagerWindow &window) { return window.selection_; }
     static void navigate(FileManagerWindow &window, const std::filesystem::path &path) {
         GFile *file = g_file_new_for_path(path.c_str());
         window.navigate_to(file, true);
@@ -95,6 +97,55 @@ void offer_files(FileManagerWindow &window, const std::vector<fs::path> &sources
     auto *clipboard = gdk_display_get_clipboard(gtk_widget_get_display(GTK_WIDGET(window.native_window())));
     require(gdk_clipboard_set_content(clipboard, provider), "Structured clipboard offer must succeed");
     g_object_unref(provider); g_bytes_unref(bytes);
+}
+void removal_batch(GtkApplication *application, const fs::path &root, const bool trash,
+                   const bool confirm, const bool close_before_answer)
+{
+    fs::create_directories(root);
+    std::ofstream(root / "first.txt") << "FIRST";
+    std::ofstream(root / "second.txt") << "SECOND";
+    auto *window = window_at(application, root);
+    window->install_operation_surface();
+    gtk_selection_model_select_all(GTK_SELECTION_MODEL(FileManagerWindowTestAccess::multi(*window)));
+    auto *menu = find(gtk_window_get_titlebar(window->native_window()), [](GtkWidget *widget) {
+        return GTK_IS_MENU_BUTTON(widget) && g_strcmp0(gtk_widget_get_tooltip_text(widget), "File actions") == 0;
+    });
+    const char *verb = trash ? "Move to Trash" : "Delete Permanently…";
+    auto *action = find(GTK_WIDGET(gtk_menu_button_get_popover(GTK_MENU_BUTTON(menu))), [verb](GtkWidget *widget) {
+        return GTK_IS_BUTTON(widget) && g_strcmp0(gtk_button_get_label(GTK_BUTTON(widget)), verb) == 0;
+    });
+    require(action != nullptr && gtk_widget_get_visible(action) && gtk_widget_get_sensitive(action),
+            "Trash and permanent delete must be available for a multiple selection");
+    g_signal_emit_by_name(action, "clicked");
+    if (!trash) {
+        GtkWindow *dialog = nullptr;
+        GtkWidget *answer = nullptr;
+        await([&] {
+            auto *toplevels = gtk_window_get_toplevels();
+            for (guint i = 0; i < g_list_model_get_n_items(toplevels); ++i) {
+                auto *candidate = GTK_WINDOW(g_list_model_get_item(toplevels, i));
+                auto *button = find(GTK_WIDGET(candidate), [confirm](GtkWidget *widget) {
+                    return GTK_IS_BUTTON(widget) && g_strcmp0(gtk_button_get_label(GTK_BUTTON(widget)),
+                        confirm ? "Delete Permanently" : "Cancel") == 0;
+                });
+                if (button != nullptr) { dialog = candidate; answer = button; return true; }
+                g_object_unref(candidate);
+            }
+            return false;
+        });
+        require(fs::exists(root / "first.txt") && fs::exists(root / "second.txt"),
+                "No item may be deleted before explicit confirmation");
+        g_signal_emit_by_name(answer, "clicked");
+        g_object_unref(dialog);
+        if (!close_before_answer) {
+            if (confirm) await([&] { return !fs::exists(root / "first.txt") && !fs::exists(root / "second.txt"); });
+            else while (g_main_context_iteration(nullptr, FALSE)) {}
+        }
+    }
+    close_and_drain(window);
+    const bool removed = trash || (confirm && !close_before_answer);
+    require(fs::exists(root / "first.txt") != removed && fs::exists(root / "second.txt") != removed,
+            "A batch must honour its confirmation decision, and late decisions must be refused");
 }
 void conflict_completion(GtkApplication *application, const fs::path &root,
                          const char *choice, const bool cut, const bool close_early,
@@ -210,6 +261,8 @@ int main()
     const fs::path root(temporary); g_free(temporary);
     g_setenv("XDG_CONFIG_HOME", (root / "config").c_str(), TRUE);
     g_setenv("XDG_STATE_HOME", (root / "state").c_str(), TRUE);
+    fs::create_directories(root / "data");
+    g_setenv("XDG_DATA_HOME", (root / "data").c_str(), TRUE);
     g_setenv("GTK_A11Y", "none", TRUE);
     g_setenv("GSETTINGS_BACKEND", "memory", TRUE);
     gtk_init();
@@ -272,6 +325,42 @@ int main()
                                         choice, cut, close_early);
             }
         }
+
+        const auto drop_source = root / "drop-source";
+        const auto drop_destination = root / "drop-destination";
+        fs::create_directories(drop_source);
+        fs::create_directories(drop_destination);
+        std::ofstream(drop_source / "large.dat") << "payload";
+        fs::resize_file(drop_source / "large.dat", 64U * 1024U * 1024U);
+        window = window_at(application, drop_destination);
+        window->install_operation_surface();
+        auto *clipboard_controller = static_cast<ClipboardController *>(
+            g_object_get_data(G_OBJECT(window->native_window()), "ifm-clipboard-controller"));
+        require(clipboard_controller != nullptr && clipboard_controller->transfer_from_drop(
+                    {(drop_source / "large.dat").string()}, drop_destination.string()),
+                "Drag and drop must start the shared clipboard transfer");
+        auto *progress = find(gtk_window_get_titlebar(window->native_window()), [](GtkWidget *widget) {
+            return GTK_IS_PROGRESS_BAR(widget) &&
+                g_strcmp0(gtk_widget_get_tooltip_text(widget), "Clipboard transfer progress") == 0;
+        });
+        require(progress != nullptr && gtk_widget_get_visible(gtk_widget_get_parent(progress)),
+                "Paste and drag transfers must display progress immediately");
+        auto *cancel = find(gtk_widget_get_parent(progress), [](GtkWidget *widget) {
+            return GTK_IS_BUTTON(widget) &&
+                g_strcmp0(gtk_widget_get_tooltip_text(widget), "Cancel at the next safe boundary") == 0;
+        });
+        require(cancel != nullptr, "Clipboard transfer must expose cancellation");
+        g_signal_emit_by_name(cancel, "clicked");
+        await([&] { return !gtk_widget_get_visible(gtk_widget_get_parent(progress)); });
+        require(fs::exists(drop_source / "large.dat") &&
+                !fs::exists(drop_destination / "large.dat"),
+                "Cancelling a clipboard transfer must retain the source and avoid a partial public destination");
+        close_and_drain(window);
+
+        removal_batch(application, root / "batch-delete-confirmed", false, true, false);
+        removal_batch(application, root / "batch-delete-cancelled", false, false, false);
+        removal_batch(application, root / "batch-delete-late", false, true, true);
+        removal_batch(application, root / "batch-trash", true, true, false);
 
         window = window_at(application, folder);
         auto *directory = FileManagerWindowTestAccess::directory(*window);

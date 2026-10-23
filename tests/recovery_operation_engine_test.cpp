@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "recovery_operation_engine.hpp"
+#include "transfer_operation_engine.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -13,6 +14,8 @@ using infiltrator::files::OperationPhase;
 using infiltrator::files::OperationResult;
 using infiltrator::files::RecoveryOperationEngine;
 using infiltrator::files::RecoveryOperationHooks;
+using infiltrator::files::TransferControl;
+using infiltrator::files::TransferProgress;
 
 namespace {
 
@@ -84,6 +87,39 @@ int main()
     fs::create_directories(root);
 
     RecoveryOperationEngine engine;
+
+    // Cancellation must preserve both the source and the previous destination,
+    // including a request received after replacement has staged the old item.
+    const fs::path cancel_source = root / "cancel-source";
+    const fs::path cancel_destination = root / "cancel-destination";
+    fs::create_directories(cancel_source);
+    fs::create_directories(cancel_destination);
+    const std::string payload(2U * 1024U * 1024U, 'x');
+    if (!write_text(cancel_source / "payload", payload) ||
+        !write_text(cancel_destination / "payload", "previous")) return 19;
+    for (bool move : {false, true}) {
+        TransferControl pre_cancelled;
+        pre_cancelled.request_cancel();
+        const auto cancelled = move
+            ? engine.replace_move(cancel_source / "payload", cancel_destination, &pre_cancelled)
+            : engine.replace_copy(cancel_source / "payload", cancel_destination, &pre_cancelled);
+        if (cancelled.status != OperationStatus::Cancelled || cancelled.changed ||
+            read_text(cancel_source / "payload") != payload ||
+            read_text(cancel_destination / "payload") != "previous") return 20;
+    }
+    TransferControl during_copy(+[](TransferControl &control, const TransferProgress &progress) noexcept {
+        if (progress.bytes_done != 0U) control.request_cancel();
+    });
+    const auto cancelled_replacement = engine.replace_copy(
+        cancel_source / "payload", cancel_destination, &during_copy);
+    if (cancelled_replacement.status != OperationStatus::Cancelled ||
+        !cancelled_replacement.changed || cancelled_replacement.retained_paths.size() != 1U ||
+        !fs::exists(cancelled_replacement.retained_paths.front()) ||
+        cancelled_replacement.message.find(cancelled_replacement.retained_paths.front().string()) ==
+            std::string::npos ||
+        read_text(cancel_source / "payload") != payload ||
+        read_text(cancel_destination / "payload") != "previous")
+        return 21;
 
     const fs::path copy_source_dir = root / "copy-source";
     const fs::path copy_destination_dir = root / "copy-destination";

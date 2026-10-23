@@ -314,11 +314,15 @@ OperationResult preflight_parent(const std::filesystem::path &source,
 bool scan_totals(const std::filesystem::path &source,
                  std::uintmax_t &bytes,
                  std::uintmax_t &items,
-                 std::error_code &error)
+                 std::error_code &error, TransferControl *control)
 {
     bytes = 0;
     items = 0;
     error.clear();
+    if (control != nullptr && control->cancelled()) {
+        error = std::make_error_code(std::errc::operation_canceled);
+        return false;
+    }
     const auto status = std::filesystem::symlink_status(source, error);
     if (error) {
         return false;
@@ -343,6 +347,10 @@ bool scan_totals(const std::filesystem::path &source,
     for (std::filesystem::recursive_directory_iterator iterator(source, error), end;
          !error && iterator != end;
          iterator.increment(error)) {
+        if (control != nullptr && control->cancelled()) {
+            error = std::make_error_code(std::errc::operation_canceled);
+            return false;
+        }
         if (!checked_add_uintmax(1U, items)) {
             error = std::make_error_code(std::errc::value_too_large);
             return false;
@@ -500,7 +508,8 @@ OperationResult copy_exact(const std::filesystem::path &source,
     if (control != nullptr && !control->has_batch_totals()) {
         std::uintmax_t bytes = 0;
         std::uintmax_t items = 0;
-        if (!scan_totals(source, bytes, items, error)) {
+        if (!scan_totals(source, bytes, items, error, control)) {
+            if (error == std::errc::operation_canceled) return cancelled_result(destination);
             return failure(OperationEngine::status_for_error(error),
                            OperationPhase::Preflight,
                            destination,
@@ -992,6 +1001,7 @@ OperationResult TransferOperationEngine::copy_item(const std::filesystem::path &
                                                     const ConflictPolicy policy,
                                                     TransferControl *control) const
 {
+    if (control != nullptr && control->cancelled()) return cancelled_result({});
     OperationResult preflight = preflight_parent(source, destination_parent);
     if (!preflight.ok()) {
         return preflight;
@@ -1047,6 +1057,7 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
                                                     const ConflictPolicy policy,
                                                     TransferControl *control) const
 {
+    if (control != nullptr && control->cancelled()) return cancelled_result({});
     OperationResult preflight = preflight_parent(source, destination_parent);
     if (!preflight.ok()) {
         return preflight;
@@ -1097,11 +1108,14 @@ OperationResult TransferOperationEngine::move_item(const std::filesystem::path &
 
     std::uintmax_t bytes = 0;
     std::uintmax_t items = 0;
-    if (control != nullptr && scan_totals(source, bytes, items, error)) {
-        control->set_total(bytes, items);
-        if (control->cancelled()) {
-            return cancelled_result(decision.destination);
+    if (control != nullptr) {
+        if (!scan_totals(source, bytes, items, error, control)) {
+            if (error == std::errc::operation_canceled) return cancelled_result(decision.destination);
+            return failure(OperationEngine::status_for_error(error), OperationPhase::Preflight,
+                           decision.destination, "The selected item could not be measured safely.");
         }
+        control->set_total(bytes, items);
+        if (control->cancelled()) return cancelled_result(decision.destination);
     }
     error.clear();
     const auto moved_identity = destination_ownership::identity_for(source, error);

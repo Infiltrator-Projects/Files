@@ -2,6 +2,7 @@
 #pragma once
 
 #include "directory_mutation_guard.hpp"
+#include "transfer_progress_view.hpp"
 
 #include <gtk/gtk.h>
 
@@ -40,7 +41,6 @@ private:
     static void on_rename_clicked(GtkButton *button, gpointer user_data);
     static void on_copy_clicked(GtkButton *button, gpointer user_data);
     static void on_move_clicked(GtkButton *button, gpointer user_data);
-    static void on_cancel_operation_clicked(GtkButton *button, gpointer user_data);
     static gboolean on_key_pressed(GtkEventControllerKey *controller,
                                    guint keyval,
                                    guint keycode,
@@ -70,7 +70,6 @@ private:
     static void on_operation_finished(GObject *source_object,
                                       GAsyncResult *result,
                                       gpointer user_data);
-    static gboolean on_progress_tick(gpointer user_data);
 
     void show_rename_dialog();
     void submit_rename();
@@ -85,7 +84,6 @@ private:
                          const std::string &new_name);
     void set_busy(bool busy);
     void update_action_state();
-    void update_progress();
     void select_pending_item();
     void close_menu();
     void show_alert(const char *title, const std::string &detail) const;
@@ -95,6 +93,7 @@ private:
     [[nodiscard]] static bool kind_is_transfer(Kind kind) noexcept;
 
     DirectoryMutationGuard mutation_guard_;
+    TransferProgressView progress_view_;
     GtkWindow *window_{nullptr};
     GtkDirectoryList *directory_list_{nullptr};
     GtkSingleSelection *selection_{nullptr};
@@ -104,16 +103,12 @@ private:
     GtkWidget *rename_button_{nullptr};
     GtkWidget *copy_button_{nullptr};
     GtkWidget *move_button_{nullptr};
-    GtkWidget *operation_box_{nullptr};
-    GtkWidget *progress_bar_{nullptr};
-    GtkWidget *cancel_operation_button_{nullptr};
     GtkWidget *rename_dialog_{nullptr};
     GtkWidget *rename_entry_{nullptr};
     GtkWidget *rename_message_{nullptr};
     gulong selection_handler_{0U};
     gulong location_handler_{0U};
     gulong items_handler_{0U};
-    guint progress_source_id_{0U};
     bool busy_{false};
     bool chooser_busy_{false};
     Kind chooser_kind_{Kind::Copy};
