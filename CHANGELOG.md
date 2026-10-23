@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.56 — 2026-10-23
+
+- Refuse queued clipboard conflict choices after their originating window is removed from the application.
+- Require successful mutation-lifetime admission before every controller dispatches a worker; release admission after journal setup failure.
+- Qualify live and late Skip, Keep Both and Replace continuations for both Copy and Cut using the actual clipboard/dialog controllers, and reject duplicate or revoked mutation leases.
+- Align the maintained temporal integration ledger with Common's ordinary host Gregorian adapter and optional chronology resources.
+
 ## 0.1.55 — 2026-10-23
 
 - Flush private copied data, metadata and directory entries before publication, and the destination parent before cross-volume source removal. Flush failures retain the original and report exact recovery paths; cancellation remains effective before publication.

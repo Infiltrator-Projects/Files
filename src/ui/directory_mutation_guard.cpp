@@ -67,9 +67,9 @@ DirectoryMutationGuard::~DirectoryMutationGuard() { (void)finish(); }
 
 bool DirectoryMutationGuard::alive() const { return state_ != nullptr && state_->alive; }
 
-void DirectoryMutationGuard::begin()
+bool DirectoryMutationGuard::begin()
 {
-    if (active_ || !alive()) return;
+    if (active_ || !alive()) return false;
     active_ = true;
     if (state_->users++ == 0U) {
         // A GTask's window reference does not keep GApplication's main loop
@@ -79,6 +79,7 @@ void DirectoryMutationGuard::begin()
         state_->restore_monitor = gtk_directory_list_get_monitored(state_->directory);
         gtk_directory_list_set_monitored(state_->directory, FALSE);
     }
+    return true;
 }
 
 bool DirectoryMutationGuard::finish()

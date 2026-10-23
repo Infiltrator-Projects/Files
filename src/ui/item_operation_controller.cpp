@@ -602,7 +602,7 @@ void ItemOperationController::start_operation(const Kind kind,
                                               const std::string &destination_parent,
                                               const std::string &new_name)
 {
-    if (busy_ || source_path.empty() || window_ == nullptr) {
+    if (busy_ || source_path.empty() || window_ == nullptr || !mutation_guard_.begin()) {
         return;
     }
 
@@ -614,6 +614,7 @@ void ItemOperationController::start_operation(const Kind kind,
                                                  source_path,
                                                  journal_destination);
     if (journal_id.empty()) {
+        (void)mutation_guard_.finish();
         show_alert("File operation",
                    "The durable operation journal could not be written, so the mutation was not started.");
         return;
@@ -633,7 +634,6 @@ void ItemOperationController::start_operation(const Kind kind,
         gtk_label_set_text(GTK_LABEL(status_label_), busy_text(data->kind));
     }
 
-    mutation_guard_.begin();
     GTask *task = g_task_new(G_OBJECT(window_), nullptr,
                              &ItemOperationController::on_operation_finished, this);
     g_task_set_task_data(task, data, [](gpointer value) {

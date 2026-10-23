@@ -29,6 +29,7 @@ namespace fs = std::filesystem;
 namespace {
 std::thread::id main_thread;
 std::atomic_bool delay_worker_flushes{false};
+std::atomic_uint started_worker_flushes{0U};
 std::atomic_uint completed_worker_flushes{0U};
 void require(bool condition, const char *message) { if (!condition) throw std::runtime_error(message); }
 void await(const std::function<bool()> &ready)
@@ -42,6 +43,7 @@ void await(const std::function<bool()> &ready)
 }
 GtkWidget *find(GtkWidget *root, const std::function<bool(GtkWidget *)> &matches)
 {
+    if (root == nullptr) return nullptr;
     if (matches(root)) return root;
     for (auto *child = gtk_widget_get_first_child(root); child != nullptr;
          child = gtk_widget_get_next_sibling(child))
@@ -65,6 +67,92 @@ void close_and_drain(FileManagerWindow *window)
     gtk_window_destroy(window->native_window());
     await([&] { return finalized; });
     while (g_main_context_iteration(nullptr, FALSE)) {}
+}
+GtkWidget *paste_action(FileManagerWindow &window)
+{
+    auto *menu = find(gtk_window_get_titlebar(window.native_window()), [](GtkWidget *widget) {
+        return GTK_IS_MENU_BUTTON(widget) &&
+               g_strcmp0(gtk_widget_get_tooltip_text(widget), "File actions") == 0;
+    });
+    require(menu != nullptr, "File actions must exist");
+    auto *paste = find(GTK_WIDGET(gtk_menu_button_get_popover(GTK_MENU_BUTTON(menu))),
+        [](GtkWidget *widget) {
+            return GTK_IS_BUTTON(widget) && g_strcmp0(gtk_button_get_label(GTK_BUTTON(widget)), "Paste") == 0;
+        });
+    require(paste != nullptr, "Paste action must exist");
+    return paste;
+}
+void offer_files(FileManagerWindow &window, const std::vector<fs::path> &sources, const bool cut)
+{
+    std::string offer = cut ? "cut\n" : "copy\n";
+    for (const auto &source : sources) {
+        char *uri = g_filename_to_uri(source.c_str(), nullptr, nullptr);
+        require(uri != nullptr, "Clipboard source must have a local URI");
+        offer += uri; offer += '\n'; g_free(uri);
+    }
+    auto *bytes = g_bytes_new(offer.data(), offer.size());
+    auto *provider = gdk_content_provider_new_for_bytes("x-special/gnome-copied-files", bytes);
+    auto *clipboard = gdk_display_get_clipboard(gtk_widget_get_display(GTK_WIDGET(window.native_window())));
+    require(gdk_clipboard_set_content(clipboard, provider), "Structured clipboard offer must succeed");
+    g_object_unref(provider); g_bytes_unref(bytes);
+}
+void conflict_completion(GtkApplication *application, const fs::path &root,
+                         const char *choice, const bool cut, const bool close_early,
+                         const bool close_during_work = false)
+{
+    const auto source = root / "source", destination = root / "destination";
+    fs::create_directories(source); fs::create_directories(destination);
+    std::ofstream(source / "same.txt") << "NEW";
+    std::ofstream(source / "other.txt") << "OTHER";
+    std::ofstream(destination / "same.txt") << "OLD";
+    auto *window = window_at(application, destination);
+    window->install_operation_surface();
+    auto *paste = paste_action(*window);
+    offer_files(*window, {source / "same.txt", source / "other.txt"}, cut);
+    g_signal_emit_by_name(paste, "clicked");
+    GtkWindow *dialog = nullptr;
+    GtkWidget *answer = nullptr;
+    await([&] {
+        auto *toplevels = gtk_window_get_toplevels();
+        for (guint i = 0; i < g_list_model_get_n_items(toplevels); ++i) {
+            auto *candidate = GTK_WINDOW(g_list_model_get_item(toplevels, i));
+            auto *button = find(GTK_WIDGET(candidate), [choice](GtkWidget *widget) {
+                return GTK_IS_BUTTON(widget) &&
+                       g_strcmp0(gtk_button_get_label(GTK_BUTTON(widget)), choice) == 0;
+            });
+            if (button != nullptr) { dialog = candidate; answer = button; return true; }
+            g_object_unref(candidate);
+        }
+        return false;
+    });
+    g_signal_emit_by_name(answer, "clicked");
+    g_object_unref(dialog);
+    if (close_during_work) {
+        // Let the live conflict continuation acquire its lease and enter a
+        // delayed worker flush, then close the actual last application window.
+        auto *native = GTK_WINDOW(g_object_ref(window->native_window()));
+        g_timeout_add_full(G_PRIORITY_DEFAULT, 1, +[](gpointer value) -> gboolean {
+            if (started_worker_flushes.load() == 0U) return G_SOURCE_CONTINUE;
+            gtk_window_destroy(GTK_WINDOW(value));
+            return G_SOURCE_REMOVE;
+        }, native, g_object_unref);
+        return;
+    }
+    if (!close_early)
+        await([&] { return fs::exists(destination / "other.txt") && gtk_widget_get_sensitive(paste); });
+    close_and_drain(window);
+    std::ifstream original(destination / "same.txt");
+    const std::string contents{std::istreambuf_iterator<char>(original), {}};
+    if (close_early) {
+        require(fs::exists(source / "same.txt") && fs::exists(source / "other.txt") &&
+                contents == "OLD" && !fs::exists(destination / "other.txt") &&
+                !fs::exists(destination / "same (copy).txt"),
+                "A late clipboard conflict choice must never create, replace or move files");
+    } else {
+        require(contents == (std::string(choice) == "Replace Conflicts" ? "NEW" : "OLD"),
+                "Live clipboard conflict resolution must retain its chosen policy");
+        require(!cut || !fs::exists(source / "other.txt"), "A live Cut continuation must complete its move");
+    }
 }
 void create_then_close(GtkApplication *application, const fs::path &folder, const bool file,
                        const bool drain = true)
@@ -109,7 +197,7 @@ extern "C" int __real_fsync(int);
 extern "C" int __wrap_fsync(const int fd)
 {
     const bool worker = delay_worker_flushes.load() && std::this_thread::get_id() != main_thread;
-    if (worker) g_usleep(100000);
+    if (worker) { ++started_worker_flushes; g_usleep(100000); }
     const int result = __real_fsync(fd);
     if (worker && result == 0) ++completed_worker_flushes;
     return result;
@@ -176,21 +264,32 @@ int main()
         require(!fs::exists(paste_folder / "renamed.txt"),
                 "Clipboard completion after window destruction must not start a mutation");
 
+        unsigned conflict_index = 0U;
+        for (const bool cut : {false, true}) {
+            for (const char *choice : {"Skip Conflicts", "Keep Both", "Replace Conflicts"}) {
+                for (const bool close_early : {false, true})
+                    conflict_completion(application, root / ("conflict-" + std::to_string(conflict_index++)),
+                                        choice, cut, close_early);
+            }
+        }
+
         window = window_at(application, folder);
         auto *directory = FileManagerWindowTestAccess::directory(*window);
         DirectoryMutationGuard first(window->native_window(), directory);
         DirectoryMutationGuard second(window->native_window(), directory);
-        first.begin(); second.begin();
+        require(first.begin() && second.begin(), "Live mutation leases must be admitted");
+        require(!first.begin(), "A controller must not admit a second worker on one lease");
         require(!gtk_directory_list_get_monitored(directory), "Concurrent mutations must pause monitoring");
         require(first.finish() && !gtk_directory_list_get_monitored(directory),
                 "One completion must not restart monitoring while another mutation is active");
         require(second.finish() && gtk_directory_list_get_monitored(directory),
                 "The final completion must restart monitoring and enumerate results");
         await([&] { return !gtk_directory_list_is_loading(directory); });
-        first.begin();
+        require(first.begin(), "A completed lease must be reusable");
         close_and_drain(window);
         require(!first.finish() && !gtk_directory_list_get_monitored(directory),
                 "A destroyed window must never restart directory monitoring");
+        require(!first.begin() && !second.begin(), "A destroyed window must refuse new mutations");
 
         // Exercise the actual application loop, not a test-owned drain loop.
         // The worker is deliberately still flushing END after the final window
@@ -207,6 +306,24 @@ int main()
         require(status == 0 && completed_worker_flushes.load() >= 2U,
                 "Closing the last window must wait for durable operation completion");
         g_object_unref(last_application);
+
+        const auto last_clipboard = root / "last-clipboard";
+        auto *clipboard_application = gtk_application_new(
+            "org.infiltrator.Files.LastClipboardTest", G_APPLICATION_NON_UNIQUE);
+        g_signal_connect(clipboard_application, "activate", G_CALLBACK(+[](GtkApplication *app, gpointer data) {
+            conflict_completion(app, *static_cast<const fs::path *>(data),
+                                "Replace Conflicts", true, false, true);
+        }), const_cast<fs::path *>(&last_clipboard));
+        started_worker_flushes.store(0U);
+        completed_worker_flushes.store(0U);
+        delay_worker_flushes.store(true);
+        const int clipboard_status = g_application_run(G_APPLICATION(clipboard_application), 0, nullptr);
+        delay_worker_flushes.store(false);
+        require(clipboard_status == 0 && completed_worker_flushes.load() >= 2U &&
+                fs::exists(last_clipboard / "destination" / "other.txt") &&
+                !fs::exists(last_clipboard / "source" / "other.txt"),
+                "An admitted clipboard conflict transfer must finish before the last-window loop exits");
+        g_object_unref(clipboard_application);
     } catch (const std::exception &error) {
         std::cerr << error.what() << '\n';
         return 1;

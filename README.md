@@ -146,6 +146,7 @@ It currently provides:
 - asynchronous execution of mutation work so filesystem operations do not block the GTK main loop;
 - monitored refresh and automatic selection of newly created, renamed, copied or moved single items when their result appears in the current view;
 - one window-owned directory-monitor lease shared by mutation controllers, with late completion isolated from disposed controls and active work holding the application until its durable result is consumed;
+- successful lifetime admission required before worker dispatch, including clipboard conflict continuations after Copy or Cut;
 - separate creation, single-item operation, batch operation, clipboard, drag/drop transport, destructive/recovery, journal-inspection and theme controllers; window-owned navigation, bookmark, rename-presentation and thumbnail bindings remain separate from the durable file mutation engines;
 - the full `InfiltratrCommon::Common` build dependency on InfiltratorOS/POSIX, making Common's POSIX/state/I/O contracts available to the non-UI layers as they are introduced; and
 - a hosted build/test gate on every main-branch update, including headless GTK window lifetime, interaction-surface and workspace/tab/bookmark/inline-rename checks, sorted selection, mount-row identity/focus and fresh-profile policy monitoring, mounted-place identity qualification, batch preflight/policy/progress/cancellation, interrupted-journal recovery and permission/timestamp preservation qualification.

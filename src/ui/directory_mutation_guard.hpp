@@ -16,7 +16,9 @@ public:
     DirectoryMutationGuard(const DirectoryMutationGuard &) = delete;
     DirectoryMutationGuard &operator=(const DirectoryMutationGuard &) = delete;
 
-    void begin();
+    // A worker may be dispatched only after admission succeeds. A reference
+    // to the native window is not authority to revive a removed window.
+    [[nodiscard]] bool begin();
     [[nodiscard]] bool finish();
     [[nodiscard]] bool alive() const;
 

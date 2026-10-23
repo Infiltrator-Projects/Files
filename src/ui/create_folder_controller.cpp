@@ -273,10 +273,16 @@ void CreateFolderController::submit_dialog()
         return;
     }
 
+    if (!mutation_guard_.begin()) {
+        g_free(path);
+        g_free(uri);
+        return;
+    }
     OperationJournal journal;
     const std::string kind = creating_file_ ? "create-empty-file" : "create-folder";
     const std::string journal_id = journal.begin(kind, path, name);
     if (journal_id.empty()) {
+        (void)mutation_guard_.finish();
         g_free(path);
         g_free(uri);
         show_alert("New Folder",
@@ -294,7 +300,6 @@ void CreateFolderController::submit_dialog()
         gtk_label_set_text(GTK_LABEL(status_label_), data->file ? "Creating file…" : "Creating folder…");
     }
 
-    mutation_guard_.begin();
     GTask *task = g_task_new(G_OBJECT(window_), nullptr,
                              &CreateFolderController::on_create_folder_finished, this);
     g_task_set_task_data(task, data, [](gpointer value) {

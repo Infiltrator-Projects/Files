@@ -405,7 +405,7 @@ void DestructiveOperationController::start_operation(const Kind kind,
                                                      const std::string &trash_uri,
                                                      const std::string &original_path)
 {
-    if (busy_ || window_ == nullptr) {
+    if (busy_ || window_ == nullptr || !mutation_guard_.begin()) {
         return;
     }
 
@@ -416,6 +416,7 @@ void DestructiveOperationController::start_operation(const Kind kind,
                                                  journal_source,
                                                  original_path);
     if (journal_id.empty()) {
+        (void)mutation_guard_.finish();
         show_alert("File operation",
                    "The durable operation journal could not be written, so the mutation was not started.");
         return;
@@ -429,7 +430,6 @@ void DestructiveOperationController::start_operation(const Kind kind,
         gtk_label_set_text(GTK_LABEL(status_label_), busy_text(data->kind));
     }
 
-    mutation_guard_.begin();
     GTask *task = g_task_new(G_OBJECT(window_), nullptr,
                              &DestructiveOperationController::on_operation_finished, this);
     g_task_set_task_data(task, data, [](gpointer value) {

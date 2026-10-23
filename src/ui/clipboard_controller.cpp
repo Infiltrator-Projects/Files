@@ -512,7 +512,7 @@ void ClipboardController::on_clipboard_text_read(GObject *source_object,
 bool ClipboardController::transfer_from_drop(const std::vector<std::string> &sources,
                                              const std::string &destination)
 {
-    if (busy_ || reading_external_clipboard_ || window_ == nullptr ||
+    if (!mutation_guard_.alive() || busy_ || reading_external_clipboard_ || window_ == nullptr ||
         sources.empty() || destination.empty()) return false;
     paste_sources(Mode::Copy, sources, destination, BatchConflictPolicy::Fail);
     return true;
@@ -524,7 +524,7 @@ void ClipboardController::paste_sources(const Mode mode,
                                         const BatchConflictPolicy policy)
 {
     if (busy_ || sources.empty() || destination_parent.empty() || mode == Mode::None ||
-        window_ == nullptr) {
+        window_ == nullptr || !mutation_guard_.begin()) {
         return;
     }
 
@@ -534,8 +534,6 @@ void ClipboardController::paste_sources(const Mode mode,
         sources,
         destination_parent,
     };
-
-    mutation_guard_.begin();
 
     busy_ = true;
     update_action_state();
@@ -639,7 +637,7 @@ void ClipboardController::prompt_conflict(const Mode mode,
                                           const std::string &destination_parent,
                                           const std::string &detail)
 {
-    if (window_ == nullptr || sources.empty() || destination_parent.empty()) {
+    if (!mutation_guard_.alive() || window_ == nullptr || sources.empty() || destination_parent.empty()) {
         return;
     }
 
@@ -673,6 +671,11 @@ void ClipboardController::on_conflict_chosen(GObject *source_object,
     GError *error = nullptr;
     const int choice = gtk_alert_dialog_choose_finish(
         GTK_ALERT_DIALOG(source_object), result, &error);
+    if (!self->mutation_guard_.alive()) {
+        g_clear_error(&error);
+        g_object_unref(held_window);
+        return;
+    }
 
     PendingConflict pending = std::move(self->pending_conflict_);
     self->pending_conflict_ = {};

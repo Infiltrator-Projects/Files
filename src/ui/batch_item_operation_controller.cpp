@@ -359,7 +359,8 @@ void BatchItemOperationController::start_operation(
     const std::string &destination_parent,
     const BatchConflictPolicy policy)
 {
-    if (busy_ || sources.size() < 2U || destination_parent.empty() || window_ == nullptr) {
+    if (busy_ || sources.size() < 2U || destination_parent.empty() || window_ == nullptr ||
+        !mutation_guard_.begin()) {
         return;
     }
 
@@ -379,7 +380,6 @@ void BatchItemOperationController::start_operation(
         gtk_label_set_text(GTK_LABEL(status_label_), status.c_str());
     }
 
-    mutation_guard_.begin();
     GTask *task = g_task_new(G_OBJECT(window_), nullptr,
                              &BatchItemOperationController::on_operation_finished, this);
     g_task_set_task_data(task, data, [](gpointer value) {
