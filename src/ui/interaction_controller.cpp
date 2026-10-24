@@ -436,6 +436,8 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
                     ActionScope::AnySelection, proxies);
         add_command(tools, "Copy tag catalogue as TSV", "export-tags",
                     ActionScope::Always, proxies);
+        add_command(tools, "Import tag catalogue from TSV…", "import-tags",
+                    ActionScope::Always, proxies);
         preview_actions_.push_back(add_command(
             tools, "Quick Look", "quick-preview",
             ActionScope::SingleSelection, proxies));
@@ -753,6 +755,8 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
         self->inspect_primary();
     else if (g_strcmp0(command, "tag-selected") == 0)
         self->show_tags_dialog();
+    else if (g_strcmp0(command, "import-tags") == 0)
+        self->show_import_tags_dialog();
     else if (g_strcmp0(command, "export-tags") == 0) {
         const TagCatalogue catalogue = load_tag_catalogue();
         if (catalogue.writable) {
@@ -802,6 +806,87 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
     self->close_popovers();
 }
 
+
+
+void InteractionController::show_import_tags_dialog()
+{
+    if (window_ == nullptr) return;
+    GtkWidget *dialog = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(dialog), "Import tag catalogue");
+    gtk_window_set_transient_for(GTK_WINDOW(dialog), window_);
+    gtk_window_set_destroy_with_parent(GTK_WINDOW(dialog), TRUE);
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 640, 430);
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    for (auto margin : {gtk_widget_set_margin_top, gtk_widget_set_margin_bottom,
+                        gtk_widget_set_margin_start, gtk_widget_set_margin_end})
+        margin(box, 16);
+    gtk_window_set_child(GTK_WINDOW(dialog), box);
+    GtkWidget *label = gtk_label_new(
+        "Paste an exact exported TSV table (File URI and Tag columns).\n"
+        "Import replaces the entire derived tag catalogue only after full validation; "
+        "it never renames or changes user files. Export a backup first.");
+    gtk_label_set_wrap(GTK_LABEL(label), TRUE);
+    gtk_label_set_xalign(GTK_LABEL(label), 0);
+    gtk_box_append(GTK_BOX(box), label);
+    GtkWidget *scroller = gtk_scrolled_window_new();
+    gtk_widget_set_vexpand(scroller, TRUE);
+    gtk_box_append(GTK_BOX(box), scroller);
+    GtkWidget *entry = gtk_text_view_new();
+    gtk_text_view_set_monospace(GTK_TEXT_VIEW(entry), TRUE);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroller), entry);
+    GtkWidget *notice = gtk_label_new("");
+    gtk_widget_set_halign(notice, GTK_ALIGN_START);
+    gtk_label_set_wrap(GTK_LABEL(notice), TRUE);
+    gtk_box_append(GTK_BOX(box), notice);
+    GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_set_halign(actions, GTK_ALIGN_END);
+    gtk_box_append(GTK_BOX(box), actions);
+    GtkWidget *cancel = gtk_button_new_with_label("Cancel");
+    GtkWidget *apply = gtk_button_new_with_label("Replace tag catalogue");
+    gtk_widget_add_css_class(apply, "destructive-action");
+    gtk_box_append(GTK_BOX(actions), cancel);
+    gtk_box_append(GTK_BOX(actions), apply);
+    struct ImportData {
+        GWeakRef owner;
+        GtkWidget *editor{nullptr};
+        GtkWidget *notice{nullptr};
+        ImportData(GtkWindow *window, GtkWidget *text, GtkWidget *feedback)
+            : editor(text), notice(feedback) { g_weak_ref_init(&owner, G_OBJECT(window)); }
+        ~ImportData() { g_weak_ref_clear(&owner); }
+    };
+    g_object_set_data_full(G_OBJECT(dialog), "ifm-tag-import",
+        new ImportData(window_, entry, notice),
+        [](gpointer raw) { delete static_cast<ImportData *>(raw); });
+    g_signal_connect_swapped(cancel, "clicked", G_CALLBACK(gtk_window_destroy), dialog);
+    g_signal_connect(apply, "clicked", G_CALLBACK((+[](GtkButton *, gpointer raw) {
+        GtkWindow *dialog = GTK_WINDOW(raw);
+        auto *state = static_cast<ImportData *>(
+            g_object_get_data(G_OBJECT(dialog), "ifm-tag-import"));
+        if (state == nullptr) return;
+        GtkWindow *owner = GTK_WINDOW(g_weak_ref_get(&state->owner));
+        if (owner == nullptr) return;
+        if (gtk_window_get_application(owner) == nullptr) {
+            g_object_unref(owner); return;
+        }
+        GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(state->editor));
+        GtkTextIter begin, end;
+        gtk_text_buffer_get_bounds(buffer, &begin, &end);
+        char *contents = gtk_text_buffer_get_text(buffer, &begin, &end, FALSE);
+        std::string error;
+        const bool imported = contents != nullptr &&
+            import_tags_tsv(contents, error);
+        g_free(contents);
+        if (imported) {
+            gtk_window_destroy(dialog);
+        } else {
+            gtk_label_set_text(GTK_LABEL(state->notice),
+                error.empty() ? "The pasted catalogue is invalid." : error.c_str());
+        }
+        g_object_unref(owner);
+    })), dialog);
+    gtk_window_present(GTK_WINDOW(dialog));
+}
 
 void InteractionController::show_selection_pattern_dialog()
 {
