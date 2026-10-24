@@ -73,6 +73,7 @@ void ThumbnailCache::bind(GtkImage *image, GFileInfo *info, GFile *parent,
     // A recycled GTK cell must never receive a completion from its former item.
     g_object_set_data_full(G_OBJECT(image), "ifm-thumb-key", nullptr, nullptr);
     if (info == nullptr || parent == nullptr ||
+        (!remote_enabled_ && !g_file_is_native(parent)) ||
         g_file_info_get_file_type(info) != G_FILE_TYPE_REGULAR ||
         g_file_info_get_size(info) < 0 ||
         g_file_info_get_size(info) >

@@ -50,6 +50,10 @@ public:
     void toggle_sidebar();
     void toggle_single_click_activation();
     void toggle_folder_open_mode();
+    void toggle_remote_thumbnails();
+    void adjust_icon_density(int direction);
+    [[nodiscard]] bool remote_thumbnails() const noexcept { return remote_thumbnails_; }
+    [[nodiscard]] int icon_size() const noexcept { return icon_size_; }
     [[nodiscard]] bool folder_open_new_tab() const noexcept { return folder_open_new_tab_; }
     [[nodiscard]] bool single_click_activation() const noexcept { return single_click_activation_; }
     void refresh_current_directory();
@@ -278,6 +282,8 @@ private:
     bool show_extensions_{true};
     bool single_click_activation_{false};
     bool folder_open_new_tab_{false};
+    bool remote_thumbnails_{true};
+    int icon_size_{64};
     bool folders_first_{true};
     bool sidebar_visible_{true};
     bool preferences_ready_{false};

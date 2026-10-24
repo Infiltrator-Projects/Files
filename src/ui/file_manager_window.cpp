@@ -798,6 +798,11 @@ void FileManagerWindow::load_preferences()
             single_click_activation_ = g_key_file_get_boolean(keys, "Appearance", "single-click", nullptr);
         if (g_key_file_has_key(keys, "Appearance", "folder-new-tab", nullptr))
             folder_open_new_tab_ = g_key_file_get_boolean(keys, "Appearance", "folder-new-tab", nullptr);
+        if (g_key_file_has_key(keys, "Appearance", "remote-thumbnails", nullptr))
+            remote_thumbnails_ = g_key_file_get_boolean(keys, "Appearance", "remote-thumbnails", nullptr);
+        const int thumbnail_size = g_key_file_get_integer(keys, "Appearance", "icon-size", nullptr);
+        if (thumbnail_size == 48 || thumbnail_size == 64 || thumbnail_size == 96)
+            icon_size_ = thumbnail_size;
         if (g_key_file_has_key(keys, "Appearance", "sidebar-visible", nullptr))
             sidebar_visible_ = g_key_file_get_boolean(keys, "Appearance", "sidebar-visible", nullptr);
         if (g_key_file_has_key(keys, "Appearance", "folders-first", nullptr))
@@ -827,6 +832,8 @@ void FileManagerWindow::save_preferences() const
     g_key_file_set_boolean(keys, "Appearance", "show-extensions", show_extensions_);
     g_key_file_set_boolean(keys, "Appearance", "single-click", single_click_activation_);
     g_key_file_set_boolean(keys, "Appearance", "folder-new-tab", folder_open_new_tab_);
+    g_key_file_set_boolean(keys, "Appearance", "remote-thumbnails", remote_thumbnails_);
+    g_key_file_set_integer(keys, "Appearance", "icon-size", icon_size_);
     g_key_file_set_boolean(keys, "Appearance", "sidebar-visible", sidebar_visible_);
     g_key_file_set_boolean(keys, "Appearance", "folders-first", folders_first_);
     g_key_file_set_integer(keys, "Appearance", "view", static_cast<gint>(view_mode_) + 1);
@@ -849,6 +856,22 @@ void FileManagerWindow::apply_preferences()
     if (sidebar_scroll_ != nullptr)
         gtk_widget_set_visible(sidebar_scroll_, sidebar_visible_);
     set_view_mode(view_mode_);
+    if (thumbnails_ != nullptr) thumbnails_->set_remote_enabled(remote_thumbnails_);
+    // Apply the durable icon density before any new pooled grid cell is bound.
+    if (content_stack_ != nullptr) {
+        GtkWidget *scroller = gtk_stack_get_child_by_name(GTK_STACK(content_stack_), "icons");
+        GtkWidget *grid = GTK_IS_SCROLLED_WINDOW(scroller)
+            ? gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scroller)) : nullptr;
+        if (GTK_IS_GRID_VIEW(grid)) {
+            GtkListItemFactory *factory = gtk_grid_view_get_factory(GTK_GRID_VIEW(grid));
+            if (factory != nullptr) {
+                g_object_set_data(G_OBJECT(factory), "ifm-icon-size",
+                                  GINT_TO_POINTER(icon_size_));
+                g_object_set_data(G_OBJECT(factory), "ifm-tile-width",
+                                  GINT_TO_POINTER(icon_size_ == 96 ? 196 : icon_size_ == 64 ? 132 : 108));
+            }
+        }
+    }
     if (detail_view_ != nullptr)
         gtk_column_view_set_single_click_activate(detail_view_, single_click_activation_);
     if (content_stack_ != nullptr) {
@@ -921,6 +944,53 @@ void FileManagerWindow::toggle_folders_first()
     folders_first_state_->store(folders_first_, std::memory_order_relaxed);
     notify_sort_changed();
     save_preferences();
+}
+
+
+void FileManagerWindow::toggle_remote_thumbnails()
+{
+    remote_thumbnails_ = !remote_thumbnails_;
+    if (thumbnails_ != nullptr) thumbnails_->set_remote_enabled(remote_thumbnails_);
+    save_preferences();
+    refresh_current_directory();
+}
+
+void FileManagerWindow::adjust_icon_density(int direction)
+{
+    const int next = direction > 0 ? (icon_size_ == 48 ? 64 : 96)
+                                  : (icon_size_ == 96 ? 64 : 48);
+    if (next == icon_size_) return;
+    icon_size_ = next;
+    if (content_stack_ != nullptr) {
+        GtkWidget *scroller = gtk_stack_get_child_by_name(GTK_STACK(content_stack_), "icons");
+        GtkWidget *grid = GTK_IS_SCROLLED_WINDOW(scroller)
+            ? gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scroller)) : nullptr;
+        if (GTK_IS_GRID_VIEW(grid)) {
+            GtkListItemFactory *factory = gtk_grid_view_get_factory(GTK_GRID_VIEW(grid));
+            if (factory != nullptr) {
+                g_object_set_data(G_OBJECT(factory), "ifm-icon-size", GINT_TO_POINTER(icon_size_));
+                g_object_set_data(G_OBJECT(factory), "ifm-tile-width",
+                    GINT_TO_POINTER(icon_size_ == 96 ? 196 : icon_size_ == 64 ? 132 : 108));
+            }
+        }
+        // GtkGridView pools cells. Update already-realised icons as well as
+        // the factory policy for cells materialised after scrolling.
+        const auto resize = [this](auto &&self, GtkWidget *widget) -> void {
+            if (widget == nullptr) return;
+            auto *image = GTK_IMAGE(g_object_get_data(G_OBJECT(widget), "ifm-icon"));
+            if (image != nullptr) {
+                gtk_image_set_pixel_size(image, icon_size_);
+                gtk_widget_set_size_request(widget,
+                    icon_size_ == 96 ? 196 : icon_size_ == 64 ? 132 : 108, -1);
+            }
+            for (GtkWidget *child = gtk_widget_get_first_child(widget); child != nullptr;
+                 child = gtk_widget_get_next_sibling(child))
+                self(self, child);
+        };
+        if (GTK_IS_GRID_VIEW(grid)) resize(resize, grid);
+    }
+    save_preferences();
+    refresh_current_directory();
 }
 
 void FileManagerWindow::toggle_folder_open_mode()
