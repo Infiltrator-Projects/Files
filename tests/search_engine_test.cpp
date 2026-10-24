@@ -193,6 +193,22 @@ int main()
         o.name = "notes.txt";
         require(found(run(location, o), "notes.txt"), "Exclusion must not suppress siblings");
 
+        // Catalogue #579: derived labels are an exact URI filter, never a
+        // content/namespace authority for unrelated pathname matches.
+        o = SearchOptions{};
+        o.restrict_tagged_uris = true;
+        GFile *tagged = g_file_get_child(location, "notes.txt");
+        gchar *tag_uri = g_file_get_uri(tagged);
+        o.tagged_uris.emplace_back(tag_uri);
+        g_free(tag_uri);
+        g_object_unref(tagged);
+        require(found(run(location, o), "notes.txt") &&
+                !found(run(location, o), "recursed.txt"),
+                "Tag filtering must return exactly authored URI references");
+        o.tagged_uris.clear();
+        require(run(location, o).hits.empty(),
+                "No associated tags must produce no matches, not a global search");
+
         o = SearchOptions{};
         o.name = "Alpha";
         o.minimum_size = 10;

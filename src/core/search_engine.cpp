@@ -156,7 +156,10 @@ SearchReport search_files(GFile *root, const SearchOptions &o,
     std::vector<GFile *> blocked;
     for (const std::string &uri : o.excluded_uris) {
         GFile *file = g_file_new_for_uri(uri.c_str());
-        if (uri.empty() || file == nullptr) {
+        char *scheme = g_uri_parse_scheme(uri.c_str());
+        const bool valid_scheme = scheme != nullptr;
+        g_free(scheme);
+        if (uri.empty() || !valid_scheme || file == nullptr) {
             for (GFile *object : blocked) g_object_unref(object);
             if (file != nullptr) g_object_unref(file);
             g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
@@ -166,6 +169,7 @@ SearchReport search_files(GFile *root, const SearchOptions &o,
         blocked.push_back(file);
     }
     if (excluded(root, blocked)) {
+        report.complete = false;
         report.limitation = "The search root was explicitly excluded";
         for (GFile *object : blocked) g_object_unref(object);
         return report;
