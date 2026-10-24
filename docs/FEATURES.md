@@ -1,5 +1,8 @@
 # Files — Complete Feature Catalogue
 
+The 0.1.63 search tranche adds ten bounded retrieval interactions: recursive current-location filename search, exact matching, case sensitivity, glob matching, file/folder filtering, minimum and maximum size criteria, modified-since criteria, UTF-8 text-content matching on recognized files <=1 MiB and reveal-in-parent results. No system-wide index, document/PDF parser or semantic search is claimed. The search explicitly reports provider errors, truncated results and skipped content; no filesystem mutation is delegated to a search worker.
+
+
 The 0.1.62 tranche qualifies ten user-facing inspection/navigation interactions: current-folder and selected-folder native terminals, SHA-256, two-file hash comparison, copyable details, image dimensions, bounded xattr listing, POSIX ACL presence, recursive directory logical/allocated size and explicit cancellation. Full EXIF parsing, editing ACLs, cross-mount accounting and broad recursive/content search remain planned. Inspection never claims unknown allocated capacity is zero and does not add another mutation engine.
 
 

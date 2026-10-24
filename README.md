@@ -58,6 +58,9 @@ Product-level acceptance is defined in [`docs/PRODUCT-QUALITY.md`](docs/PRODUCT-
 
 ## Current implementation
 
+Files 0.1.63 extends its read-only retrieval capability with a separate, cancellable Search in subfolders… surface. It searches through GIO with exact/partial/glob matching, case options, file/folder and size/date filters, text matching for recognized UTF-8 files <=1 MiB, and reveal-in-parent results. It bounds enumeration to 100,000 entries, 500 results and 64 levels, reports incomplete coverage explicitly and preserves Ctrl+F as an instantaneous current-folder filter.
+
+
 The 0.1.62 bounded inspection tranche adds terminals for native current/selected folders; asynchronous SHA-256 calculation and two-file digest comparison; a copyable inspection report with supported GIO metadata, local image dimensions, extended-attribute names and POSIX access ACL presence; and cancellable recursive folder logical/allocated size and item counts with explicit bounds. These are read-only facilities, not metadata editing, an EXIF editor or byte-for-byte verification. All file mutations retain their existing durable owners.
 
 

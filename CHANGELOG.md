@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.63 — 2026-10-24
+
+- Add a bounded, cancellable recursive search UI backed by the GIO provider layer, separate from the existing Ctrl+F current-folder quick filter.
+- Provide exact/substring/glob name matching, Unicode case-folded versus case-sensitive search, file/folder filters, minimum/maximum size, modified-since local date and bounded text-content search.
+- Reveal search results in their containing folder with original-item selection through the existing window navigation path, without duplicating file mutation machinery.
+- Limit traversal to 100,000 entries, 500 hits and 64 levels, refuse symlink traversal and known cross-device descent, and disclose incomplete enumeration, provider failures and skipped text files.
+- Qualify the core query filters and cancellation plus GTK search-dialog/reveal behaviour through the full 18-test hosted suite. Native installer and Debian qualification remain release gates; live desktop visual review remains outstanding.
+
+
 ## 0.1.62 — 2026-10-24
 
 - Add a bounded, asynchronous inspection panel with live GIO metadata, image dimensions, extended-attribute listing, POSIX ACL presence and filesystem capacity details when available.

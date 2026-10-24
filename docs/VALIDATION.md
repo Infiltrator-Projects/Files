@@ -2,6 +2,9 @@
 
 ## Qualification
 
+The 0.1.63 GIO search-engine test exercises recursive versus direct-child search, exact/Unicode-folded and case-sensitive wildcard matching, file/folder filters, minimum/maximum byte limits, modified-since filtering, content matching, symlink-cycle refusal and cancellation. The actual GTK interaction test opens Search files, finds a nested file and requires Reveal in containing folder to navigate to its parent and select the exact original item. Hosted qualification on Ubuntu 24.04 passes 18 tests and the native-installer/package gate prior to release intent; no stress-performance or GUI screenshot claim is inferred.
+
+
 Files 0.1.62's interaction-surface regression additionally opens real GTK inspection windows, waits for asynchronous GIO metadata, computes SHA-256, compares two dissimilar test files, exports the visible report through the clipboard, and verifies an empty-directory recursive scan with allocated/logical result fields. A native folder exposes terminal launch without starting a terminal in CI. The inspection worker has a cancellation contract and explicit 250,000-entry/64-level traversal limits; device and visual qualification remain separate.
 
 
