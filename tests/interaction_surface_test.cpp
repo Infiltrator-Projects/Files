@@ -70,6 +70,52 @@ GtkWidget *find_button(GtkWidget *root, const char *label)
 }
 
 
+
+GtkWindow *window_named(const char *title)
+{
+    GList *windows = gtk_window_list_toplevels();
+    GtkWindow *found = nullptr;
+    for (GList *it = windows; it != nullptr; it = it->next) {
+        GtkWindow *window = GTK_WINDOW(it->data);
+        if (g_strcmp0(gtk_window_get_title(window), title) == 0) {
+            found = window;
+            break;
+        }
+    }
+    g_list_free(windows);
+    return found;
+}
+
+std::string text_in(GtkWidget *root)
+{
+    if (root == nullptr) return {};
+    if (GTK_IS_TEXT_VIEW(root)) {
+        GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(root));
+        GtkTextIter begin, end;
+        gtk_text_buffer_get_bounds(buffer, &begin, &end);
+        char *value = gtk_text_buffer_get_text(buffer, &begin, &end, FALSE);
+        std::string result = value != nullptr ? value : "";
+        g_free(value);
+        return result;
+    }
+    for (GtkWidget *child = gtk_widget_get_first_child(root); child != nullptr;
+         child = gtk_widget_get_next_sibling(child)) {
+        const std::string result = text_in(child);
+        if (!result.empty()) return result;
+    }
+    return {};
+}
+
+bool await_text(GtkWidget *root, const std::string &needle)
+{
+    for (int i = 0; i < 5000; ++i) {
+        while (g_main_context_iteration(nullptr, FALSE)) {}
+        if (text_in(root).find(needle) != std::string::npos) return true;
+        g_usleep(1000);
+    }
+    return false;
+}
+
 guint position_for(GtkMultiSelection *selection, const char *name)
 {
     GListModel *model = gtk_multi_selection_get_model(selection);
@@ -218,6 +264,64 @@ void qualify_selection_actions(infiltrator::files::FileManagerWindow &w,
             uris.find("second.pdf") != std::string::npos,
             "URI export must enumerate selected files");
 
+
+    // Read-only inspection actions must retain the exact source selection.
+    gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection));
+    gtk_selection_model_select_item(GTK_SELECTION_MODEL(selection),
+                                    position_for(selection, "first.pdf"), TRUE);
+    require(gtk_widget_get_visible(find_button(context, "Inspect file…")),
+            "Regular file must expose inspection without expanding the context menu");
+    g_signal_emit_by_name(find_button(context, "Inspect file…"), "clicked");
+    GtkWindow *inspection = window_named("Inspect file");
+    require(inspection != nullptr, "Inspection panel did not open");
+    require(await_text(GTK_WIDGET(inspection), "Content type"),
+            "Inspection metadata did not load asynchronously");
+    GtkWidget *hash = find_button(GTK_WIDGET(inspection), "SHA-256");
+    require(hash != nullptr, "Regular-file SHA-256 action is missing");
+    g_signal_emit_by_name(hash, "clicked");
+    require(await_text(GTK_WIDGET(inspection), "SHA-256:"),
+            "SHA-256 worker failed or did not report its result");
+    GtkWidget *copy_details = find_button(GTK_WIDGET(inspection), "Copy details");
+    require(copy_details != nullptr, "Copy details action missing");
+    g_signal_emit_by_name(copy_details, "clicked");
+    require(clipboard_text(w.native_window()).find("SHA-256:") != std::string::npos,
+            "Copy details must export the visible report");
+    gtk_window_destroy(inspection);
+
+    gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection));
+    gtk_selection_model_select_item(GTK_SELECTION_MODEL(selection),
+                                    position_for(selection, "first.pdf"), TRUE);
+    gtk_selection_model_select_item(GTK_SELECTION_MODEL(selection),
+                                    position_for(selection, "second.pdf"), FALSE);
+    GtkWidget *compare = find_button(context, "Compare two file hashes…");
+    require(compare != nullptr && gtk_widget_get_visible(compare),
+            "Two regular files must expose hash comparison");
+    g_signal_emit_by_name(compare, "clicked");
+    GtkWindow *comparison = window_named("Compare file hashes");
+    require(comparison != nullptr, "Two-file comparison did not open");
+    require(await_text(GTK_WIDGET(comparison), "Different SHA-256 digests."),
+            "Comparison must report distinct test contents");
+    gtk_window_destroy(comparison);
+
+    gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection));
+    gtk_selection_model_select_item(GTK_SELECTION_MODEL(selection),
+                                    position_for(selection, "alpha"), TRUE);
+    require(gtk_widget_get_visible(find_button(context, "Open folder in terminal")),
+            "Native folder must expose terminal launch");
+    g_signal_emit_by_name(find_button(context, "Inspect file…"), "clicked");
+    inspection = window_named("Inspect file");
+    require(inspection != nullptr, "Folder inspection did not open");
+    GtkWidget *folder_size = find_button(GTK_WIDGET(inspection), "Calculate folder size");
+    require(folder_size != nullptr, "Folder size action is missing");
+    require(await_text(GTK_WIDGET(inspection), "Content type"),
+            "Folder metadata did not finish");
+    g_signal_emit_by_name(folder_size, "clicked");
+    require(await_text(GTK_WIDGET(inspection), "Items scanned: 0"),
+            "Cancellable recursive folder scan did not report its result");
+    require(text_in(GTK_WIDGET(inspection)).find("Allocated total:") != std::string::npos,
+            "Folder scan must distinguish allocated and logical sizes");
+    gtk_window_destroy(inspection);
+
     gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection));
     gtk_selection_model_select_item(GTK_SELECTION_MODEL(selection),
                                     position_for(selection, "alpha"), TRUE);
@@ -302,6 +406,10 @@ int main()
                 "New Folder must remain available after header consolidation");
         require(find_button(popover, "Properties") != nullptr,
                 "Properties must be available from File actions");
+        require(find_button(popover, "Open terminal here") != nullptr,
+                "Current-folder terminal action must be reachable in overflow");
+        require(find_button(popover, "Inspect file…") != nullptr,
+                "File inspection must be reachable in overflow");
         require(find_button(popover, "Copy") != nullptr,
                 "Clipboard Copy must be available from File actions");
         require(find_button(popover, "Cut") != nullptr,
