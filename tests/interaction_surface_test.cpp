@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 #include <stdexcept>
 
 namespace infiltrator::files {
@@ -176,13 +177,25 @@ GtkWidget *find_entry(GtkWidget *root)
     return nullptr;
 }
 
+std::vector<GtkWidget *> find_entries(GtkWidget *root)
+{
+    std::vector<GtkWidget *> result;
+    const auto walk = [&](auto &&self, GtkWidget *widget) -> void {
+        if (GTK_IS_ENTRY(widget)) result.push_back(widget);
+        for (GtkWidget *child = gtk_widget_get_first_child(widget); child != nullptr;
+             child = gtk_widget_get_next_sibling(child)) self(self, child);
+    };
+    walk(walk, root);
+    return result;
+}
+
 GtkWindow *pattern_dialog()
 {
     GList *top = gtk_window_list_toplevels();
     GtkWindow *result = nullptr;
     for (GList *it = top; it != nullptr; it = it->next) {
         GtkWindow *win = GTK_WINDOW(it->data);
-        if (g_strcmp0(gtk_window_get_title(win), "Select by filename pattern") == 0) {
+        if (g_strcmp0(gtk_window_get_title(win), "Select by pattern, size or date") == 0) {
             result = win;
             break;
         }
@@ -272,6 +285,33 @@ void qualify_selection_actions(infiltrator::files::FileManagerWindow &w,
             gtk_selection_model_is_selected(GTK_SELECTION_MODEL(selection),
                                             position_for(selection, "second.pdf")),
             "Glob selection must match only the two visible PDF names");
+
+    // Complete the original catalogue's pattern/type/date/size selection
+    // family; these are one requirement, not multiple invented features.
+    g_signal_emit_by_name(pattern_action, "clicked");
+    dialog = pattern_dialog();
+    require(dialog != nullptr, "Metadata selection dialog must be available");
+    auto fields = find_entries(GTK_WIDGET(dialog));
+    require(fields.size() == 5U, "Selection dialog must expose five criteria");
+    gtk_editable_set_text(GTK_EDITABLE(fields[1]), "10");
+    apply = find_button(GTK_WIDGET(dialog), "Select matches");
+    require(apply != nullptr, "Metadata selection apply action missing");
+    g_signal_emit_by_name(apply, "clicked");
+    require(selected_count(selection) == 1U &&
+            gtk_selection_model_is_selected(GTK_SELECTION_MODEL(selection),
+                                            position_for(selection, "photo.png")),
+            "Size selection must match only PNG, not PDF or text fixtures");
+
+    g_signal_emit_by_name(pattern_action, "clicked");
+    dialog = pattern_dialog();
+    require(dialog != nullptr, "Date selection dialog did not open");
+    fields = find_entries(GTK_WIDGET(dialog));
+    require(fields.size() == 5U, "Date filter fields missing");
+    gtk_editable_set_text(GTK_EDITABLE(fields[3]), "2099-01-01");
+    apply = find_button(GTK_WIDGET(dialog), "Select matches");
+    g_signal_emit_by_name(apply, "clicked");
+    require(selected_count(selection) == 0U,
+            "Future modified-since bound must exclude all fixture files");
 
     gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection));
     gtk_selection_model_select_item(GTK_SELECTION_MODEL(selection),
