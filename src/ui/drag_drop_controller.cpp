@@ -52,6 +52,8 @@ DragDropController::DragDropController(GtkWindow *window, GtkDirectoryList *dire
         GtkSelectionModel *model = gtk_list_view_get_model(GTK_LIST_VIEW(secondary));
         if (GTK_IS_MULTI_SELECTION(model)) {
             GListModel *directory = gtk_multi_selection_get_model(GTK_MULTI_SELECTION(model));
+            if (GTK_IS_SORT_LIST_MODEL(directory))
+                directory = gtk_sort_list_model_get_model(GTK_SORT_LIST_MODEL(directory));
             if (GTK_IS_DIRECTORY_LIST(directory)) {
                 secondary_view_ = secondary;
                 secondary_directory_ = GTK_DIRECTORY_LIST(g_object_ref(directory));

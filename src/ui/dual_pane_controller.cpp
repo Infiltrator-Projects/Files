@@ -34,7 +34,12 @@ DualPaneController::DualPaneController(GtkWindow *window, GtkWidget *host,
     g_object_ref(primary_selection_);
     secondary_ = gtk_directory_list_new(kAttributes, nullptr);
     gtk_directory_list_set_monitored(secondary_, TRUE);
-    secondary_selection_ = gtk_multi_selection_new(G_LIST_MODEL(g_object_ref(secondary_)));
+    // Sorting wraps only the second pane. Identity, transfers and drag hit-tests
+    // continue to consume the selection model's displayed GFileInfo items.
+    GtkCustomSorter *sorter = gtk_custom_sorter_new(compare_names, nullptr, nullptr);
+    GtkSortListModel *ordered = gtk_sort_list_model_new(
+        G_LIST_MODEL(g_object_ref(secondary_)), GTK_SORTER(sorter));
+    secondary_selection_ = gtk_multi_selection_new(G_LIST_MODEL(ordered));
     GtkWidget *bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
     gtk_widget_set_margin_start(bar, 8);
     gtk_widget_set_margin_end(bar, 8);
@@ -48,6 +53,10 @@ DualPaneController::DualPaneController(GtkWindow *window, GtkWidget *host,
     gtk_widget_set_tooltip_text(forward_, "Second pane: Forward");
     g_signal_connect(forward_, "clicked", G_CALLBACK(on_forward), this);
     gtk_box_append(GTK_BOX(bar), forward_);
+    sort_button_ = gtk_button_new_with_label("A–Z");
+    gtk_widget_set_tooltip_text(sort_button_, "Second pane: reverse name sort");
+    g_signal_connect(sort_button_, "clicked", G_CALLBACK(on_sort), this);
+    gtk_box_append(GTK_BOX(bar), sort_button_);
     GtkWidget *up = gtk_button_new_from_icon_name("go-up-symbolic");
     gtk_widget_set_tooltip_text(up, "Second pane: Parent");
     g_signal_connect(up, "clicked", G_CALLBACK(on_up), this);
@@ -210,7 +219,8 @@ void DualPaneController::on_activate(GtkListView *, guint position, gpointer dat
 {
     auto *self = static_cast<DualPaneController *>(data);
     GFile *parent = gtk_directory_list_get_file(self->secondary_);
-    auto *info = G_FILE_INFO(g_list_model_get_item(G_LIST_MODEL(self->secondary_), position));
+    auto *info = G_FILE_INFO(g_list_model_get_item(
+        gtk_multi_selection_get_model(self->secondary_selection_), position));
     if (parent == nullptr || info == nullptr) { g_clear_object(&info); return; }
     const char *name = g_file_info_get_name(info);
     if (name != nullptr) {
@@ -299,6 +309,39 @@ void DualPaneController::on_forward(GtkButton *, gpointer data)
     gtk_widget_set_sensitive(self->back_, !self->history_.empty());
     gtk_widget_set_sensitive(self->forward_, !self->forward_history_.empty());
     gtk_label_set_text(GTK_LABEL(self->feedback_), "");
+}
+
+GtkOrdering DualPaneController::compare_names(gconstpointer first, gconstpointer second,
+                                               gpointer user_data)
+{
+    const auto *a = G_FILE_INFO(first);
+    const auto *b = G_FILE_INFO(second);
+    const bool a_folder = g_file_info_get_file_type(const_cast<GFileInfo *>(a)) == G_FILE_TYPE_DIRECTORY;
+    const bool b_folder = g_file_info_get_file_type(const_cast<GFileInfo *>(b)) == G_FILE_TYPE_DIRECTORY;
+    int comparison = 0;
+    if (a_folder != b_folder) comparison = a_folder ? -1 : 1;
+    else {
+        comparison = g_utf8_collate(g_file_info_get_display_name(const_cast<GFileInfo *>(a)),
+                                     g_file_info_get_display_name(const_cast<GFileInfo *>(b)));
+        if (comparison == 0)
+            comparison = g_strcmp0(g_file_info_get_name(const_cast<GFileInfo *>(a)),
+                                   g_file_info_get_name(const_cast<GFileInfo *>(b)));
+    }
+    if (GPOINTER_TO_INT(user_data)) comparison = -comparison;
+    return comparison < 0 ? GTK_ORDERING_SMALLER :
+           comparison > 0 ? GTK_ORDERING_LARGER : GTK_ORDERING_EQUAL;
+}
+
+void DualPaneController::on_sort(GtkButton *, gpointer data)
+{
+    auto *self = static_cast<DualPaneController *>(data);
+    auto *model = GTK_SORT_LIST_MODEL(gtk_multi_selection_get_model(self->secondary_selection_));
+    if (!GTK_IS_SORT_LIST_MODEL(model)) return;
+    self->descending_ = !self->descending_;
+    gtk_custom_sorter_set_sort_func(
+        GTK_CUSTOM_SORTER(gtk_sort_list_model_get_sorter(model)), compare_names,
+        GINT_TO_POINTER(self->descending_), nullptr);
+    gtk_button_set_label(GTK_BUTTON(self->sort_button_), self->descending_ ? "Z–A" : "A–Z");
 }
 
 void DualPaneController::on_select_all(GtkButton *, gpointer data)

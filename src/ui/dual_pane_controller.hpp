@@ -32,6 +32,8 @@ private:
     static void on_back(GtkButton *, gpointer);
     static void on_forward(GtkButton *, gpointer);
     static void on_select_all(GtkButton *, gpointer);
+    static void on_sort(GtkButton *, gpointer);
+    static GtkOrdering compare_names(gconstpointer, gconstpointer, gpointer);
     static void on_transfer(GtkButton *, gpointer);
     static void on_cancel_import(GtkButton *, gpointer);
     static void on_loading(GObject *, GParamSpec *, gpointer);
@@ -45,6 +47,8 @@ private:
     GtkWidget *path_{nullptr};
     GtkWidget *back_{nullptr};
     GtkWidget *forward_{nullptr};
+    GtkWidget *sort_button_{nullptr};
+    bool descending_{false};
     GtkWidget *feedback_{nullptr};
     GtkDirectoryList *primary_{nullptr};
     GtkMultiSelection *primary_selection_{nullptr};
