@@ -796,6 +796,8 @@ void FileManagerWindow::load_preferences()
             show_extensions_ = g_key_file_get_boolean(keys, "Appearance", "show-extensions", nullptr);
         if (g_key_file_has_key(keys, "Appearance", "single-click", nullptr))
             single_click_activation_ = g_key_file_get_boolean(keys, "Appearance", "single-click", nullptr);
+        if (g_key_file_has_key(keys, "Appearance", "folder-new-tab", nullptr))
+            folder_open_new_tab_ = g_key_file_get_boolean(keys, "Appearance", "folder-new-tab", nullptr);
         if (g_key_file_has_key(keys, "Appearance", "sidebar-visible", nullptr))
             sidebar_visible_ = g_key_file_get_boolean(keys, "Appearance", "sidebar-visible", nullptr);
         if (g_key_file_has_key(keys, "Appearance", "folders-first", nullptr))
@@ -824,6 +826,7 @@ void FileManagerWindow::save_preferences() const
     g_key_file_set_boolean(keys, "Appearance", "show-hidden", show_hidden_);
     g_key_file_set_boolean(keys, "Appearance", "show-extensions", show_extensions_);
     g_key_file_set_boolean(keys, "Appearance", "single-click", single_click_activation_);
+    g_key_file_set_boolean(keys, "Appearance", "folder-new-tab", folder_open_new_tab_);
     g_key_file_set_boolean(keys, "Appearance", "sidebar-visible", sidebar_visible_);
     g_key_file_set_boolean(keys, "Appearance", "folders-first", folders_first_);
     g_key_file_set_integer(keys, "Appearance", "view", static_cast<gint>(view_mode_) + 1);
@@ -917,6 +920,12 @@ void FileManagerWindow::toggle_folders_first()
     folders_first_ = !folders_first_;
     folders_first_state_->store(folders_first_, std::memory_order_relaxed);
     notify_sort_changed();
+    save_preferences();
+}
+
+void FileManagerWindow::toggle_folder_open_mode()
+{
+    folder_open_new_tab_ = !folder_open_new_tab_;
     save_preferences();
 }
 
@@ -1316,7 +1325,8 @@ void FileManagerWindow::activate_position(const guint position)
 
     GFile *child = g_file_get_child(current_location_, name);
     if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY) {
-        navigate_to(child, true);
+        if (folder_open_new_tab_ && tabs_.size() < 128U) add_tab(child);
+        else navigate_to(child, true);
     } else if (g_file_info_get_is_symlink(info)) {
         // Follow for browsing only: the directory model still identifies the
         // link itself and the breadcrumb retains the link-relative namespace.

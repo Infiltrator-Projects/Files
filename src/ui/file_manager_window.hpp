@@ -49,6 +49,8 @@ public:
     void toggle_folders_first();
     void toggle_sidebar();
     void toggle_single_click_activation();
+    void toggle_folder_open_mode();
+    [[nodiscard]] bool folder_open_new_tab() const noexcept { return folder_open_new_tab_; }
     [[nodiscard]] bool single_click_activation() const noexcept { return single_click_activation_; }
     void refresh_current_directory();
     [[nodiscard]] guint open_selected_folders_in_tabs();
@@ -275,6 +277,7 @@ private:
     bool show_hidden_{false};
     bool show_extensions_{true};
     bool single_click_activation_{false};
+    bool folder_open_new_tab_{false};
     bool folders_first_{true};
     bool sidebar_visible_{true};
     bool preferences_ready_{false};

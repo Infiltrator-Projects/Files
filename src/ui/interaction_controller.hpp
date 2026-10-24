@@ -136,6 +136,7 @@ private:
     std::vector<GtkWidget *> extension_actions_;
     std::vector<GtkWidget *> folder_sort_actions_;
     std::vector<GtkWidget *> activation_actions_;
+    std::vector<GtkWidget *> folder_open_actions_;
     std::vector<GtkWidget *> sidebar_actions_;
     std::vector<GtkWidget *> folder_terminal_actions_;
     std::vector<GtkWidget *> compare_actions_;

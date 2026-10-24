@@ -457,6 +457,9 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
                                                    ActionScope::Always, proxies));
         activation_actions_.push_back(add_command(layout,
             "Enable Single-click Open", "single-click", ActionScope::Always, proxies));
+        folder_open_actions_.push_back(add_command(
+            layout, "Open folders in new tabs", "folder-default-tab",
+            ActionScope::Always, proxies));
         sidebar_actions_.push_back(add_command(layout, "Hide Sidebar", "toggle-sidebar",
                                                ActionScope::Always, proxies));
     }
@@ -692,6 +695,7 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
     else if (g_strcmp0(command, "toggle-extensions") == 0) window->toggle_extensions();
     else if (g_strcmp0(command, "folders-first") == 0) window->toggle_folders_first();
     else if (g_strcmp0(command, "single-click") == 0) window->toggle_single_click_activation();
+    else if (g_strcmp0(command, "folder-default-tab") == 0) window->toggle_folder_open_mode();
     else if (g_strcmp0(command, "toggle-sidebar") == 0) window->toggle_sidebar();
     else if (g_strcmp0(command, "selected-tabs") == 0)
         (void)window->open_selected_folders_in_tabs();
@@ -1524,6 +1528,9 @@ void InteractionController::update_action_state()
         for (GtkWidget *button : activation_actions_)
             gtk_button_set_label(GTK_BUTTON(button), window->single_click_activation()
                 ? "Require Double-click to Open" : "Enable Single-click Open");
+        for (GtkWidget *button : folder_open_actions_)
+            gtk_button_set_label(GTK_BUTTON(button), window->folder_open_new_tab()
+                ? "Open folders in current tab" : "Open folders in new tabs");
     }
 
     if (overflow_open_button_ != nullptr) {
@@ -1642,6 +1649,13 @@ void InteractionController::open_primary()
         return;
     }
     if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY) {
+        auto *window = static_cast<FileManagerWindow *>(
+            g_object_get_data(G_OBJECT(window_), "ifm-window-controller"));
+        if (window != nullptr && window->folder_open_new_tab() &&
+            window->open_primary_directory_in_new_tab()) {
+            g_object_unref(child);
+            return;
+        }
         char *parse_name = g_file_get_parse_name(child);
         if (parse_name != nullptr) {
             gtk_editable_set_text(GTK_EDITABLE(location_entry_), parse_name);
