@@ -283,10 +283,15 @@ SearchReport search_files(GFile *root, const SearchOptions &o,
             (!g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_UNIX_UID) ||
              g_file_info_get_attribute_uint32(info, G_FILE_ATTRIBUTE_UNIX_UID) != *o.owner_uid))
             matching = false;
-        if (o.duplicates_by_sha256 &&
-            (!regular || !size_known || size > 8U * 1024U * 1024U)) {
-            if (matching) ++report.duplicate_skipped;
-            matching = false;
+        if (o.duplicates_by_sha256) {
+            if (!regular) {
+                // Directories/symlinks are deliberately not candidates and
+                // cannot make a complete regular-file duplicate search partial.
+                matching = false;
+            } else if (!size_known || size > 8U * 1024U * 1024U) {
+                if (matching) ++report.duplicate_skipped;
+                matching = false;
+            }
         }
         if (matching && !o.content.empty()) {
             const char *mime = g_file_info_get_content_type(info);
