@@ -129,6 +129,86 @@ guint find_item_position(GListModel *model, GFileInfo *needle)
     return GTK_INVALID_LIST_POSITION;
 }
 
+
+struct LinkProbe {
+    GWeakRef tile;
+    std::string uri;
+    GFile *file{nullptr};
+    LinkProbe(GtkWidget *cell, std::string value, GFile *target)
+        : uri(std::move(value)), file(G_FILE(g_object_ref(target)))
+    { g_weak_ref_init(&tile, G_OBJECT(cell)); }
+    ~LinkProbe() { g_weak_ref_clear(&tile); g_object_unref(file); }
+};
+
+// Do not label links broken based on a failed follow alone. If the link was
+// removed meanwhile, the unresolved target is not evidence about a live link.
+// Only an explicit NOT_FOUND plus a successful NOFOLLOW query qualifies.
+void link_nofollow_finished(GObject *source, GAsyncResult *result, gpointer data)
+{
+    std::unique_ptr<LinkProbe> probe(static_cast<LinkProbe *>(data));
+    GError *error = nullptr;
+    GFileInfo *info = g_file_query_info_finish(G_FILE(source), result, &error);
+    if (info != nullptr && g_file_info_get_is_symlink(info)) {
+        GtkWidget *cell = GTK_WIDGET(g_weak_ref_get(&probe->tile));
+        if (cell != nullptr) {
+            const auto *key = static_cast<const char *>(
+                g_object_get_data(G_OBJECT(cell), "ifm-link-probe-uri"));
+            auto *name = GTK_LABEL(g_object_get_data(G_OBJECT(cell), "ifm-name"));
+            if (g_strcmp0(key, probe->uri.c_str()) == 0 && GTK_IS_LABEL(name)) {
+                const char *old = gtk_label_get_text(name);
+                if (old != nullptr && g_strstr_len(old, -1, " (broken link)") == nullptr) {
+                    const std::string broken = std::string(old) + " (broken link)";
+                    gtk_label_set_text(name, broken.c_str());
+                    gtk_widget_add_css_class(GTK_WIDGET(name), "error");
+                    gtk_widget_set_tooltip_text(GTK_WIDGET(name),
+                        "Broken symbolic link — target does not exist");
+                }
+            }
+            g_object_unref(cell);
+        }
+    }
+    g_clear_object(&info);
+    g_clear_error(&error);
+}
+
+void link_follow_finished(GObject *source, GAsyncResult *result, gpointer data)
+{
+    auto *probe = static_cast<LinkProbe *>(data);
+    GError *error = nullptr;
+    GFileInfo *info = g_file_query_info_finish(G_FILE(source), result, &error);
+    const bool missing = info == nullptr &&
+        g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND);
+    g_clear_object(&info);
+    g_clear_error(&error);
+    if (missing) {
+        g_file_query_info_async(probe->file, G_FILE_ATTRIBUTE_STANDARD_IS_SYMLINK,
+            G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, G_PRIORITY_LOW, nullptr,
+            link_nofollow_finished, probe);
+    } else delete probe;
+}
+
+void qualify_visible_link(GtkWidget *cell, GFileInfo *info, GFile *parent)
+{
+    g_object_set_data_full(G_OBJECT(cell), "ifm-link-probe-uri", nullptr, nullptr);
+    auto *name = GTK_LABEL(g_object_get_data(G_OBJECT(cell), "ifm-name"));
+    if (GTK_IS_LABEL(name))
+        gtk_widget_remove_css_class(GTK_WIDGET(name), "error");
+    if (info == nullptr || parent == nullptr ||
+        !g_file_info_get_is_symlink(info) || g_file_info_get_name(info) == nullptr)
+        return;
+    GFile *link = g_file_get_child(parent, g_file_info_get_name(info));
+    char *uri = g_file_get_uri(link);
+    if (uri != nullptr) {
+        g_object_set_data_full(G_OBJECT(cell), "ifm-link-probe-uri", g_strdup(uri), g_free);
+        auto *probe = new LinkProbe(cell, uri, link);
+        g_file_query_info_async(link, G_FILE_ATTRIBUTE_STANDARD_TYPE,
+            G_FILE_QUERY_INFO_NONE, G_PRIORITY_LOW, nullptr,
+            link_follow_finished, probe);
+    }
+    g_free(uri);
+    g_object_unref(link);
+}
+
 } // namespace
 
 FileManagerWindow::FileManagerWindow(GtkApplication *application)
@@ -2331,6 +2411,7 @@ void FileManagerWindow::on_factory_bind(GtkSignalListItemFactory *factory,
         const std::string presented = detail_visual_label(info, self->show_extensions_);
         gtk_label_set_text(name, presented.c_str());
         gtk_widget_set_tooltip_text(GTK_WIDGET(name), display_name);
+        qualify_visible_link(child, info, gtk_directory_list_get_file(self->directory_list_));
         if (self->thumbnails_ != nullptr)
             self->thumbnails_->bind(icon, info,
                 gtk_directory_list_get_file(self->directory_list_), kDetailIconSize);
@@ -2490,6 +2571,7 @@ void FileManagerWindow::on_icon_factory_bind(GtkSignalListItemFactory *factory,
     gtk_widget_set_tooltip_text(GTK_WIDGET(name), display_name);
     g_object_set_data_full(G_OBJECT(tile), "ifm-visual-info",
         g_object_ref(info), reinterpret_cast<GDestroyNotify>(g_object_unref));
+    qualify_visible_link(tile, info, gtk_directory_list_get_file(self->directory_list_));
     if (self->thumbnails_ != nullptr)
         static_cast<FileManagerWindow *>(user_data)->thumbnails_->bind(
             icon, info,
