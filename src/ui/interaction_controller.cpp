@@ -423,6 +423,98 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
     return box;
 }
 
+// Context actions represent what the pointer actually addresses. Unlike the
+// complete toolbar catalogue, an empty area is not a selected file, and a
+// regular item is not a Trash recovery target. These sections are reconciled
+// on every selection/location change rather than duplicating operation logic.
+GtkWidget *InteractionController::build_context_action_box()
+{
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_add_css_class(box, "ifm-context-actions");
+    gtk_widget_set_margin_start(box, 5);
+    gtk_widget_set_margin_end(box, 5);
+    gtk_widget_set_margin_top(box, 5);
+    gtk_widget_set_margin_bottom(box, 5);
+
+    const auto section = [&](bool separated) {
+        GtkWidget *group = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+        if (separated) add_separator(group);
+        gtk_box_append(GTK_BOX(box), group);
+        context_sections_.push_back(group);
+        return group;
+    };
+
+    GtkWidget *opening = section(false);
+    context_open_button_ = create_action_button(
+        opening, "Open", nullptr, ActionScope::SingleSelection, context_proxies_,
+        G_CALLBACK(&InteractionController::on_open_clicked));
+    open_with_actions_.push_back(add_command(
+        opening, "Open With…", "open-with", ActionScope::SingleSelection,
+        context_proxies_));
+
+    GtkWidget *new_tab = gtk_button_new_with_label("Open folder in new tab");
+    gtk_widget_add_css_class(new_tab, "flat");
+    gtk_box_append(GTK_BOX(opening), new_tab);
+    open_in_tab_actions_.push_back(new_tab);
+    g_signal_connect(new_tab, "clicked", G_CALLBACK(+[](GtkButton *, gpointer data) {
+        auto *self = static_cast<InteractionController *>(data);
+        if (self->window_ != nullptr) {
+            auto *window = static_cast<FileManagerWindow *>(
+                g_object_get_data(G_OBJECT(self->window_), "ifm-window-controller"));
+            if (window != nullptr) (void)window->open_primary_directory_in_new_tab();
+        }
+        self->close_popovers();
+    }), this);
+    open_in_window_actions_.push_back(add_command(
+        opening, "Open folder in new window", "folder-window",
+        ActionScope::SingleSelection, context_proxies_));
+
+    GtkWidget *creation = section(true);
+    create_action_button(creation, "New Folder", new_folder_target_,
+                         ActionScope::NoSelection, context_proxies_);
+    create_action_button(creation, "New Empty File", new_file_target_,
+                         ActionScope::NoSelection, context_proxies_);
+
+    GtkWidget *clipboard = section(true);
+    for (const char *name : {"Cut", "Copy", "Paste"}) {
+        GtkWidget *button = create_action_button(
+            clipboard, name, nullptr,
+            g_strcmp0(name, "Paste") == 0 ? ActionScope::Always
+                                          : ActionScope::AnySelection,
+            context_proxies_);
+        // ClipboardController installs its existing validated handlers after
+        // this controller. Resolve the target lazily, never fork the operation.
+        g_object_set_data(G_OBJECT(button), "ifm-clipboard-action",
+                          const_cast<char *>(name));
+    }
+
+    GtkWidget *transfer = section(true);
+    create_action_button(transfer, "Rename", rename_target_,
+                         ActionScope::SingleSelection, context_proxies_);
+    create_action_button(transfer, "Copy to…", copy_target_,
+                         ActionScope::SingleSelection, context_proxies_);
+    create_action_button(transfer, "Move to…", move_target_,
+                         ActionScope::SingleSelection, context_proxies_);
+    create_action_button(transfer, "Copy selected to…", batch_copy_target_,
+                         ActionScope::MultiSelection, context_proxies_);
+    create_action_button(transfer, "Move selected to…", batch_move_target_,
+                         ActionScope::MultiSelection, context_proxies_);
+
+    GtkWidget *removal = section(true);
+    create_action_button(removal, "Move to Trash", trash_target_,
+                         ActionScope::AnySelection, context_proxies_);
+    create_action_button(removal, "Restore", restore_target_,
+                         ActionScope::SingleSelection, context_proxies_);
+    create_action_button(removal, "Delete Permanently…", delete_target_,
+                         ActionScope::AnySelection, context_proxies_);
+
+    GtkWidget *details = section(true);
+    context_properties_button_ = create_action_button(
+        details, "Properties", nullptr, ActionScope::SingleSelection,
+        context_proxies_, G_CALLBACK(&InteractionController::on_properties_clicked));
+    return box;
+}
+
 void InteractionController::install_action_surfaces()
 {
     GtkWidget *titlebar = gtk_window_get_titlebar(window_);
@@ -467,11 +559,21 @@ void InteractionController::install_action_surfaces()
     context_popover_ = gtk_popover_new();
     g_object_ref_sink(context_popover_);
     gtk_popover_set_has_arrow(GTK_POPOVER(context_popover_), TRUE);
-    GtkWidget *context_box =
-        build_action_box(context_proxies_,
-                         &context_open_button_,
-                         &context_properties_button_);
-    gtk_popover_set_child(GTK_POPOVER(context_popover_), context_box);
+    gtk_widget_add_css_class(context_popover_, "ifm-context-popover");
+    GtkWidget *context_scroller = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(context_scroller),
+                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_propagate_natural_height(
+        GTK_SCROLLED_WINDOW(context_scroller), TRUE);
+    gtk_scrolled_window_set_max_content_height(
+        GTK_SCROLLED_WINDOW(context_scroller), 330);
+    gtk_widget_set_size_request(context_scroller, 220, -1);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(context_scroller),
+                                  build_context_action_box());
+    gtk_popover_set_child(GTK_POPOVER(context_popover_), context_scroller);
+    // Unowned test/inspection handle; the interaction controller and popover
+    // remain governed by the existing native window lifetime.
+    g_object_set_data(G_OBJECT(window_), "ifm-context-popover", context_popover_);
 }
 
 void InteractionController::install_context_gestures()
@@ -1034,13 +1136,31 @@ guint InteractionController::selection_count() const
 void InteractionController::update_action_state()
 {
     const guint count = selection_count();
+    GFile *location = gtk_directory_list_get_file(directory_list_);
+    const bool in_trash = location != nullptr &&
+        g_file_has_uri_scheme(location, "trash");
 
-    const auto update = [count](std::vector<ProxyAction> &proxies) {
+    // The clipboard actions are installed last by ClipboardController. Late
+    // binding to those buttons retains its safety checks and journalling.
+    for (ProxyAction &proxy : context_proxies_) {
+        const char *clipboard = static_cast<const char *>(
+            g_object_get_data(G_OBJECT(proxy.button), "ifm-clipboard-action"));
+        if (clipboard != nullptr) {
+            proxy.target = find_button_by_label(overflow_popover_, clipboard);
+            g_object_set_data(G_OBJECT(proxy.button), "ifm-proxy-target",
+                              proxy.target);
+        }
+    }
+
+    const auto update = [count, in_trash, this](std::vector<ProxyAction> &proxies) {
         for (ProxyAction &proxy : proxies) {
             bool visible = false;
             switch (proxy.scope) {
             case ActionScope::Always:
                 visible = true;
+                break;
+            case ActionScope::NoSelection:
+                visible = count == 0U;
                 break;
             case ActionScope::SingleSelection:
                 visible = count == 1U;
@@ -1053,6 +1173,10 @@ void InteractionController::update_action_state()
                 break;
             }
 
+            // These are mutually exclusive locations, not merely disabled
+            // alternatives. No recovery command should appear in /sbin.
+            if (proxy.target == restore_target_) visible = visible && in_trash;
+            if (proxy.target == trash_target_) visible = visible && !in_trash;
             gtk_widget_set_visible(proxy.button, visible);
             if (proxy.requires_target) {
                 gtk_widget_set_sensitive(
@@ -1083,6 +1207,22 @@ void InteractionController::update_action_state()
     for (GtkWidget *button : open_with_actions_) {
         gtk_widget_set_visible(button, regular);
         gtk_widget_set_sensitive(button, regular);
+    }
+    // Suppress empty groups and leading dividers in both selected-file and
+    // background menus. Scrolling is only for genuinely crowded contexts.
+    bool preceding_section = false;
+    for (GtkWidget *section : context_sections_) {
+        bool has_action = false;
+        GtkWidget *divider = nullptr;
+        for (GtkWidget *child = gtk_widget_get_first_child(section);
+             child != nullptr; child = gtk_widget_get_next_sibling(child)) {
+            if (GTK_IS_SEPARATOR(child)) divider = child;
+            else if (gtk_widget_get_visible(child)) has_action = true;
+        }
+        gtk_widget_set_visible(section, has_action);
+        if (divider != nullptr)
+            gtk_widget_set_visible(divider, has_action && preceding_section);
+        if (has_action) preceding_section = true;
     }
     auto *window = static_cast<FileManagerWindow *>(
         g_object_get_data(G_OBJECT(window_), "ifm-window-controller"));

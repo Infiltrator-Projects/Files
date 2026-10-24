@@ -160,6 +160,11 @@ void qualify_selection_actions(infiltrator::files::FileManagerWindow &w,
         if (!loaded) g_usleep(1000);
     }
     require(loaded, "Test location did not enumerate five files/folders");
+    GtkWidget *context = GTK_WIDGET(g_object_get_data(
+        G_OBJECT(w.native_window()), "ifm-context-popover"));
+    require(GTK_IS_POPOVER(context), "Context menu must exist at selection test");
+    require(!gtk_widget_get_visible(find_button(context, "Restore")),
+            "Regular filesystem locations must not expose Restore");
 
     GtkWidget *pattern_action = find_button(popover, "Select by filename pattern…");
     GtkWidget *type_action = find_button(popover, "Select same file type");
@@ -188,6 +193,12 @@ void qualify_selection_actions(infiltrator::files::FileManagerWindow &w,
     gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection));
     gtk_selection_model_select_item(GTK_SELECTION_MODEL(selection),
                                     position_for(selection, "first.pdf"), TRUE);
+    require(!gtk_widget_get_visible(find_button(context, "New Folder")),
+            "Item context menu must not include background creation controls");
+    require(gtk_widget_get_visible(find_button(context, "Open With…")),
+            "Regular file context menu must offer Open With");
+    require(gtk_widget_get_sensitive(find_button(context, "Copy")),
+            "Item context Copy must use the installed clipboard action");
     g_signal_emit_by_name(type_action, "clicked");
     require(selected_count(selection) == 2U,
             "Select same type must include both PDFs but exclude text and directories");
@@ -296,6 +307,25 @@ int main()
                 "Clipboard Cut must be available from File actions");
         require(find_button(popover, "Paste") != nullptr,
                 "Clipboard Paste must be available from File actions");
+
+        auto *context = GTK_WIDGET(g_object_get_data(
+            G_OBJECT(window->native_window()), "ifm-context-popover"));
+        require(GTK_IS_POPOVER(context), "Native right-click popover is missing");
+        GtkWidget *context_scroller =
+            gtk_popover_get_child(GTK_POPOVER(context));
+        require(GTK_IS_SCROLLED_WINDOW(context_scroller),
+                "Right-click menu must be scrollable rather than unbounded");
+        require(gtk_scrolled_window_get_max_content_height(
+                    GTK_SCROLLED_WINDOW(context_scroller)) <= 350,
+                "Right-click menu must fit on compact screens");
+        require(find_button(context, "New Folder") != nullptr &&
+                find_button(context, "Paste") != nullptr &&
+                find_button(context, "Restore") != nullptr,
+                "Right-click actions must retain creation, clipboard and recovery");
+        require(gtk_widget_get_visible(find_button(context, "New Folder")),
+                "Empty-directory right click must offer folder creation");
+        require(!gtk_widget_get_visible(find_button(context, "Restore")),
+                "Restore must not appear outside Trash");
         gtk_menu_button_popdown(GTK_MENU_BUTTON(overflow));
         require(!gtk_widget_get_visible(popover),
                 "Closing File actions must dismiss its popover");

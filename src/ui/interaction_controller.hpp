@@ -24,6 +24,7 @@ public:
 private:
     enum class ActionScope {
         Always,
+        NoSelection,
         SingleSelection,
         MultiSelection,
         AnySelection,
@@ -89,6 +90,7 @@ private:
     GtkWidget *build_action_box(std::vector<ProxyAction> &proxies,
                                 GtkWidget **open_button,
                                 GtkWidget **properties_button);
+    GtkWidget *build_context_action_box();
     [[nodiscard]] guint selection_count() const;
 
     GtkWindow *window_{nullptr};
@@ -131,6 +133,7 @@ private:
     std::vector<GtkWidget *> sidebar_actions_;
     std::vector<ProxyAction> overflow_proxies_;
     std::vector<ProxyAction> context_proxies_;
+    std::vector<GtkWidget *> context_sections_;
 
     gulong selection_handler_{0U};
     gulong location_handler_{0U};

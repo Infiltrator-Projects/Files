@@ -418,6 +418,11 @@ void ThemeController::apply_theme()
     rule("popover button", "color:" + text + ";border-radius:" + radius);
     rule("popover button:hover", "background-color:" + active_hover);
     rule("popover label", "color:" + text);
+    rule("popover.ifm-context-popover button.flat",
+         "min-height:24px;padding:3px 9px;font-size:0.94em;"
+         "border-radius:" + radius);
+    rule("popover.ifm-context-popover separator",
+         "margin:2px 3px;background-color:" + subtle_border);
     rule("entry", "background-color:" + input + ";color:" + text +
          ";border-radius:" + radius);
     rule("entry selection", "background-color:" + selected +
