@@ -310,6 +310,8 @@ void ItemOperationController::on_permissions_dialog_destroy(GtkWidget *, gpointe
     auto *self = static_cast<ItemOperationController *>(data);
     self->permissions_dialog_ = nullptr;
     self->permissions_entry_ = nullptr;
+    self->permissions_grid_ = nullptr;
+    self->permission_sync_ = false;
     self->permissions_message_ = nullptr;
     self->permissions_source_path_.clear();
 }
@@ -329,6 +331,48 @@ void ItemOperationController::on_permissions_cancel(GtkButton *, gpointer data)
 void ItemOperationController::on_permissions_entry_activate(GtkEntry *, gpointer data)
 {
     static_cast<ItemOperationController *>(data)->submit_permissions();
+}
+
+void ItemOperationController::on_permission_toggle(GtkCheckButton *, gpointer data)
+{
+    auto *self = static_cast<ItemOperationController *>(data);
+    if (self->permission_sync_ || self->permissions_grid_ == nullptr ||
+        self->permissions_entry_ == nullptr) return;
+    guint mode = 0U;
+    for (GtkWidget *child = gtk_widget_get_first_child(self->permissions_grid_);
+         child != nullptr; child = gtk_widget_get_next_sibling(child)) {
+        if (GTK_IS_CHECK_BUTTON(child) && gtk_check_button_get_active(GTK_CHECK_BUTTON(child)))
+            mode |= GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(child), "ifm-mode-bit"));
+    }
+    char *text = g_strdup_printf("%03o", mode);
+    self->permission_sync_ = true;
+    gtk_editable_set_text(GTK_EDITABLE(self->permissions_entry_), text);
+    self->permission_sync_ = false;
+    g_free(text);
+}
+
+void ItemOperationController::on_permissions_text_changed(GtkEditable *field, gpointer data)
+{
+    auto *self = static_cast<ItemOperationController *>(data);
+    if (self->permission_sync_ || self->permissions_grid_ == nullptr) return;
+    const char *text = gtk_editable_get_text(field);
+    if (text == nullptr) return;
+    const std::string mode(text);
+    if (!(mode.size() == 3U || (mode.size() == 4U && mode[0] == '0')))
+        return;
+    guint bits = 0U;
+    for (char c : mode) {
+        if (c < '0' || c > '7') return;
+        bits = bits * 8U + static_cast<guint>(c - '0');
+    }
+    self->permission_sync_ = true;
+    for (GtkWidget *child = gtk_widget_get_first_child(self->permissions_grid_);
+         child != nullptr; child = gtk_widget_get_next_sibling(child)) {
+        if (!GTK_IS_CHECK_BUTTON(child)) continue;
+        const guint bit = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(child), "ifm-mode-bit"));
+        gtk_check_button_set_active(GTK_CHECK_BUTTON(child), (bits & bit) != 0U);
+    }
+    self->permission_sync_ = false;
 }
 
 void ItemOperationController::show_permissions_dialog()
@@ -371,6 +415,8 @@ void ItemOperationController::show_permissions_dialog()
     gtk_box_append(GTK_BOX(box), instruction);
 
     permissions_entry_ = gtk_entry_new();
+    guint32 presented_mode = 0U;
+    bool has_mode = false;
     // The already enumerated GFileInfo supplies the displayed mode. Never
     // query a potentially slow filesystem synchronously from the UI thread.
     const guint selected = gtk_single_selection_get_selected(selection_);
@@ -379,12 +425,39 @@ void ItemOperationController::show_permissions_dialog()
         : nullptr;
     if (info != nullptr && g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_UNIX_MODE)) {
         const guint32 mode = g_file_info_get_attribute_uint32(info, G_FILE_ATTRIBUTE_UNIX_MODE);
+        presented_mode = mode & 0777U;
+        has_mode = true;
         char *text = g_strdup_printf("%04o", mode & 07777U);
         gtk_editable_set_text(GTK_EDITABLE(permissions_entry_), text);
         g_free(text);
     }
     g_clear_object(&info);
     gtk_box_append(GTK_BOX(box), permissions_entry_);
+    permissions_grid_ = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(permissions_grid_), 7);
+    gtk_grid_set_column_spacing(GTK_GRID(permissions_grid_), 14);
+    constexpr const char *groups[] = {"Owner", "Group", "Others"};
+    constexpr const char *flags[] = {"Read", "Write", "Execute"};
+    constexpr guint masks[] = {0400U, 0200U, 0100U,
+                               0040U, 0020U, 0010U,
+                               0004U, 0002U, 0001U};
+    for (guint row = 0; row != 3U; ++row) {
+        GtkWidget *group = gtk_label_new(groups[row]);
+        gtk_widget_set_halign(group, GTK_ALIGN_START);
+        gtk_grid_attach(GTK_GRID(permissions_grid_), group, 0, static_cast<int>(row), 1, 1);
+        for (guint col = 0; col != 3U; ++col) {
+            GtkWidget *check = gtk_check_button_new_with_label(flags[col]);
+            const guint mask = masks[row * 3U + col];
+            g_object_set_data(G_OBJECT(check), "ifm-mode-bit", GUINT_TO_POINTER(mask));
+            gtk_check_button_set_active(GTK_CHECK_BUTTON(check), (presented_mode & mask) != 0U);
+            gtk_grid_attach(GTK_GRID(permissions_grid_), check,
+                            static_cast<int>(col + 1U), static_cast<int>(row), 1, 1);
+            g_signal_connect(check, "toggled", G_CALLBACK(on_permission_toggle), this);
+        }
+    }
+    gtk_widget_set_sensitive(permissions_grid_, has_mode);
+    gtk_box_append(GTK_BOX(box), permissions_grid_);
+    g_signal_connect(permissions_entry_, "changed", G_CALLBACK(on_permissions_text_changed), this);
     g_signal_connect(permissions_entry_, "activate",
                      G_CALLBACK(&ItemOperationController::on_permissions_entry_activate), this);
     permissions_message_ = gtk_label_new("");

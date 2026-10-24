@@ -59,6 +59,8 @@ private:
     static void on_rename_dialog_destroy(GtkWidget *widget, gpointer user_data);
     static void on_permissions_dialog_destroy(GtkWidget *widget, gpointer user_data);
     static void on_permissions_submit(GtkButton *button, gpointer user_data);
+    static void on_permission_toggle(GtkCheckButton *, gpointer);
+    static void on_permissions_text_changed(GtkEditable *, gpointer);
     static void on_permissions_cancel(GtkButton *button, gpointer user_data);
     static void on_permissions_entry_activate(GtkEntry *entry, gpointer user_data);
     static void on_rename_cancel(GtkButton *button, gpointer user_data);
@@ -115,6 +117,8 @@ private:
     GtkWidget *permissions_button_{nullptr};
     GtkWidget *permissions_dialog_{nullptr};
     GtkWidget *permissions_entry_{nullptr};
+    GtkWidget *permissions_grid_{nullptr};
+    bool permission_sync_{false};
     GtkWidget *permissions_message_{nullptr};
     std::string permissions_source_path_;
     GtkWidget *rename_dialog_{nullptr};
