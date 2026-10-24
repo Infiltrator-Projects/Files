@@ -128,6 +128,7 @@ add_library(infiltrator-files-ui STATIC
     src/ui/location_open.cpp
     src/ui/operation_surface_install.cpp
     src/ui/presentation_store.cpp
+    src/ui/quick_preview.cpp
     src/ui/recursive_search.cpp
     src/ui/theme_controller.cpp
     src/ui/transfer_progress_view.cpp

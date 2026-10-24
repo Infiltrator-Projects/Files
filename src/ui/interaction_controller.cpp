@@ -4,6 +4,7 @@
 #include "detail_metadata.hpp"
 #include "file_inspection.hpp"
 #include "recursive_search.hpp"
+#include "quick_preview.hpp"
 #include "file_manager_window.hpp"
 
 #include <algorithm>
@@ -423,6 +424,9 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
             ActionScope::SingleSelection, proxies));
         add_command(tools, "Inspect file…", "inspect",
                     ActionScope::SingleSelection, proxies);
+        preview_actions_.push_back(add_command(
+            tools, "Quick Look", "quick-preview",
+            ActionScope::SingleSelection, proxies));
         compare_actions_.push_back(add_command(
             tools, "Compare two file hashes…", "compare-hashes",
             ActionScope::MultiSelection, proxies));
@@ -533,6 +537,9 @@ GtkWidget *InteractionController::build_context_action_box()
         context_proxies_, G_CALLBACK(&InteractionController::on_properties_clicked));
     add_command(details, "Inspect file…", "inspect",
                 ActionScope::SingleSelection, context_proxies_);
+    preview_actions_.push_back(add_command(
+        details, "Quick Look", "quick-preview",
+        ActionScope::SingleSelection, context_proxies_));
     folder_terminal_actions_.push_back(add_command(
         details, "Open folder in terminal", "terminal-selected",
         ActionScope::SingleSelection, context_proxies_));
@@ -677,6 +684,9 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
         self->select_same_type();
     else if (g_strcmp0(command, "inspect") == 0)
         self->inspect_primary();
+    else if (g_strcmp0(command, "quick-preview") == 0)
+        show_quick_preview(self->window_, self->directory_list_,
+                           self->selection_, self->primary_selection_);
     else if (g_strcmp0(command, "compare-hashes") == 0)
         self->compare_selected_hashes();
     else if (g_strcmp0(command, "terminal-current") == 0)
@@ -1057,6 +1067,13 @@ gboolean InteractionController::on_key_pressed(GtkEventControllerKey *controller
     const bool control = (state & GDK_CONTROL_MASK) != 0;
     const bool shift = (state & GDK_SHIFT_MASK) != 0;
 
+    if (keyval == GDK_KEY_space && !control && !shift) {
+        if (self->selection_count() == 1U) {
+            show_quick_preview(self->window_, self->directory_list_,
+                               self->selection_, self->primary_selection_);
+            return TRUE;
+        }
+    }
     if (control && (keyval == GDK_KEY_l || keyval == GDK_KEY_L)) {
         self->show_location_entry();
         return TRUE;
@@ -1246,6 +1263,10 @@ void InteractionController::update_action_state()
     const bool regular = count == 1U && info != nullptr &&
         g_file_info_get_file_type(info) == G_FILE_TYPE_REGULAR;
     for (GtkWidget *button : open_with_actions_) {
+        gtk_widget_set_visible(button, regular);
+        gtk_widget_set_sensitive(button, regular);
+    }
+    for (GtkWidget *button : preview_actions_) {
         gtk_widget_set_visible(button, regular);
         gtk_widget_set_sensitive(button, regular);
     }
