@@ -206,6 +206,15 @@ void qualify_selection_actions(infiltrator::files::FileManagerWindow &w,
     { std::ofstream(root / "first.pdf") << "pdf one"; }
     { std::ofstream(root / "second.pdf") << "pdf two"; }
     { std::ofstream(root / "notes.txt") << "notes"; }
+    GdkPixbuf *small_image = gdk_pixbuf_new(GDK_COLORSPACE_RGB, FALSE, 8, 4, 3);
+    require(small_image != nullptr, "Failed to create image preview fixture");
+    gdk_pixbuf_fill(small_image, 0x336699ffU);
+    GError *image_error = nullptr;
+    require(gdk_pixbuf_save(small_image, (root / "photo.png").c_str(),
+                            "png", &image_error, nullptr),
+            "Failed to save image preview fixture");
+    g_object_unref(small_image);
+    g_clear_error(&image_error);
     GFile *location = g_file_new_for_path(root.c_str());
     w.open_location(location);
     g_object_unref(location);
@@ -216,10 +225,10 @@ void qualify_selection_actions(infiltrator::files::FileManagerWindow &w,
         while (g_main_context_iteration(nullptr, FALSE)) {}
         GListModel *items = gtk_multi_selection_get_model(selection);
         loaded = !gtk_directory_list_is_loading(listing) &&
-                 g_list_model_get_n_items(items) == 5U;
+                 g_list_model_get_n_items(items) == 6U;
         if (!loaded) g_usleep(1000);
     }
-    require(loaded, "Test location did not enumerate five files/folders");
+    require(loaded, "Test location did not enumerate six files/folders");
     GtkWidget *context = GTK_WIDGET(g_object_get_data(
         G_OBJECT(w.native_window()), "ifm-context-popover"));
     require(GTK_IS_POPOVER(context), "Context menu must exist at selection test");
@@ -335,6 +344,75 @@ void qualify_selection_actions(infiltrator::files::FileManagerWindow &w,
     require(text_in(GTK_WIDGET(inspection)).find("Allocated total:") != std::string::npos,
             "Folder scan must distinguish allocated and logical sizes");
     gtk_window_destroy(inspection);
+
+
+    // Quick Look consumes a snapshot of the visible directory model, not a
+    // mutable row pointer: switching files must not change the source model.
+    gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection));
+    gtk_selection_model_select_item(GTK_SELECTION_MODEL(selection),
+                                    position_for(selection, "notes.txt"), TRUE);
+    GtkWidget *quick = find_button(context, "Quick Look");
+    require(quick != nullptr && gtk_widget_get_visible(quick),
+            "Regular selection must expose a compact Quick Look action");
+    g_signal_emit_by_name(quick, "clicked");
+    GtkWindow *look = window_named("Quick Look");
+    require(look != nullptr, "Quick Look dialog did not open");
+    require(await_text(GTK_WIDGET(look), "notes"),
+            "UTF-8 text preview did not render");
+    GtkWidget *copy_text = find_button(GTK_WIDGET(look), "Copy text");
+    require(copy_text != nullptr && gtk_widget_get_sensitive(copy_text),
+            "Text preview must allow copying the visible contents");
+    g_signal_emit_by_name(copy_text, "clicked");
+    require(clipboard_text(w.native_window()) == "notes",
+            "Quick Look text-copy must preserve the visible text");
+    GtkWidget *copy_path = find_button(GTK_WIDGET(look), "Copy path");
+    require(copy_path != nullptr, "Quick Look path-copy missing");
+    g_signal_emit_by_name(copy_path, "clicked");
+    require(clipboard_text(w.native_window()) == (root / "notes.txt").string(),
+            "Quick Look must copy the exact file path");
+    GtkWidget *next = find_button(GTK_WIDGET(look), "Next");
+    GtkWidget *previous = find_button(GTK_WIDGET(look), "Previous");
+    require(next != nullptr && previous != nullptr,
+            "Quick Look must expose adjacent-file navigation");
+    const bool can_next = gtk_widget_get_sensitive(next);
+    const bool can_prev = gtk_widget_get_sensitive(previous);
+    require(can_next || can_prev,
+            "A populated folder must allow movement to another preview");
+    g_signal_emit_by_name(can_next ? next : previous, "clicked");
+    require(await_text(GTK_WIDGET(look), "preview") || window_named("Quick Look") != nullptr,
+            "Neighbour preview navigation must retain a valid window");
+    gtk_window_destroy(look);
+
+    gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection));
+    gtk_selection_model_select_item(GTK_SELECTION_MODEL(selection),
+                                    position_for(selection, "photo.png"), TRUE);
+    g_signal_emit_by_name(quick, "clicked");
+    look = window_named("Quick Look");
+    require(look != nullptr, "Image preview dialog did not open");
+    GtkWidget *zoom_in = find_button(GTK_WIDGET(look), "Zoom +");
+    GtkWidget *zoom_out = find_button(GTK_WIDGET(look), "Zoom −");
+    require(zoom_in != nullptr && zoom_out != nullptr,
+            "Image preview must expose bounded zoom controls");
+    bool image_loaded = false;
+    for (int n = 0; n < 5000 && !image_loaded; ++n) {
+        while (g_main_context_iteration(nullptr, FALSE)) {}
+        image_loaded = gtk_widget_get_sensitive(zoom_in);
+        if (!image_loaded) g_usleep(1000);
+    }
+    require(image_loaded, "Image decoding must complete off-thread and enable zoom");
+    g_signal_emit_by_name(zoom_in, "clicked");
+    require(gtk_widget_get_sensitive(zoom_out),
+            "Zooming in must make zoom out available");
+    gtk_window_destroy(look);
+
+    gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection));
+    gtk_selection_model_select_item(GTK_SELECTION_MODEL(selection),
+                                    position_for(selection, "first.pdf"), TRUE);
+    g_signal_emit_by_name(quick, "clicked");
+    look = window_named("Quick Look");
+    require(look != nullptr && await_text(GTK_WIDGET(look), "Binary preview"),
+            "Unsupported binary format must show bounded hex, never launch another app");
+    gtk_window_destroy(look);
 
     gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection));
     gtk_selection_model_select_item(GTK_SELECTION_MODEL(selection),

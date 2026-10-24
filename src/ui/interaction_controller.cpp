@@ -1067,13 +1067,6 @@ gboolean InteractionController::on_key_pressed(GtkEventControllerKey *controller
     const bool control = (state & GDK_CONTROL_MASK) != 0;
     const bool shift = (state & GDK_SHIFT_MASK) != 0;
 
-    if (keyval == GDK_KEY_space && !control && !shift) {
-        if (self->selection_count() == 1U) {
-            show_quick_preview(self->window_, self->directory_list_,
-                               self->selection_, self->primary_selection_);
-            return TRUE;
-        }
-    }
     if (control && (keyval == GDK_KEY_l || keyval == GDK_KEY_L)) {
         self->show_location_entry();
         return TRUE;
@@ -1089,6 +1082,11 @@ gboolean InteractionController::on_key_pressed(GtkEventControllerKey *controller
     GtkWidget *focus = gtk_window_get_focus(self->window_);
     if (GTK_IS_EDITABLE(focus)) {
         return FALSE;
+    }
+    if (keyval == GDK_KEY_space && !control && !shift && self->selection_count() == 1U) {
+        show_quick_preview(self->window_, self->directory_list_,
+                           self->selection_, self->primary_selection_);
+        return TRUE;
     }
 
     if (control && shift && (keyval == GDK_KEY_c || keyval == GDK_KEY_C)) {
