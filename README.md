@@ -58,6 +58,9 @@ Product-level acceptance is defined in [`docs/PRODUCT-QUALITY.md`](docs/PRODUCT-
 
 ## Current implementation
 
+Files 0.1.65 advances fifteen **separate original catalogue requirements**, not fifteen buttons. It introduces derived file tags and bulk tagging, tag search/export, persistent scoped saved searches and fail-closed private search exclusions, bounded duplicate lookup, UID and modified-range filtering, selected-folder search, external checksum verification, exact byte comparison, symlink health and provider metadata. Four original requirements remain **partial** rather than falsely declared complete; the per-line evidence and limitations are maintained in [the 0.1.65 audit](docs/FEATURE-AUDIT-0.1.65.md). No additional mutation engine, private filesystem parser or privileged service has been introduced.
+
+
 Files 0.1.64 adds a bounded, read-only Quick Look surface for selected regular files. Space or the context action opens background-decoded images, UTF-8 text (up to 256 KiB), or a hex fallback for unsupported formats; Previous/Next navigate the current visible file order, with zoom, copy-text, copy-path and cancellation. Unknown-size files and files over 8 MiB are refused. No preview owns filesystem mutations, and desktop Day/Night visual acceptance remains outstanding.
 
 

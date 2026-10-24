@@ -2,6 +2,9 @@
 
 ## Qualification
 
+The 0.1.65 tranche adds `tag-catalogue` and `search-persistence` CTest executables (raising the hosted suite to 20), including malformed durable-state refusal and exact read-back checks. Search engine fixtures exercise duplicate SHA-256 grouping, UID filtering, modified intervals, per-query exclusions, tag-URI matching and symlink-cycle avoidance. Real GTK tests cover selected-root aggregation, named-search save/reload and expected checksum verification/mismatch including basename-bound sha256sum lines. Exact revision CI, native-install qualification and beta APT publication remain release gates; no headless test proves desktop aesthetic acceptance.
+
+
 Files 0.1.64 interaction-surface qualification exercises Quick Look on a real temporary directory containing plain text, PNG and intentionally unsupported binary content. It asserts clipboard text/path fidelity, image decode/zoom availability, neighbour actions and explicit binary fallback. The preview work captures GFile references and uses a cancellable generation-fenced background GTask, refusing unknown or >8 MiB inputs. The hosted Ubuntu 24.04 build passed 18/18 CTest executables and the aggressive native-installer qualification. Actual Mint Day/Night screenshots, accessibility review and remote-provider stress remain unproven.
 
 

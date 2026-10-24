@@ -1,5 +1,8 @@
 # Files — Complete Feature Catalogue
 
+The 0.1.65 tranche is explicitly reconciled against fifteen distinct entries from the **original v0.1.61 catalogue**, not controls fabricated from one larger feature. See [0.1.65 catalogue audit](FEATURE-AUDIT-0.1.65.md): **11 bounded complete, 4 partial**. In particular, owner/tag and date-range filtering are not yet comprehensive collection metadata search; named saved searches do not yet provide automatically maintained smart collections; SHA-256 duplicate grouping has 8 MiB/500-candidate bounds; tag export has no import/reconciliation. New features also include selection-scoped search, exact byte-stream comparison, checked SHA-256 provenance text, symlink health, provider details and fail-closed private exclusions.
+
+
 The 0.1.64 Quick Look tranche qualifies ten everyday preview interactions (Space, contextual opening, text, image, binary hex, adjacent-file traversal, zoom, copy contents, copy location and metadata/status). Its read-only GIO workers have bounded reads and stale-generation rejection. This is not PDF rendering, media playback, a streaming large-file viewer or a replacement for the preview-provider roadmap.
 
 

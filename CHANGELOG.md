@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.65 — 2026-10-24
+
+- Advance **15 distinct original Files feature-catalogue entries**, with traceability to the untouched v0.1.61 specification: 11 bounded complete and 4 honestly partial; see `docs/FEATURE-AUDIT-0.1.65.md`.
+- Add selected-location GIO retrieval, owner UID and modified-range filters, bounded SHA-256 duplicate grouping, mandatory private-location exclusions, up to 16 saved searches and genuine real-object reveal.
+- Add a derived, atomic URI/tag catalogue with 1–128 item bulk tagging, exact tag search, TSV export and strict refusal to overwrite unreadable state. Tags do not become filesystem authority.
+- Add copyable SHA-256 verification (exact hash or basename-bound sha256sum line), byte-stream comparison with size/digest reporting and richer link/provider/volume inspection.
+- Preserve bounded resource policies, cancellation, provider capability distinctions, explicit unknown/incomplete states and read-only search/inspection boundaries. No new mutations or elevated services.
+- Full smart collections, comprehensive metadata collection filters, large/cross-root duplicates and imported tag-catalogue reconstruction remain unfinished. Native visual qualification remains open.
+
+
 ## 0.1.64 — 2026-10-24
 
 - Add opt-in Quick Look (Space and context action) for regular files, preserving the existing open/launch and mutation ownership boundaries.

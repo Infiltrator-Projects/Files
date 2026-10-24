@@ -236,6 +236,13 @@ Recovery scanning and append admission share one complete-frame validator. Under
 
 ## 7. Search architecture
 
+### 0.1.65 retrieval and derived tags
+
+The GIO search engine remains the sole read-only enumerator; it implements bounded per-root duplicate digest grouping, owner/time criteria and immutable exact-URI label membership without any mutation authority. A selected-root search aggregates only bounded ordinary search results; cross-root duplicate comparison is explicitly refused rather than giving an incomplete positive verdict. Permanent search privacy exclusions are kept independently from named presets; an invalid exclusion file disables scanning rather than falling back to an empty allowlist.
+
+`tag_catalogue` owns the private derived URI/label association file. It is not a filesystem or inode identity service: external moves and renames may invalidate labels, and the durable map is never consulted by mutating operation preflight. `search_persistence` owns versioned, bounded named presets and mandatory private search exclusions, using Common-backed private atomic storage through `presentation_store`. A failed or malformed load preserves the source bytes, distinguishes unavailable state and refuses conflicting writes.
+
+
 Search has independent layers:
 
 ### Exact/native search
