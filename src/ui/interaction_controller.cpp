@@ -460,6 +460,15 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
         folder_open_actions_.push_back(add_command(
             layout, "Open folders in new tabs", "folder-default-tab",
             ActionScope::Always, proxies));
+        thumbnail_actions_.push_back(add_command(
+            layout, "Disable remote thumbnails", "remote-thumbnails",
+            ActionScope::Always, proxies));
+        zoom_smaller_actions_.push_back(add_command(
+            layout, "Smaller Icons", "icons-smaller",
+            ActionScope::Always, proxies));
+        zoom_larger_actions_.push_back(add_command(
+            layout, "Larger Icons", "icons-larger",
+            ActionScope::Always, proxies));
         sidebar_actions_.push_back(add_command(layout, "Hide Sidebar", "toggle-sidebar",
                                                ActionScope::Always, proxies));
     }
@@ -696,6 +705,9 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
     else if (g_strcmp0(command, "folders-first") == 0) window->toggle_folders_first();
     else if (g_strcmp0(command, "single-click") == 0) window->toggle_single_click_activation();
     else if (g_strcmp0(command, "folder-default-tab") == 0) window->toggle_folder_open_mode();
+    else if (g_strcmp0(command, "remote-thumbnails") == 0) window->toggle_remote_thumbnails();
+    else if (g_strcmp0(command, "icons-smaller") == 0) window->adjust_icon_density(-1);
+    else if (g_strcmp0(command, "icons-larger") == 0) window->adjust_icon_density(1);
     else if (g_strcmp0(command, "toggle-sidebar") == 0) window->toggle_sidebar();
     else if (g_strcmp0(command, "selected-tabs") == 0)
         (void)window->open_selected_folders_in_tabs();
@@ -1531,6 +1543,13 @@ void InteractionController::update_action_state()
         for (GtkWidget *button : folder_open_actions_)
             gtk_button_set_label(GTK_BUTTON(button), window->folder_open_new_tab()
                 ? "Open folders in current tab" : "Open folders in new tabs");
+        for (GtkWidget *button : thumbnail_actions_)
+            gtk_button_set_label(GTK_BUTTON(button), window->remote_thumbnails()
+                ? "Disable remote thumbnails" : "Enable remote thumbnails");
+        for (GtkWidget *button : zoom_smaller_actions_)
+            gtk_widget_set_sensitive(button, window->icon_size() > 48);
+        for (GtkWidget *button : zoom_larger_actions_)
+            gtk_widget_set_sensitive(button, window->icon_size() < 96);
     }
 
     if (overflow_open_button_ != nullptr) {
