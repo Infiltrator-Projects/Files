@@ -25,7 +25,9 @@ struct SearchOptions {
     std::optional<std::int64_t> modified_since; // Unix seconds, inclusive
     std::optional<std::int64_t> modified_before; // Unix seconds, exclusive
     std::optional<std::uint32_t> owner_uid; // Provider must expose unix::uid
-    bool duplicates_by_sha256{false}; // Bounded digest search, not byte equality
+    bool duplicates_by_sha256{false};
+    bool restrict_tagged_uris{false};
+    std::vector<std::string> tagged_uris; // Derived, per-query snapshot only // Bounded digest search, not byte equality
     std::vector<std::string> excluded_uris; // Exact URI or descendant only
     std::string content; // UTF-8 substring, regular text files <=1 MiB only
 };

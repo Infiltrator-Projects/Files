@@ -3,6 +3,7 @@
 
 #include "file_manager_window.hpp"
 #include "../core/search_engine.hpp"
+#include "tag_catalogue.hpp"
 
 #include <charconv>
 #include <cstring>
@@ -33,6 +34,7 @@ struct SearchWindow {
     GtkWidget *since{nullptr};
     GtkWidget *before{nullptr};
     GtkWidget *owner_uid{nullptr};
+    GtkWidget *tag{nullptr};
     GtkWidget *excluded{nullptr};
     GtkWidget *duplicates{nullptr};
     GtkWidget *content{nullptr};
@@ -279,6 +281,20 @@ void start(GtkButton *, gpointer data)
     else if (owner) o.owner_uid = static_cast<std::uint32_t>(*owner);
     o.duplicates_by_sha256 =
         gtk_check_button_get_active(GTK_CHECK_BUTTON(s->duplicates));
+    const char *tag = gtk_editable_get_text(GTK_EDITABLE(s->tag));
+    if (tag != nullptr && *tag != '\0') {
+        std::string name(tag);
+        if (!valid_tag(name)) valid = false;
+        else {
+            const TagCatalogue catalogue = load_tag_catalogue();
+            if (!catalogue.writable) {
+                gtk_label_set_text(GTK_LABEL(s->status), catalogue.error.c_str());
+                return;
+            }
+            o.restrict_tagged_uris = true;
+            o.tagged_uris = uris_for_tag(catalogue, name);
+        }
+    }
     const char *excluded = gtk_editable_get_text(GTK_EDITABLE(s->excluded));
     if (excluded != nullptr && *excluded != '\0') {
         // Per-query exclusions are absolute URIs/paths, not wildcards. A path
@@ -312,7 +328,8 @@ void start(GtkButton *, gpointer data)
     }
     if (o.name.empty() && o.content.empty() && o.kind == SearchItemKind::Any &&
         !o.minimum_size && !o.maximum_size && !o.modified_since &&
-        !o.modified_before && !o.owner_uid && !o.duplicates_by_sha256) {
+        !o.modified_before && !o.owner_uid && !o.duplicates_by_sha256 &&
+        !o.restrict_tagged_uris) {
         gtk_label_set_text(GTK_LABEL(s->status),
             "Enter a name, text or filter to start a bounded search.");
         return;
@@ -397,6 +414,7 @@ void show_recursive_search_impl(GtkWindow *owner, GFile *location,
     s->since = field(GTK_GRID(options), "Modified on/after (local YYYY-MM-DD)", 0, 3, "Optional");
     s->before = field(GTK_GRID(options), "Modified before (local YYYY-MM-DD)", 1, 3, "Optional");
     s->owner_uid = field(GTK_GRID(options), "Owner UID (native providers)", 0, 4, "Optional numeric UID");
+    s->tag = field(GTK_GRID(options), "Tag filter (derived catalogue)", 0, 5, "Optional exact label");
     s->excluded = field(GTK_GRID(options), "Exclude locations (paths/URIs separated by ;)", 1, 4, "Optional private locations");
     GtkWidget *flags = gtk_box_new(GTK_ORIENTATION_VERTICAL, 3);
     s->recursive = gtk_check_button_new_with_label("Include subfolders");
@@ -409,7 +427,7 @@ void show_recursive_search_impl(GtkWindow *owner, GFile *location,
     s->duplicates = gtk_check_button_new_with_label(
         "Find duplicate regular files by SHA-256 (8 MiB/file limit)");
     gtk_box_append(GTK_BOX(flags), s->duplicates);
-    gtk_grid_attach(GTK_GRID(options), flags, 0, 5, 2, 1);
+    gtk_grid_attach(GTK_GRID(options), flags, 1, 5, 1, 1);
 
     GtkWidget *toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_box_append(GTK_BOX(outer), toolbar);

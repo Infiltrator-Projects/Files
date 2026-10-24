@@ -147,11 +147,12 @@ SearchReport search_files(GFile *root, const SearchOptions &o,
         (o.modified_before && *o.modified_before < 0) ||
         (o.modified_since && o.modified_before &&
          *o.modified_since >= *o.modified_before) ||
-        o.excluded_uris.size() > 64) {
+        o.excluded_uris.size() > 64 || o.tagged_uris.size() > 512) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
                     "Invalid search pattern, text or size bounds");
         return report;
     }
+    const std::set<std::string> tagged(o.tagged_uris.begin(), o.tagged_uris.end());
     std::vector<GFile *> blocked;
     for (const std::string &uri : o.excluded_uris) {
         GFile *file = g_file_new_for_uri(uri.c_str());
@@ -283,6 +284,11 @@ SearchReport search_files(GFile *root, const SearchOptions &o,
             (!g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_UNIX_UID) ||
              g_file_info_get_attribute_uint32(info, G_FILE_ATTRIBUTE_UNIX_UID) != *o.owner_uid))
             matching = false;
+        if (o.restrict_tagged_uris) {
+            char *uri = g_file_get_uri(child);
+            if (uri == nullptr || !tagged.contains(uri)) matching = false;
+            g_free(uri);
+        }
         if (o.duplicates_by_sha256) {
             if (!regular) {
                 // Directories/symlinks are deliberately not candidates and
