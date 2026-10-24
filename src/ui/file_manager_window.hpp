@@ -48,6 +48,8 @@ public:
     [[nodiscard]] bool show_extensions() const noexcept { return show_extensions_; }
     void toggle_folders_first();
     void toggle_sidebar();
+    void toggle_single_click_activation();
+    [[nodiscard]] bool single_click_activation() const noexcept { return single_click_activation_; }
     void refresh_current_directory();
     [[nodiscard]] guint open_selected_folders_in_tabs();
     [[nodiscard]] bool show_hidden() const noexcept { return show_hidden_; }
@@ -272,6 +274,7 @@ private:
     ViewMode view_mode_{ViewMode::List};
     bool show_hidden_{false};
     bool show_extensions_{true};
+    bool single_click_activation_{false};
     bool folders_first_{true};
     bool sidebar_visible_{true};
     bool preferences_ready_{false};

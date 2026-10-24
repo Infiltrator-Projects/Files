@@ -455,6 +455,8 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
             ActionScope::Always, proxies));
         folder_sort_actions_.push_back(add_command(layout, "Folders First", "folders-first",
                                                    ActionScope::Always, proxies));
+        activation_actions_.push_back(add_command(layout,
+            "Enable Single-click Open", "single-click", ActionScope::Always, proxies));
         sidebar_actions_.push_back(add_command(layout, "Hide Sidebar", "toggle-sidebar",
                                                ActionScope::Always, proxies));
     }
@@ -689,6 +691,7 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
     else if (g_strcmp0(command, "toggle-hidden") == 0) window->toggle_show_hidden();
     else if (g_strcmp0(command, "toggle-extensions") == 0) window->toggle_extensions();
     else if (g_strcmp0(command, "folders-first") == 0) window->toggle_folders_first();
+    else if (g_strcmp0(command, "single-click") == 0) window->toggle_single_click_activation();
     else if (g_strcmp0(command, "toggle-sidebar") == 0) window->toggle_sidebar();
     else if (g_strcmp0(command, "selected-tabs") == 0)
         (void)window->open_selected_folders_in_tabs();
@@ -1518,6 +1521,9 @@ void InteractionController::update_action_state()
         for (GtkWidget *button : sidebar_actions_)
             gtk_button_set_label(GTK_BUTTON(button), window->sidebar_visible()
                                      ? "Hide Sidebar" : "Show Sidebar");
+        for (GtkWidget *button : activation_actions_)
+            gtk_button_set_label(GTK_BUTTON(button), window->single_click_activation()
+                ? "Require Double-click to Open" : "Enable Single-click Open");
     }
 
     if (overflow_open_button_ != nullptr) {

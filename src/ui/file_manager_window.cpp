@@ -780,6 +780,8 @@ void FileManagerWindow::load_preferences()
             show_hidden_ = g_key_file_get_boolean(keys, "Appearance", "show-hidden", nullptr);
         if (g_key_file_has_key(keys, "Appearance", "show-extensions", nullptr))
             show_extensions_ = g_key_file_get_boolean(keys, "Appearance", "show-extensions", nullptr);
+        if (g_key_file_has_key(keys, "Appearance", "single-click", nullptr))
+            single_click_activation_ = g_key_file_get_boolean(keys, "Appearance", "single-click", nullptr);
         if (g_key_file_has_key(keys, "Appearance", "sidebar-visible", nullptr))
             sidebar_visible_ = g_key_file_get_boolean(keys, "Appearance", "sidebar-visible", nullptr);
         if (g_key_file_has_key(keys, "Appearance", "folders-first", nullptr))
@@ -807,6 +809,7 @@ void FileManagerWindow::save_preferences() const
     GKeyFile *keys = g_key_file_new();
     g_key_file_set_boolean(keys, "Appearance", "show-hidden", show_hidden_);
     g_key_file_set_boolean(keys, "Appearance", "show-extensions", show_extensions_);
+    g_key_file_set_boolean(keys, "Appearance", "single-click", single_click_activation_);
     g_key_file_set_boolean(keys, "Appearance", "sidebar-visible", sidebar_visible_);
     g_key_file_set_boolean(keys, "Appearance", "folders-first", folders_first_);
     g_key_file_set_integer(keys, "Appearance", "view", static_cast<gint>(view_mode_) + 1);
@@ -829,6 +832,17 @@ void FileManagerWindow::apply_preferences()
     if (sidebar_scroll_ != nullptr)
         gtk_widget_set_visible(sidebar_scroll_, sidebar_visible_);
     set_view_mode(view_mode_);
+    if (detail_view_ != nullptr)
+        gtk_column_view_set_single_click_activate(detail_view_, single_click_activation_);
+    if (content_stack_ != nullptr) {
+        for (const char *name : {"icons", "compact"}) {
+            GtkWidget *scroller = gtk_stack_get_child_by_name(GTK_STACK(content_stack_), name);
+            GtkWidget *grid = GTK_IS_SCROLLED_WINDOW(scroller)
+                ? gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scroller)) : nullptr;
+            if (GTK_IS_GRID_VIEW(grid))
+                gtk_grid_view_set_single_click_activate(GTK_GRID_VIEW(grid), single_click_activation_);
+        }
+    }
     preferences_ready_ = true;
 }
 
@@ -889,6 +903,23 @@ void FileManagerWindow::toggle_folders_first()
     folders_first_ = !folders_first_;
     folders_first_state_->store(folders_first_, std::memory_order_relaxed);
     notify_sort_changed();
+    save_preferences();
+}
+
+void FileManagerWindow::toggle_single_click_activation()
+{
+    single_click_activation_ = !single_click_activation_;
+    if (detail_view_ != nullptr)
+        gtk_column_view_set_single_click_activate(detail_view_, single_click_activation_);
+    if (content_stack_ != nullptr) {
+        for (const char *name : {"icons", "compact"}) {
+            GtkWidget *scroller = gtk_stack_get_child_by_name(GTK_STACK(content_stack_), name);
+            GtkWidget *grid = GTK_IS_SCROLLED_WINDOW(scroller)
+                ? gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scroller)) : nullptr;
+            if (GTK_IS_GRID_VIEW(grid))
+                gtk_grid_view_set_single_click_activate(GTK_GRID_VIEW(grid), single_click_activation_);
+        }
+    }
     save_preferences();
 }
 
