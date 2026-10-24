@@ -99,6 +99,7 @@ add_library(infiltrator-files-core STATIC
     src/core/mounted_places.cpp
     src/core/operation_engine.cpp
     src/core/operation_journal.cpp
+    src/core/provider_import_engine.cpp
     src/core/recovery_operation_engine.cpp
     src/core/search_engine.cpp
     src/core/transfer_operation_engine.cpp)
@@ -162,6 +163,7 @@ endfunction()
 
 if(BUILD_TESTING)
     infiltrator_add_core_test(location-model-test tests/location_model_test.cpp location-model)
+    infiltrator_add_core_test(provider-import-test tests/provider_import_engine_test.cpp provider-import)
 
     add_library(calendar-date-test-fixture MODULE tests/calendar_date_fixture.c)
     target_link_libraries(calendar-date-test-fixture PRIVATE InfiltratrCommon::Portable)

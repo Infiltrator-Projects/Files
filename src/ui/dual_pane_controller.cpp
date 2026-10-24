@@ -83,6 +83,8 @@ DualPaneController::DualPaneController(GtkWindow *window, GtkWidget *host,
     action(toolbar, "Move →", "Move selected items in the main pane into the second pane", 2, this, G_CALLBACK(on_transfer));
     action(toolbar, "← Copy", "Copy selected items in the second pane into the main pane", 3, this, G_CALLBACK(on_transfer));
     action(toolbar, "← Move", "Move selected items in the second pane into the main pane", 4, this, G_CALLBACK(on_transfer));
+    action(toolbar, "Stop Import", "Cancel a provider import; previously completed copies are retained",
+           0, this, G_CALLBACK(on_cancel_import));
     GtkWidget *select_all = gtk_button_new_with_label("Select all");
     gtk_widget_set_tooltip_text(select_all, "Select every visible item in the second pane");
     g_signal_connect(select_all, "clicked", G_CALLBACK(on_select_all), this);
@@ -348,6 +350,36 @@ std::vector<std::string> DualPaneController::selected_sources(bool from_primary)
     return result;
 }
 
+std::vector<std::string> DualPaneController::selected_provider_uris() const
+{
+    std::vector<std::string> uris;
+    GFile *parent = gtk_directory_list_get_file(secondary_);
+    if (parent == nullptr || g_file_is_native(parent)) return uris;
+    GListModel *model = gtk_multi_selection_get_model(secondary_selection_);
+    if (model == nullptr) return uris;
+    GtkBitset *bits = gtk_selection_model_get_selection(GTK_SELECTION_MODEL(secondary_selection_));
+    if (gtk_bitset_get_size(bits) > 256U) {
+        gtk_bitset_unref(bits);
+        return uris;
+    }
+    GtkBitsetIter iter;
+    guint index = 0;
+    for (gboolean valid = gtk_bitset_iter_init_first(&iter, bits, &index);
+         valid; valid = gtk_bitset_iter_next(&iter, &index)) {
+        auto *info = G_FILE_INFO(g_list_model_get_item(model, index));
+        if (info != nullptr && g_file_info_get_name(info) != nullptr) {
+            GFile *child = g_file_get_child(parent, g_file_info_get_name(info));
+            char *uri = g_file_get_uri(child);
+            if (uri != nullptr) uris.emplace_back(uri);
+            g_free(uri);
+            g_object_unref(child);
+        }
+        g_clear_object(&info);
+    }
+    gtk_bitset_unref(bits);
+    return uris;
+}
+
 void DualPaneController::status(const char *message) const
 {
     if (feedback_ != nullptr) gtk_label_set_text(GTK_LABEL(feedback_), message);
@@ -362,16 +394,31 @@ void DualPaneController::transfer(bool to_secondary, bool move)
         return;
     }
     char *path = g_file_get_path(destination);
-    auto sources = selected_sources(to_secondary);
-    if (path == nullptr || sources.empty()) {
-        status("Select local source items in the opposite pane first.");
+    auto *controller = static_cast<ClipboardController *>(
+        g_object_get_data(G_OBJECT(window_), "ifm-clipboard-controller"));
+    if (path == nullptr || controller == nullptr) {
+        status("The import destination or transfer controller is unavailable.");
         g_free(path);
         return;
     }
-    auto *controller = static_cast<ClipboardController *>(
-        g_object_get_data(G_OBJECT(window_), "ifm-clipboard-controller"));
-    if (controller == nullptr || !controller->transfer_from_drop(sources, path, move))
+    GFile *source_parent = gtk_directory_list_get_file(to_secondary ? primary_ : secondary_);
+    if (!to_secondary && source_parent != nullptr && !g_file_is_native(source_parent)) {
+        if (move) {
+            status("Remote and portable devices are copy-only; Move is not supported.");
+        } else {
+            auto uris = selected_provider_uris();
+            if (uris.empty() || !controller->import_provider_files(uris, path))
+                status("Select up to 256 provider files, or finish the active transfer first.");
+        }
+        g_free(path);
+        return;
+    }
+    auto sources = selected_sources(to_secondary);
+    if (sources.empty()) {
+        status("Select up to 256 native source items in the opposite pane first.");
+    } else if (!controller->transfer_from_drop(sources, path, move)) {
         status("Another transfer is active, or the window is no longer available.");
+    }
     g_free(path);
 }
 
@@ -382,6 +429,14 @@ void DualPaneController::on_transfer(GtkButton *button, gpointer data)
         g_object_get_data(G_OBJECT(button), "ifm-pane-transfer"));
     if (mode >= 1 && mode <= 4)
         self->transfer(mode <= 2, (mode % 2) == 0);
+}
+
+void DualPaneController::on_cancel_import(GtkButton *, gpointer data)
+{
+    auto *self = static_cast<DualPaneController *>(data);
+    auto *controller = static_cast<ClipboardController *>(
+        g_object_get_data(G_OBJECT(self->window_), "ifm-clipboard-controller"));
+    if (controller != nullptr) controller->cancel_provider_import();
 }
 
 } // namespace infiltrator::files

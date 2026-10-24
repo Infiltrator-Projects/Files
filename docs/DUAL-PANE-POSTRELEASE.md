@@ -49,3 +49,20 @@ The tested scope is native filesystem paths with at most 256 items per drop;
 unsupported non-native drags and oversized input fail without partial acceptance.
 Only an explicit Shift-modified same-process drop can request a move. This is
 not yet remote/MTP transfer support or parity in split-pane tab/view modes.
+
+## Provider ingress: bounded copy-only import
+
+The secondary-pane Copy-to-primary action may now import up to 256 regular files
+from a readable non-native GIO location into a native destination. This includes
+GVfs devices such as MTP/PTP when a qualified system provider exposes readable
+regular-file streams; no device-specific compatibility is claimed without hardware.
+The operation creates journal-correlated private staging under the native target,
+copies the provider bytes, rereads the source to verify staged content, then uses
+the existing native TransferOperationEngine for conflict-safe durable publication.
+Interrupted or failed imports must not delete or move device originals. The Stop
+Import action cancels the active provider read and retains previously published
+items; a failure stops the remainder of the requested batch.
+
+Non-native destinations, remote moves, recursive provider directories, remote
+write/rename, selective retry/resume, full provider metadata preservation and
+hardware disconnect qualification remain outside this bounded slice.

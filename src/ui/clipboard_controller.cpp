@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "clipboard_controller.hpp"
+#include "../core/provider_import_engine.hpp"
+#include "../core/operation_journal.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -31,6 +33,16 @@ struct ClipboardTaskData {
     std::vector<std::string> sources;
     std::string destination_parent;
     std::shared_ptr<TransferControl> control;
+};
+
+struct ProviderImportTaskData {
+    std::vector<std::string> uris;
+    std::string destination;
+};
+struct ProviderImportOutcome {
+    std::size_t imported{0};
+    std::size_t requested{0};
+    OperationResult last;
 };
 
 bool tooltip_equals(GtkWidget *widget, const char *expected)
@@ -115,6 +127,8 @@ ClipboardController::ClipboardController(GtkWindow *window,
 
 ClipboardController::~ClipboardController()
 {
+    cancel_provider_import();
+    g_clear_object(&provider_import_cancellable_);
     if (clipboard_ != nullptr) {
         if (clipboard_changed_handler_ != 0U)
             g_signal_handler_disconnect(clipboard_, clipboard_changed_handler_);
@@ -143,6 +157,7 @@ void ClipboardController::on_window_destroyed(GtkWidget *, gpointer user_data)
 {
     auto *self = static_cast<ClipboardController *>(user_data);
     ++self->clipboard_generation_;
+    self->cancel_provider_import();
     if (self->clipboard_ != nullptr && self->clipboard_changed_handler_ != 0U) {
         g_signal_handler_disconnect(self->clipboard_, self->clipboard_changed_handler_);
         self->clipboard_changed_handler_ = 0U;
@@ -520,6 +535,107 @@ bool ClipboardController::transfer_from_drop(const std::vector<std::string> &sou
     // transport must never perform a second, unjournalled deletion.
     paste_sources(move ? Mode::Cut : Mode::Copy, sources, destination, BatchConflictPolicy::Fail);
     return true;
+}
+
+bool ClipboardController::import_provider_files(
+    const std::vector<std::string> &uris, const std::string &destination)
+{
+    if (busy_ || reading_external_clipboard_ || uris.empty() || uris.size() > 256U ||
+        destination.empty() || window_ == nullptr || !mutation_guard_.begin())
+        return false;
+    for (const std::string &uri : uris) {
+        GFile *file = g_file_new_for_uri(uri.c_str());
+        const bool remote = !g_file_is_native(file);
+        g_object_unref(file);
+        if (!remote) {
+            (void)mutation_guard_.finish();
+            return false;
+        }
+    }
+    g_clear_object(&provider_import_cancellable_);
+    provider_import_cancellable_ = g_cancellable_new();
+    auto *data = new ProviderImportTaskData{uris, destination};
+    busy_ = true;
+    update_action_state();
+    set_status("Importing selected provider files into native storage (copy only)…");
+    GTask *task = g_task_new(G_OBJECT(window_), provider_import_cancellable_,
+                             &ClipboardController::on_provider_import_finished, this);
+    g_task_set_task_data(task, data, [](gpointer value) {
+        delete static_cast<ProviderImportTaskData *>(value);
+    });
+    g_task_run_in_thread(task, &ClipboardController::on_provider_import_thread);
+    g_object_unref(task);
+    return true;
+}
+
+void ClipboardController::cancel_provider_import()
+{
+    if (provider_import_cancellable_ != nullptr)
+        g_cancellable_cancel(provider_import_cancellable_);
+}
+
+void ClipboardController::on_provider_import_thread(
+    GTask *task, gpointer, gpointer task_data, GCancellable *cancellable)
+{
+    const auto *data = static_cast<const ProviderImportTaskData *>(task_data);
+    auto *out = new ProviderImportOutcome{};
+    out->requested = data->uris.size();
+    ProviderImportEngine engine;
+    OperationJournal journal;
+    for (const std::string &uri : data->uris) {
+        if (cancellable != nullptr && g_cancellable_is_cancelled(cancellable)) {
+            out->last = OperationResult{OperationStatus::Cancelled, OperationPhase::Execute,
+                data->destination, "Provider import cancelled. Previously imported items remain.", false, {}};
+            break;
+        }
+        const std::string journal_id = journal.begin("ProviderImport", uri, data->destination);
+        if (journal_id.empty()) {
+            out->last = OperationResult{OperationStatus::VerificationFailure,
+                OperationPhase::Preflight, data->destination,
+                "The durable journal refused provider import; no further files were imported.", false, {}};
+            break;
+        }
+        out->last = engine.import_regular_file(uri, data->destination, journal_id, cancellable);
+        if (!journal.finish(journal_id, "ProviderImport", out->last)) {
+            out->last.status = OperationStatus::VerificationFailure;
+            out->last.phase = OperationPhase::Verify;
+            out->last.message += " The operation journal could not record the result.";
+            break;
+        }
+        if (!out->last.ok()) break;
+        ++out->imported;
+    }
+    g_task_return_pointer(task, out, [](gpointer value) {
+        delete static_cast<ProviderImportOutcome *>(value);
+    });
+}
+
+void ClipboardController::on_provider_import_finished(
+    GObject *, GAsyncResult *result, gpointer user_data)
+{
+    auto *self = static_cast<ClipboardController *>(user_data);
+    GError *error = nullptr;
+    std::unique_ptr<ProviderImportOutcome> out(
+        static_cast<ProviderImportOutcome *>(g_task_propagate_pointer(G_TASK(result), &error)));
+    g_clear_object(&self->provider_import_cancellable_);
+    if (!self->mutation_guard_.finish()) {
+        g_clear_error(&error);
+        return;
+    }
+    self->busy_ = false;
+    self->update_action_state();
+    if (error != nullptr) {
+        self->set_status(error->message);
+        self->show_alert("Provider import", error->message);
+        g_error_free(error);
+        return;
+    }
+    if (!out) return;
+    const std::string summary = "Imported " + std::to_string(out->imported) +
+        " of " + std::to_string(out->requested) + " provider files. " + out->last.message;
+    self->set_status(summary);
+    if (out->imported != out->requested)
+        self->show_alert("Provider import incomplete", summary);
 }
 
 void ClipboardController::paste_sources(const Mode mode,

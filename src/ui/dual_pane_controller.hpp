@@ -33,10 +33,12 @@ private:
     static void on_forward(GtkButton *, gpointer);
     static void on_select_all(GtkButton *, gpointer);
     static void on_transfer(GtkButton *, gpointer);
+    static void on_cancel_import(GtkButton *, gpointer);
     static void on_loading(GObject *, GParamSpec *, gpointer);
     void navigate(GFile *);
     void transfer(bool to_secondary, bool move);
     [[nodiscard]] std::vector<std::string> selected_sources(bool from_primary) const;
+    [[nodiscard]] std::vector<std::string> selected_provider_uris() const;
     void status(const char *) const;
     GtkWindow *window_{nullptr}; // weak; window finalization deletes controller
     GtkWidget *host_{nullptr};

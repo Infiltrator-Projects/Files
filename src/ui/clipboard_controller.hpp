@@ -24,6 +24,11 @@ public:
                                           const std::string &destination, bool move = false);
     // Read-only operation state for UI qualification and disabled actions.
     [[nodiscard]] bool transfer_busy() const noexcept { return busy_; }
+    // Read-only GIO providers (including GVfs MTP/PTP when present) may only
+    // import regular files into native storage, never move from the device.
+    [[nodiscard]] bool import_provider_files(const std::vector<std::string> &uris,
+                                              const std::string &destination);
+    void cancel_provider_import();
 
     ClipboardController(const ClipboardController &) = delete;
     ClipboardController &operator=(const ClipboardController &) = delete;
@@ -71,6 +76,10 @@ private:
     static void on_operation_finished(GObject *source_object,
                                       GAsyncResult *result,
                                       gpointer user_data);
+    static void on_provider_import_thread(GTask *task, gpointer source_object,
+                                           gpointer task_data, GCancellable *cancellable);
+    static void on_provider_import_finished(GObject *source_object,
+                                             GAsyncResult *result, gpointer user_data);
     static void on_conflict_chosen(GObject *source_object,
                                    GAsyncResult *result,
                                    gpointer user_data);
@@ -107,6 +116,7 @@ private:
     GtkWidget *cut_button_{nullptr};
     GtkWidget *paste_button_{nullptr};
     GdkClipboard *clipboard_{nullptr};
+    GCancellable *provider_import_cancellable_{nullptr};
     GdkContentProvider *owned_content_{nullptr};
     gulong clipboard_changed_handler_{0U};
 
