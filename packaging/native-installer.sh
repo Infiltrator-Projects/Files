@@ -105,6 +105,20 @@ version=$(tr -d '[:space:]' < "$source_root/VERSION")
     printf 'Invalid Files VERSION in installer payload.\n' >&2
     exit 1
 }
+native_version="${version}+native1"
+
+# Version ordering must express the difference between the generic APT build
+# and this locally trained PGO build. Never silently downgrade a newer release.
+installed_version=''
+if [[ "$(dpkg-query -W -f='${db:Status-Abbrev}' files 2>/dev/null || true)" == ii* ]]; then
+    installed_version=$(dpkg-query -W -f='${Version}' files)
+fi
+if [[ -n "$installed_version" ]] &&
+   dpkg --compare-versions "$installed_version" gt "$native_version"; then
+    printf 'Refusing to downgrade Files from %s to %s.\n' \
+        "$installed_version" "$native_version" >&2
+    exit 1
+fi
 
 base_flags='-O3 -DNDEBUG -march=native -mtune=native -flto=auto'
 generate_flags="$base_flags -fprofile-generate=$profile_root"
@@ -135,6 +149,7 @@ CC=gcc CXX=g++ cmake -S "$source_root" -B "$build_root" -G Ninja \
     -DCMAKE_CXX_FLAGS_RELEASE="$use_flags" \
     -DINFILTRATOR_BUILD_PROFILE=aggressive \
     -DINFILTRATOR_PGO_STATUS='trained two-pass profile' \
+    -DINFILTRATOR_NATIVE_PACKAGE=ON \
     -DBUILD_TESTING=OFF
 cmake --build "$build_root" --parallel
 cpack --config "$build_root/CPackConfig.cmake" -G DEB -B "$dist_root"
@@ -147,7 +162,7 @@ fi
 deb=${packages[0]}
 
 [[ "$(dpkg-deb -f "$deb" Package)" == files ]]
-[[ "$(dpkg-deb -f "$deb" Version)" == "$version" ]]
+[[ "$(dpkg-deb -f "$deb" Version)" == "$native_version" ]]
 [[ "$(dpkg-deb -f "$deb" Architecture)" == amd64 ]]
 
 inspect="$work/package"
@@ -163,9 +178,10 @@ grep -Fxq 'PGO: trained two-pass profile' "$inspect/usr/share/doc/files/BUILD-IN
 grep -Fq -- '-O3' "$inspect/usr/share/doc/files/BUILD-INFO"
 grep -Fq -- '-march=native' "$inspect/usr/share/doc/files/BUILD-INFO"
 
-printf 'Installing Files %s into /Programs...\n' "$version"
+printf 'Installing Files %s into /Programs...\n' "$native_version"
 run_root /usr/bin/apt-get -o DPkg::Lock::Timeout=300 install -y "$deb"
 
+[[ "$(dpkg-query -W -f='${Version}' files)" == "$native_version" ]]
 test -x /Programs/files
 test ! -e /usr/bin/files
 grep -Fxq 'Exec=/Programs/files %U' /usr/share/applications/files.desktop
@@ -173,7 +189,7 @@ grep -Fxq 'MimeType=inode/directory;' /usr/share/applications/files.desktop
 grep -Fxq 'Profile: aggressive' /usr/share/doc/files/BUILD-INFO
 grep -Fxq 'PGO: trained two-pass profile' /usr/share/doc/files/BUILD-INFO
 
-printf 'Files %s native installation complete: /Programs/files\n' "$version"
+printf 'Files %s native installation complete: /Programs/files\n' "$native_version"
 exit 0
 
 __FILES_PAYLOAD_BELOW__

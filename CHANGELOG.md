@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.68 — 2026-10-24
+
+- Correct the failure exposed by a real InfiltratorOS native installation after Files compiled successfully: APT rejected installing a locally compiled package under the generic release's Debian version as a downgrade.
+- Give the final trained two-pass aggressive build a distinct `+native1` package version, leaving the published generic APT version and underlying project source VERSION unchanged for that release.
+- Reject a genuinely newer installed version before rebuilding; do not mask version-ordering errors with unconditional `--allow-downgrades`.
+- Make hosted native-installer CI first install the generic package, then require the local installer to upgrade it and verify the installed `+native1` version, profile, desktop entry and binary.
+
+
+
 ## 0.1.67 — 2026-10-24
 
 - Publish the previously unreleased 24 post-v0.1.66 commits using a distinct immutable version. Do not retag or overwrite the earlier release.

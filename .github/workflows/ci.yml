@@ -170,12 +170,20 @@ jobs:
           printf '%s  %s\n' "${digest#sha256:}" "$resources_dir/$resources_asset" | sha256sum --check -
           sudo apt-get install -y "$resources_dir/$resources_asset"
 
+          # Reproduce the field failure: provisioning starts with the generic
+          # APT package already installed. Native +native1 must upgrade it
+          # without an implicit downgrade or allow-downgrades override.
+          sudo apt-get -o DPkg::Lock::Timeout=300 install -y "./dist/files_${VERSION}_amd64.deb"
+          test "$(dpkg-query -W -f='${Version}' files)" = "$VERSION"
+
           ./ci/build-native-installer.sh dist
           native="dist/files-${VERSION}-native-installer.run"
           test -x "$native"
 
           sudo "$native" --system-package-mode
 
+          test "$(dpkg-query -W -f='${Version}' files)" = "${VERSION}+native1"
+          dpkg --compare-versions "${VERSION}+native1" gt "$VERSION"
           test -x /Programs/files
           test ! -e /usr/bin/files
           test ! -e /System/Programs

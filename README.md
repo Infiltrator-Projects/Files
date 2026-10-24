@@ -58,6 +58,10 @@ Product-level acceptance is defined in [`docs/PRODUCT-QUALITY.md`](docs/PRODUCT-
 
 ## Current implementation
 
+Files 0.1.68 corrects native installer version ordering on Linux Mint: the same source release's generic APT package and locally trained two-pass PGO package have distinct Debian versions (`VERSION` and `VERSION+native1`). The hosted gate exercises the generic-to-native upgrade rather than treating a local compilation as proof of installation.
+
+
+
 Files 0.1.67 reconciles the **24 implementation commits after the immutable v0.1.66 release** and records the actual source-backed scope in [the 0.1.67 feature audit](docs/FEATURE-AUDIT-0.1.67.md). Recent work includes regular-file bookmarks, visible broken-reference states, type/size/date/pattern selection, confirmed broken-link labels, bounded remote thumbnail controls, single-click and navigation preferences, crash-safe browsing checkpoints, tag TSV import and Recent privacy exclusions. Those features are bounded and do not complete the original catalogue. The new version must pass exact-head Verify **and** GitHub/APT publication before being called distributed.
 
 Files 0.1.66 delivers four further distinct original catalogue capabilities: date-created column sorting when provided by GIO, visible link/hidden/special identity cues, and a Show/Hide filename extensions preference. Rendered filenames are never mutation authority; full names remain available as tooltips and underlying GFileInfo names drive file actions. The release's audit at `docs/FEATURE-AUDIT-0.1.66.md` reconciles 15 distinct bounded-complete original requirements across 0.1.65–0.1.66, with four other partially implemented originals still open.

@@ -1,5 +1,13 @@
 # Validation
 
+## 0.1.68 native package identity and upgrade regression
+
+The InfiltratorOS field log for Files 0.1.67 reached 66/66 C/C++ compilation steps and generated its native DEB, then APT refused the final native package transaction as a downgrade. The native installer's source-version-equivalent package identity was ambiguous with the separately published generic APT build.
+
+The production native installer now retains the product source release but assigns a `+native1` Debian package suffix *only* to the final trained, aggressive PGO package. The ordinary release package remains at the unchanged source version. The system-mode installer fails before the expensive two-pass build if a genuinely newer Files package is installed. Release qualification installs the generic package first, runs the actual native compiler and verifies that APT upgrades it to the exact native-versioned package without `--allow-downgrades`. The ordinary runtime, GTK toolkit, package payload and file-operation engines are otherwise unchanged. This source change is not itself proof of publication or machine-level installation.
+
+
+
 ## 0.1.67 source/release evidence
 
 The [0.1.67 implementation audit](FEATURE-AUDIT-0.1.67.md) anchors the 24 post-v0.1.66 changes to source, original requirements and tests. The prior main source `d562d113...` passed 20 hosted CTest executables and package/native-installer checks in [Verify run 40075635698](https://github.com/Infiltrator-Projects/Files/actions/runs/40075635698). This is evidence for the **earlier exact commit only**. The 0.1.67 versioned/audited commit requires **its own** successful Verify, GitHub asset/tag qualification and central beta APT SHA-256 match. Physical Linux Mint Day/Night, accessibility, cross-filesystem and unplug/crash tests remain explicitly unproven.

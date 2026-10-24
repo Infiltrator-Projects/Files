@@ -289,7 +289,23 @@ install(PROGRAMS
 set(CPACK_PACKAGE_NAME "files")
 set(CPACK_PACKAGE_VENDOR "Infiltrator Projects")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "InfiltratorOS file manager")
-set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+# The generic Debian release uses VERSION verbatim. The independently compiled
+# aggressive native package is a strictly greater local variant of that same
+# source release. Giving both packages the same version made APT attempt a
+# downgrade when InfiltratorOS installed the CPU-specific build.
+option(INFILTRATOR_NATIVE_PACKAGE "Use the trained local build's distinct Debian identity" OFF)
+if(INFILTRATOR_NATIVE_PACKAGE)
+    if(NOT INFILTRATOR_BUILD_PROFILE STREQUAL "aggressive" OR
+       NOT INFILTRATOR_PGO_STATUS STREQUAL "trained two-pass profile" OR
+       BUILD_TESTING)
+        message(FATAL_ERROR
+            "The +native1 package identity requires the final trained "
+            "aggressive build with BUILD_TESTING=OFF")
+    endif()
+    set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}+native1")
+else()
+    set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+endif()
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Infiltrator Projects")
 set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
