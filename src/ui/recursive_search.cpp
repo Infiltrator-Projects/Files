@@ -627,6 +627,10 @@ void show_recursive_search_impl(GtkWindow *owner, GFile *location,
     gtk_grid_set_column_spacing(GTK_GRID(options), 14);
     gtk_grid_set_row_spacing(GTK_GRID(options), 8);
     gtk_box_append(GTK_BOX(outer), options);
+    // Search criteria precede saved presets in focus/reading order. Besides
+    // reducing cognitive noise, this retains the established filename-first
+    // entry contract for keyboard users and interaction clients.
+    gtk_box_reorder_child_after(GTK_BOX(outer), saved_row, options);
     s->name = field(GTK_GRID(options), "Filename", 0, 0, "Part of name, exact name or *.pdf");
     constexpr const char *modes[] = {"Contains", "Exact", "Wildcard (* and ?)", nullptr};
     s->mode = choice(GTK_GRID(options), "Name matching", 1, 0, modes);
