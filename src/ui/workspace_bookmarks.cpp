@@ -187,6 +187,32 @@ void FileManagerWindow::update_bookmark_button()
                                 pinned ? "Unpin current folder" : "Pin current folder");
     g_free(uri);
 }
+void FileManagerWindow::toggle_bookmark_for_selected()
+{
+    if (!bookmarks_writable_) {
+        (void)save_bookmarks();
+        return;
+    }
+    if (current_location_ == nullptr || primary_selection_ == nullptr) return;
+    GFileInfo *info = G_FILE_INFO(gtk_single_selection_get_selected_item(primary_selection_));
+    if (info == nullptr || g_file_info_get_name(info) == nullptr ||
+        g_file_info_get_file_type(info) != G_FILE_TYPE_REGULAR) return;
+    GFile *file = g_file_get_child(current_location_, g_file_info_get_name(info));
+    char *uri = g_file_get_uri(file);
+    if (uri != nullptr) {
+        auto it = std::find_if(bookmarks_.begin(), bookmarks_.end(),
+            [uri](const BookmarkRow &entry) { return entry.uri == uri; });
+        if (it != bookmarks_.end())
+            remove_bookmark(static_cast<std::size_t>(it - bookmarks_.begin()));
+        else if (bookmarks_.size() < 128U) {
+            append_bookmark(uri);
+            (void)save_bookmarks();
+        }
+        g_free(uri);
+    }
+    g_object_unref(file);
+}
+
 void FileManagerWindow::on_bookmark_toggle(GtkButton *, gpointer data)
 {
     auto *self = static_cast<FileManagerWindow *>(data);
