@@ -76,6 +76,7 @@ private:
     void show_open_with();
     void show_properties();
     void inspect_primary();
+    void show_tags_dialog();
     void compare_selected_hashes();
     void launch_terminal(bool selected);
     void show_selection_pattern_dialog();

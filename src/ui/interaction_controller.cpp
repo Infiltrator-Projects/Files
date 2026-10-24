@@ -5,6 +5,7 @@
 #include "file_inspection.hpp"
 #include "recursive_search.hpp"
 #include "quick_preview.hpp"
+#include "tag_catalogue.hpp"
 #include "file_manager_window.hpp"
 
 #include <algorithm>
@@ -426,6 +427,10 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
             ActionScope::SingleSelection, proxies));
         add_command(tools, "Inspect file…", "inspect",
                     ActionScope::SingleSelection, proxies);
+        add_command(tools, "Tag selected files…", "tag-selected",
+                    ActionScope::AnySelection, proxies);
+        add_command(tools, "Copy tag catalogue as TSV", "export-tags",
+                    ActionScope::Always, proxies);
         preview_actions_.push_back(add_command(
             tools, "Quick Look", "quick-preview",
             ActionScope::SingleSelection, proxies));
@@ -539,6 +544,8 @@ GtkWidget *InteractionController::build_context_action_box()
         context_proxies_, G_CALLBACK(&InteractionController::on_properties_clicked));
     add_command(details, "Inspect file…", "inspect",
                 ActionScope::SingleSelection, context_proxies_);
+    add_command(details, "Edit tags…", "tag-selected",
+                ActionScope::AnySelection, context_proxies_);
     preview_actions_.push_back(add_command(
         details, "Quick Look", "quick-preview",
         ActionScope::SingleSelection, context_proxies_));
@@ -714,6 +721,18 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
         self->select_same_type();
     else if (g_strcmp0(command, "inspect") == 0)
         self->inspect_primary();
+    else if (g_strcmp0(command, "tag-selected") == 0)
+        self->show_tags_dialog();
+    else if (g_strcmp0(command, "export-tags") == 0) {
+        const TagCatalogue catalogue = load_tag_catalogue();
+        if (catalogue.writable) {
+            GdkClipboard *clipboard = gtk_widget_get_clipboard(GTK_WIDGET(self->window_));
+            if (clipboard != nullptr)
+                gdk_clipboard_set_text(clipboard, export_tags_tsv(catalogue).c_str());
+        } else if (self->status_label_ != nullptr) {
+            gtk_label_set_text(self->status_label_, catalogue.error.c_str());
+        }
+    }
     else if (g_strcmp0(command, "quick-preview") == 0)
         show_quick_preview(self->window_, self->directory_list_,
                            self->selection_, self->primary_selection_);
@@ -1512,6 +1531,124 @@ void InteractionController::open_primary()
     g_free(uri);
 }
 
+
+
+void InteractionController::show_tags_dialog()
+{
+    if (window_ == nullptr || selection_ == nullptr || directory_list_ == nullptr) return;
+    GFile *parent = gtk_directory_list_get_file(directory_list_);
+    GListModel *model = gtk_multi_selection_get_model(selection_);
+    if (parent == nullptr || model == nullptr) return;
+    GtkBitset *bits = gtk_selection_model_get_selection(GTK_SELECTION_MODEL(selection_));
+    GtkBitsetIter iterator;
+    guint position = 0;
+    gboolean valid = gtk_bitset_iter_init_first(&iterator, bits, &position);
+    std::vector<std::string> uris;
+    while (valid && uris.size() < 129) {
+        auto *info = G_FILE_INFO(g_list_model_get_item(model, position));
+        if (info != nullptr && g_file_info_get_name(info) != nullptr) {
+            GFile *child = g_file_get_child(parent, g_file_info_get_name(info));
+            char *uri = g_file_get_uri(child);
+            if (uri != nullptr) uris.emplace_back(uri);
+            g_free(uri);
+            g_object_unref(child);
+        }
+        if (info != nullptr) g_object_unref(info);
+        valid = gtk_bitset_iter_next(&iterator, &position);
+    }
+    gtk_bitset_unref(bits);
+    if (uris.empty() || uris.size() > 128) {
+        if (status_label_ != nullptr)
+            gtk_label_set_text(status_label_, "Select 1–128 items for tagging.");
+        return;
+    }
+    const TagCatalogue existing = load_tag_catalogue();
+    if (!existing.writable) {
+        if (status_label_ != nullptr)
+            gtk_label_set_text(status_label_, existing.error.c_str());
+        return;
+    }
+    struct TagsRequest {
+        std::vector<std::string> uris;
+        GtkWidget *input{nullptr};
+        GtkWidget *message{nullptr};
+    };
+    GtkWidget *dialog = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(dialog), "Edit Tags");
+    gtk_window_set_transient_for(GTK_WINDOW(dialog), window_);
+    gtk_window_set_destroy_with_parent(GTK_WINDOW(dialog), TRUE);
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 490, -1);
+    auto *request = new TagsRequest{std::move(uris)};
+    g_object_set_data_full(G_OBJECT(dialog), "ifm-tags-request", request,
+        [](gpointer data) { delete static_cast<TagsRequest *>(data); });
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 9);
+    gtk_widget_set_margin_start(box, 16);
+    gtk_widget_set_margin_end(box, 16);
+    gtk_widget_set_margin_top(box, 14);
+    gtk_widget_set_margin_bottom(box, 14);
+    gtk_window_set_child(GTK_WINDOW(dialog), box);
+    std::string label = "Assign the same tags to " +
+        std::to_string(request->uris.size()) + " selected item(s).";
+    gtk_box_append(GTK_BOX(box), gtk_label_new(label.c_str()));
+    GtkWidget *input = gtk_entry_new();
+    request->input = input;
+    gtk_entry_set_placeholder_text(GTK_ENTRY(input),
+        "Comma-separated labels; leave empty to clear tags");
+    gtk_box_append(GTK_BOX(box), input);
+    if (request->uris.size() == 1) {
+        const auto tags = tags_for(existing, request->uris.front());
+        std::string value;
+        for (const auto &tag : tags) {
+            if (!value.empty()) value += ", ";
+            value += tag;
+        }
+        gtk_editable_set_text(GTK_EDITABLE(input), value.c_str());
+    }
+    request->message = gtk_label_new(
+        "Tags are private derived URI references; external moves can leave them stale.");
+    gtk_label_set_wrap(GTK_LABEL(request->message), TRUE);
+    gtk_widget_add_css_class(request->message, "dim-label");
+    gtk_box_append(GTK_BOX(box), request->message);
+    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_append(GTK_BOX(box), row);
+    GtkWidget *save = gtk_button_new_with_label("Save tags");
+    gtk_widget_add_css_class(save, "suggested-action");
+    gtk_box_append(GTK_BOX(row), save);
+    GtkWidget *close = gtk_button_new_with_label("Close");
+    gtk_box_append(GTK_BOX(row), close);
+    g_signal_connect_swapped(close, "clicked", G_CALLBACK(gtk_window_destroy), dialog);
+    g_signal_connect(save, "clicked", G_CALLBACK((+[](GtkButton *, gpointer data) {
+        GtkWidget *win = GTK_WIDGET(data);
+        auto *request = static_cast<TagsRequest *>(
+            g_object_get_data(G_OBJECT(win), "ifm-tags-request"));
+        if (request == nullptr) return;
+        const gchar *input = gtk_editable_get_text(GTK_EDITABLE(request->input));
+        gchar **pieces = g_strsplit(input != nullptr ? input : "", ",", 17);
+        std::set<std::string> labels;
+        bool valid = true;
+        for (gchar **p = pieces; p != nullptr && *p != nullptr; ++p) {
+            char *trimmed = g_strstrip(*p);
+            if (*trimmed == '\0') continue;
+            if (!valid_tag(trimmed) || !labels.insert(trimmed).second)
+                valid = false;
+        }
+        g_strfreev(pieces);
+        if (!valid || labels.size() > 16) {
+            gtk_label_set_text(GTK_LABEL(request->message),
+                "Use 1–16 distinct labels (up to 64 UTF-8 bytes each), or leave blank to clear.");
+            return;
+        }
+        std::string error;
+        if (!apply_tags(request->uris, labels, error)) {
+            gtk_label_set_text(GTK_LABEL(request->message), error.c_str());
+            return;
+        }
+        gtk_window_destroy(GTK_WINDOW(win));
+    })), dialog);
+    gtk_window_present(GTK_WINDOW(dialog));
+    gtk_widget_grab_focus(input);
+}
 
 void InteractionController::inspect_primary()
 {
