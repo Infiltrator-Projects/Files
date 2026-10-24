@@ -403,6 +403,8 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
     add_separator(box);
     add_command(box, "Search in subfolders…", "recursive-search",
                 ActionScope::Always, proxies);
+    add_command(box, "Search selected folders…", "search-selected-folders",
+                ActionScope::MultiSelection, proxies);
     add_command(box, "Select by filename pattern…", "select-pattern",
                 ActionScope::Always, proxies);
     add_command(box, "Select same file type", "select-type",
@@ -677,6 +679,34 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
     else if (g_strcmp0(command, "recursive-search") == 0) {
         GFile *location = gtk_directory_list_get_file(self->directory_list_);
         if (location != nullptr) show_recursive_search(self->window_, location);
+    }
+    else if (g_strcmp0(command, "search-selected-folders") == 0) {
+        GFile *parent = gtk_directory_list_get_file(self->directory_list_);
+        GListModel *model = gtk_multi_selection_get_model(self->selection_);
+        if (parent != nullptr && model != nullptr) {
+            std::vector<GFile *> roots;
+            GtkBitset *bits = gtk_selection_model_get_selection(
+                GTK_SELECTION_MODEL(self->selection_));
+            GtkBitsetIter iter;
+            guint pos = 0;
+            gboolean valid = gtk_bitset_iter_init_first(&iter, bits, &pos);
+            while (valid && roots.size() < 17) {
+                auto *info = G_FILE_INFO(g_list_model_get_item(model, pos));
+                if (info != nullptr &&
+                    g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY &&
+                    g_file_info_get_name(info) != nullptr)
+                    roots.push_back(g_file_get_child(parent, g_file_info_get_name(info)));
+                if (info != nullptr) g_object_unref(info);
+                valid = gtk_bitset_iter_next(&iter, &pos);
+            }
+            gtk_bitset_unref(bits);
+            if (roots.size() >= 2 && roots.size() <= 16)
+                show_selected_location_search(self->window_, roots);
+            else if (self->status_label_ != nullptr)
+                gtk_label_set_text(self->status_label_,
+                    "Select 2–16 folders to search together.");
+            for (GFile *folder : roots) g_object_unref(folder);
+        }
     }
     else if (g_strcmp0(command, "select-pattern") == 0)
         self->show_selection_pattern_dialog();

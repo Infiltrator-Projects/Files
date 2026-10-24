@@ -8,6 +8,8 @@
 #include <cstring>
 #include <cstdint>
 #include <memory>
+#include <iterator>
+#include <vector>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -18,6 +20,7 @@ namespace {
 
 struct SearchWindow {
     GFile *root{nullptr};
+    std::vector<GFile *> selected_roots;
     GtkWindow *owner{nullptr}; // Lifetime bounded by destroy-with-parent
     GtkWidget *name{nullptr};
     GtkWidget *mode{nullptr};
@@ -45,15 +48,18 @@ struct SearchWindow {
             g_object_unref(active);
         }
         if (root != nullptr) g_object_unref(root);
+        for (GFile *folder : selected_roots) g_object_unref(folder);
     }
 };
 
 struct SearchWork {
-    GFile *root;
+    std::vector<GFile *> roots;
     SearchOptions options;
-    SearchWork(GFile *location, SearchOptions query)
-        : root(G_FILE(g_object_ref(location))), options(std::move(query)) {}
-    ~SearchWork() { g_object_unref(root); }
+    SearchWork(const std::vector<GFile *> &locations, SearchOptions query)
+        : options(std::move(query)) {
+        for (GFile *location : locations) roots.push_back(G_FILE(g_object_ref(location)));
+    }
+    ~SearchWork() { for (GFile *root : roots) g_object_unref(root); }
 };
 
 SearchWindow *state(GtkWidget *dialog)
@@ -162,7 +168,27 @@ void run_search(GTask *task, gpointer, gpointer data, GCancellable *cancel)
 {
     auto *work = static_cast<SearchWork *>(data);
     GError *error = nullptr;
-    SearchReport result = search_files(work->root, work->options, cancel, &error);
+    SearchReport result;
+    for (std::size_t index = 0; index < work->roots.size(); ++index) {
+        if (g_cancellable_set_error_if_cancelled(cancel, &error)) break;
+        SearchReport next = search_files(work->roots[index], work->options, cancel, &error);
+        if (error != nullptr) break;
+        result.visited += next.visited;
+        result.content_skipped += next.content_skipped;
+        result.duplicate_skipped += next.duplicate_skipped;
+        result.hits.insert(result.hits.end(),
+            std::make_move_iterator(next.hits.begin()),
+            std::make_move_iterator(next.hits.end()));
+        if (!next.complete) {
+            result.complete = false;
+            if (result.limitation.empty()) result.limitation = next.limitation;
+        }
+        if (result.hits.size() >= 500 || result.visited >= 100000) {
+            result.complete = false;
+            result.limitation = "Combined search reached its 500-result/100,000-entry bound";
+            break;
+        }
+    }
     if (error != nullptr) {
         g_task_return_error(task, error);
     } else {
@@ -310,7 +336,9 @@ void start(GtkButton *, gpointer data)
     auto *weak = new GWeakRef;
     g_weak_ref_init(weak, G_OBJECT(dialog));
     GTask *task = g_task_new(nullptr, s->active, completed, weak);
-    g_task_set_task_data(task, new SearchWork(s->root, std::move(o)),
+    std::vector<GFile *> roots = s->selected_roots;
+    if (roots.empty()) roots.push_back(s->root);
+    g_task_set_task_data(task, new SearchWork(roots, std::move(o)),
         [](gpointer ptr) { delete static_cast<SearchWork *>(ptr); });
     g_task_run_in_thread(task, run_search);
     g_object_unref(task);
@@ -318,9 +346,10 @@ void start(GtkButton *, gpointer data)
 
 } // namespace
 
-void show_recursive_search(GtkWindow *owner, GFile *location)
+void show_recursive_search_impl(GtkWindow *owner, GFile *location,
+                               const std::vector<GFile *> &selected)
 {
-    if (owner == nullptr || location == nullptr) return;
+    if (owner == nullptr || location == nullptr || selected.size() > 16) return;
     GtkWidget *dialog = gtk_window_new();
     gtk_window_set_title(GTK_WINDOW(dialog), "Search files");
     gtk_window_set_transient_for(GTK_WINDOW(dialog), owner);
@@ -330,6 +359,8 @@ void show_recursive_search(GtkWindow *owner, GFile *location)
     auto *s = new SearchWindow;
     s->owner = owner;
     s->root = G_FILE(g_object_ref(location));
+    for (GFile *folder : selected)
+        s->selected_roots.push_back(G_FILE(g_object_ref(folder)));
     g_object_set_data_full(G_OBJECT(dialog), "ifm-recursive-search-state", s,
         [](gpointer ptr) { delete static_cast<SearchWindow *>(ptr); });
 
@@ -340,8 +371,11 @@ void show_recursive_search(GtkWindow *owner, GFile *location)
     gtk_widget_set_margin_bottom(outer, 14);
     gtk_window_set_child(GTK_WINDOW(dialog), outer);
     char *location_name = g_file_get_parse_name(location);
-    const std::string scope = "Search within: " + std::string(
-        location_name != nullptr ? location_name : "current folder");
+    const std::string scope = selected.empty() ?
+        "Search within: " + std::string(location_name != nullptr ?
+                                      location_name : "current folder") :
+        "Search within " + std::to_string(selected.size()) +
+        " selected folders (at most 16)";
     g_free(location_name);
     GtkWidget *intro = gtk_label_new(scope.c_str());
     gtk_label_set_xalign(GTK_LABEL(intro), 0);
@@ -426,6 +460,18 @@ void show_recursive_search(GtkWindow *owner, GFile *location)
     g_signal_connect_swapped(close, "clicked", G_CALLBACK(gtk_window_destroy), dialog);
     gtk_window_present(GTK_WINDOW(dialog));
     gtk_widget_grab_focus(s->name);
+}
+
+void show_recursive_search(GtkWindow *owner, GFile *location)
+{
+    show_recursive_search_impl(owner, location, {});
+}
+
+void show_selected_location_search(GtkWindow *owner,
+                                   const std::vector<GFile *> &directories)
+{
+    if (directories.empty() || directories.size() > 16) return;
+    show_recursive_search_impl(owner, directories.front(), directories);
 }
 
 } // namespace infiltrator::files
