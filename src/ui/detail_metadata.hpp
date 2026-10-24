@@ -28,5 +28,9 @@ namespace infiltrator::files {
 [[nodiscard]] int detail_compare_type(GFileInfo *left, GFileInfo *right);
 [[nodiscard]] int detail_compare_size(GFileInfo *left, GFileInfo *right);
 [[nodiscard]] int detail_compare_modified(GFileInfo *left, GFileInfo *right);
+[[nodiscard]] int detail_compare_created(GFileInfo *left, GFileInfo *right);
+[[nodiscard]] std::string detail_created_text(
+    GFileInfo *info, InfiltratrTemporalDateProvider *date_provider = nullptr);
+[[nodiscard]] std::string detail_visual_label(GFileInfo *info, bool show_extensions);
 
 } // namespace infiltrator::files

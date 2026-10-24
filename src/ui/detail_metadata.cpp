@@ -526,12 +526,12 @@ std::string detail_size_text(GFileInfo *info)
     return formatted != nullptr && formatted[0] != '\0' ? formatted : "—";
 }
 
-std::string detail_modified_text(GFileInfo *info,
-                                 InfiltratrTemporalDateProvider *date_provider)
+static std::string detail_time_text(GFileInfo *info, const char *attribute,
+                                    InfiltratrTemporalDateProvider *date_provider)
 {
-    guint64 seconds = 0U;
-    if (!detail_modified_value(info, &seconds) ||
-        seconds > static_cast<guint64>(std::numeric_limits<gint64>::max())) {
+    if (info == nullptr || !g_file_info_has_attribute(info, attribute)) return "—";
+    const guint64 seconds = g_file_info_get_attribute_uint64(info, attribute);
+    if (seconds > static_cast<guint64>(std::numeric_limits<gint64>::max())) {
         return "—";
     }
 
@@ -568,6 +568,37 @@ std::string detail_modified_text(GFileInfo *info,
     return result;
 }
 
+std::string detail_modified_text(GFileInfo *info,
+                                 InfiltratrTemporalDateProvider *date_provider)
+{
+    return detail_time_text(info, G_FILE_ATTRIBUTE_TIME_MODIFIED, date_provider);
+}
+std::string detail_created_text(GFileInfo *info,
+                                InfiltratrTemporalDateProvider *date_provider)
+{
+    return detail_time_text(info, G_FILE_ATTRIBUTE_TIME_CREATED, date_provider);
+}
+std::string detail_visual_label(GFileInfo *info, const bool show_extensions)
+{
+    if (info == nullptr) return {};
+    const char *display = g_file_info_get_display_name(info);
+    const char *raw = g_file_info_get_name(info);
+    std::string name = display != nullptr ? display : (raw != nullptr ? raw : "");
+    // The extension switch only changes the rendered label. Raw names remain
+    // the authority for selection, rename, drag operations and GIO actions.
+    if (!show_extensions && g_file_info_get_file_type(info) == G_FILE_TYPE_REGULAR) {
+        const std::size_t dot = name.rfind('.');
+        if (dot != std::string::npos && dot > 0 && dot + 1 < name.size())
+            name.resize(dot);
+    }
+    if (g_file_info_get_is_symlink(info) ||
+        g_file_info_get_file_type(info) == G_FILE_TYPE_SHORTCUT) return "↗ " + name;
+    if (g_file_info_get_file_type(info) == G_FILE_TYPE_SPECIAL ||
+        g_file_info_get_file_type(info) == G_FILE_TYPE_MOUNTABLE) return "◆ " + name;
+    if (g_file_info_get_is_hidden(info)) return "· " + name;
+    return name;
+}
+
 int detail_compare_name(GFileInfo *left, GFileInfo *right)
 {
     return name_tiebreak(left, right);
@@ -588,6 +619,19 @@ int detail_compare_size(GFileInfo *left, GFileInfo *right)
     const bool right_present = detail_size_value(right, &right_size);
     return compare_optional_u64(left_present, left_size,
                                 right_present, right_size);
+}
+
+int detail_compare_created(GFileInfo *left, GFileInfo *right)
+{
+    const bool lp = left != nullptr &&
+        g_file_info_has_attribute(left, G_FILE_ATTRIBUTE_TIME_CREATED);
+    const bool rp = right != nullptr &&
+        g_file_info_has_attribute(right, G_FILE_ATTRIBUTE_TIME_CREATED);
+    const guint64 lv = lp ? g_file_info_get_attribute_uint64(
+        left, G_FILE_ATTRIBUTE_TIME_CREATED) : 0;
+    const guint64 rv = rp ? g_file_info_get_attribute_uint64(
+        right, G_FILE_ATTRIBUTE_TIME_CREATED) : 0;
+    return compare_optional_u64(lp, lv, rp, rv);
 }
 
 int detail_compare_modified(GFileInfo *left, GFileInfo *right)
