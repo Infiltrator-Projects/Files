@@ -710,7 +710,7 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
             if (roots.size() >= 2 && roots.size() <= 16)
                 show_selected_location_search(self->window_, roots);
             else if (self->status_label_ != nullptr)
-                gtk_label_set_text(self->status_label_,
+                gtk_label_set_text(GTK_LABEL(self->status_label_),
                     "Select 2–16 folders to search together.");
             for (GFile *folder : roots) g_object_unref(folder);
         }
@@ -730,7 +730,7 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
             if (clipboard != nullptr)
                 gdk_clipboard_set_text(clipboard, export_tags_tsv(catalogue).c_str());
         } else if (self->status_label_ != nullptr) {
-            gtk_label_set_text(self->status_label_, catalogue.error.c_str());
+            gtk_label_set_text(GTK_LABEL(self->status_label_), catalogue.error.c_str());
         }
     }
     else if (g_strcmp0(command, "quick-preview") == 0)
