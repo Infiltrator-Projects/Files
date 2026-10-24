@@ -375,7 +375,7 @@ void on_done(GObject *, GAsyncResult *result, gpointer user_data)
     auto *weak = static_cast<GWeakRef *>(user_data);
     GError *error = nullptr;
     char *text = static_cast<char *>(g_task_propagate_pointer(G_TASK(result), &error));
-    GObject *object = g_weak_ref_get(weak);
+    GObject *object = static_cast<GObject *>(g_weak_ref_get(weak));
     if (object != nullptr) {
         auto *state = static_cast<DialogState *>(
             g_object_get_data(object, "ifm-inspection-state"));
@@ -456,7 +456,7 @@ GtkWindow *make_dialog(GtkWindow *parent, GFile *file, const char *title)
     gtk_box_append(GTK_BOX(root), buttons);
     GtkWidget *copy = gtk_button_new_with_label("Copy details");
     gtk_box_append(GTK_BOX(buttons), copy);
-    g_signal_connect(copy, "clicked", G_CALLBACK(+[](GtkButton *, gpointer data) {
+    g_signal_connect(copy, "clicked", G_CALLBACK((+[](GtkButton *, gpointer data) {
         auto *state = static_cast<DialogState *>(
             g_object_get_data(G_OBJECT(data), "ifm-inspection-state"));
         if (state == nullptr) return;
@@ -468,16 +468,16 @@ GtkWindow *make_dialog(GtkWindow *parent, GFile *file, const char *title)
         if (clipboard != nullptr && text != nullptr)
             gdk_clipboard_set_text(clipboard, text);
         g_free(text);
-    }), dialog);
+    })), dialog);
     state->cancel = gtk_button_new_with_label("Cancel");
     gtk_box_append(GTK_BOX(buttons), state->cancel);
     gtk_widget_set_sensitive(state->cancel, FALSE);
-    g_signal_connect(state->cancel, "clicked", G_CALLBACK(+[](GtkButton *, gpointer data) {
+    g_signal_connect(state->cancel, "clicked", G_CALLBACK((+[](GtkButton *, gpointer data) {
         auto *state = static_cast<DialogState *>(
             g_object_get_data(G_OBJECT(data), "ifm-inspection-state"));
         if (state != nullptr && state->active != nullptr)
             g_cancellable_cancel(state->active);
-    }), dialog);
+    })), dialog);
     GtkWidget *close = gtk_button_new_with_label("Close");
     gtk_widget_set_hexpand(close, TRUE);
     gtk_widget_set_halign(close, GTK_ALIGN_END);
@@ -497,21 +497,21 @@ void show_file_inspection(GtkWindow *parent, GFile *file, GFileInfo *known)
     GtkWidget *buttons = gtk_widget_get_last_child(gtk_window_get_child(dialog));
     state->details = gtk_button_new_with_label("Details");
     gtk_box_prepend(GTK_BOX(buttons), state->details);
-    g_signal_connect(state->details, "clicked", G_CALLBACK(+[](GtkButton *, gpointer data) {
+    g_signal_connect(state->details, "clicked", G_CALLBACK((+[](GtkButton *, gpointer data) {
         begin(GTK_WINDOW(data), InspectionKind::Details);
-    }), dialog);
+    })), dialog);
     if (g_file_info_get_file_type(known) == G_FILE_TYPE_DIRECTORY) {
         state->folder = gtk_button_new_with_label("Calculate folder size");
         gtk_box_prepend(GTK_BOX(buttons), state->folder);
-        g_signal_connect(state->folder, "clicked", G_CALLBACK(+[](GtkButton *, gpointer data) {
+        g_signal_connect(state->folder, "clicked", G_CALLBACK((+[](GtkButton *, gpointer data) {
             begin(GTK_WINDOW(data), InspectionKind::FolderSize);
-        }), dialog);
+        })), dialog);
     } else if (g_file_info_get_file_type(known) == G_FILE_TYPE_REGULAR) {
         state->hash = gtk_button_new_with_label("SHA-256");
         gtk_box_prepend(GTK_BOX(buttons), state->hash);
-        g_signal_connect(state->hash, "clicked", G_CALLBACK(+[](GtkButton *, gpointer data) {
+        g_signal_connect(state->hash, "clicked", G_CALLBACK((+[](GtkButton *, gpointer data) {
             begin(GTK_WINDOW(data), InspectionKind::Sha256);
-        }), dialog);
+        })), dialog);
     }
     gtk_window_present(dialog);
     begin(dialog, InspectionKind::Details);
