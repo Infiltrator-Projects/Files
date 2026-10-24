@@ -669,7 +669,28 @@ void show_file_inspection(GtkWindow *parent, GFile *file, GFileInfo *known)
                 g_object_get_data(G_OBJECT(dialog), "ifm-inspection-state"));
             if (state == nullptr || state->busy) return;
             const char *input = gtk_editable_get_text(GTK_EDITABLE(state->expected_hash));
-            std::string expected = input != nullptr ? input : "";
+            const std::string supplied = input != nullptr ? input : "";
+            if (supplied.size() > 8192) {
+                set_text(state->view, "Checksum input exceeds its 8 KiB safety limit.");
+                return;
+            }
+            std::string expected = supplied;
+            if (supplied.size() > 64) {
+                // Standard sha256sum syntax: 64 hex digits, a separator,
+                // then ' ' or '*' and the exact selected basename. A manifest
+                // entry for a different file must never verify this object.
+                char *basename = g_file_get_basename(state->file);
+                const std::string target = basename != nullptr ? basename : "";
+                g_free(basename);
+                if (supplied.size() < 67 || supplied[64] != ' ' ||
+                    (supplied[65] != ' ' && supplied[65] != '*') ||
+                    supplied.substr(66) != target) {
+                    set_text(state->view,
+                        "Use 64 SHA-256 hex digits or one sha256sum line for this exact filename.");
+                    return;
+                }
+                expected = supplied.substr(0, 64);
+            }
             if (expected.size() != 64 ||
                 !std::all_of(expected.begin(), expected.end(), [](unsigned char ch) {
                     return g_ascii_isxdigit(ch);
