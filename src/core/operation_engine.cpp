@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/xattr.h>
 #include <unistd.h>
 #include <string>
 #include <utility>
@@ -100,6 +101,22 @@ OperationResult OperationEngine::change_permissions(
         (void)close_fd();
         return failure(OperationStatus::UnsupportedCapability, OperationPhase::Preflight,
                        source, "Special setuid/setgid/sticky bits require an explicit specialised editor.");
+    }
+    // chmod may rewrite the effective POSIX ACL mask on ACL-bearing files.
+    // Refuse rather than silently modifying access rights beyond the user's
+    // three ordinary mode fields. Unknown ACL readability also fails closed.
+    errno = 0;
+    const ssize_t acl_bytes = ::fgetxattr(fd, "system.posix_acl_access", nullptr, 0);
+    if (acl_bytes >= 0) {
+        (void)close_fd();
+        return failure(OperationStatus::UnsupportedCapability, OperationPhase::Preflight, source,
+                       "This item has an extended POSIX ACL; use a qualified ACL editor.");
+    }
+    if (errno != ENODATA && errno != ENOTSUP && errno != EOPNOTSUPP) {
+        const std::error_code error(errno, std::generic_category());
+        (void)close_fd();
+        return failure(status_for_error(error), OperationPhase::Preflight, source,
+                       "The item's ACL policy could not be established safely: " + error.message());
     }
     if ((static_cast<unsigned int>(before.st_mode) & 0777U) == permissions) {
         (void)close_fd();
