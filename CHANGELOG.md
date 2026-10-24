@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.69 — 2026-10-25
+
+- Add copy-only native ZIP creation for one selected regular file, using bounded private staging, journal admission, collision refusal and the existing durable transfer publication path. Directory-tree creation, encryption and virtual archive browsing remain outstanding.
+- Introduce independent secondary-pane name sorting; preserve the displayed source identity in selection, transfers and drag/drop. Complete pane/tab/view parity is not yet qualified.
+- Add synchronised Owner/Group/Others permission checkboxes beside the octal mode field, without silently clearing special bits. ACL editor, ownership changes and privilege elevation remain outside this release.
+- Cap GIO provider imports at 1 GiB per file by metadata preflight and live transfer progress; identify remote disconnection and portable-device disappearance. Provider originals are not moved or deleted. Real MTP/PTP hardware qualification and recursive imports remain open.
+- Extend native archive, provider import and GTK workspace tests. This bounded release is not completion of the 520-item original catalogue.
+
 ## 0.1.68 — 2026-10-24
 
 - Correct the failure exposed by a real InfiltratorOS native installation after Files compiled successfully: APT rejected installing a locally compiled package under the generic release's Debian version as a downgrade.
