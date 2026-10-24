@@ -212,6 +212,33 @@ int main()
         require(g_file_equal(pane->secondary_location(), secondary_target) &&
                 at(*source, a), "Second-pane navigation must not retarget the first pane");
         g_object_unref(secondary_target);
+        // Exercise the actual user-facing cross-pane action, not just the
+        // second GTK directory model. It must delegate to the shared batch
+        // transfer machinery and leave the source untouched for Copy.
+        GtkMultiSelection *selected_in_primary = FileManagerWindowTestAccess::selection(*source);
+        GListModel *selected_model = gtk_multi_selection_get_model(selected_in_primary);
+        bool selected_copy_source = false;
+        for (guint i = 0; i < g_list_model_get_n_items(selected_model); ++i) {
+            auto *info = G_FILE_INFO(g_list_model_get_item(selected_model, i));
+            if (info != nullptr &&
+                g_strcmp0(g_file_info_get_name(info), "file with spaces.txt") == 0) {
+                selected_copy_source = gtk_selection_model_select_item(
+                    GTK_SELECTION_MODEL(selected_in_primary), i, TRUE);
+            }
+            g_clear_object(&info);
+            if (selected_copy_source) break;
+        }
+        require(selected_copy_source, "Cross-pane Copy requires a real source selection");
+        GtkWidget *pane_copy = find(GTK_WIDGET(source->native_window()), [](GtkWidget *widget) {
+            return GTK_IS_BUTTON(widget) &&
+                g_strcmp0(gtk_button_get_label(GTK_BUTTON(widget)), "Copy →") == 0;
+        });
+        require(pane_copy != nullptr, "Second pane must expose the directional Copy operation");
+        g_signal_emit_by_name(pane_copy, "clicked");
+        await([&] { return fs::exists(b / "file with spaces.txt"); });
+        require(fs::exists(a / "file with spaces.txt") &&
+                fs::file_size(b / "file with spaces.txt") == fs::file_size(a / "file with spaces.txt"),
+                "Cross-pane Copy must preserve the original and publish its contents");
         pane->toggle();
         require(!pane->visible() && pane->secondary_location() == nullptr,
                 "Collapsing secondary pane must relinquish its enumeration location");
