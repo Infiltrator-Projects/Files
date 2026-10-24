@@ -50,6 +50,20 @@ GtkWidget *find_by_tooltip(GtkWidget *root, const char *tooltip)
     return nullptr;
 }
 
+GtkWidget *find_expander(GtkWidget *root, const char *label)
+{
+    if (root == nullptr) return nullptr;
+    if (GTK_IS_EXPANDER(root) &&
+        g_strcmp0(gtk_expander_get_label(GTK_EXPANDER(root)), label) == 0)
+        return root;
+    for (GtkWidget *child = gtk_widget_get_first_child(root); child != nullptr;
+         child = gtk_widget_get_next_sibling(child)) {
+        if (GtkWidget *result = find_expander(child, label); result != nullptr)
+            return result;
+    }
+    return nullptr;
+}
+
 GtkWidget *find_button(GtkWidget *root, const char *label)
 {
     if (root == nullptr) {
@@ -406,8 +420,12 @@ int main()
                 "New Folder must remain available after header consolidation");
         require(find_button(popover, "Properties") != nullptr,
                 "Properties must be available from File actions");
+        GtkWidget *inspection_tools = find_expander(popover, "Inspection and tools");
+        require(inspection_tools != nullptr, "Inspection tools section is missing");
+        gtk_expander_set_expanded(GTK_EXPANDER(inspection_tools), TRUE);
+        while (g_main_context_iteration(nullptr, FALSE)) {}
         require(find_button(popover, "Open terminal here") != nullptr,
-                "Current-folder terminal action must be reachable in overflow");
+                "Current-folder terminal action must be reachable in expanded tools");
         require(find_button(popover, "Inspect file…") != nullptr,
                 "File inspection must be reachable in overflow");
         require(find_button(popover, "Copy") != nullptr,
