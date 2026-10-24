@@ -30,6 +30,8 @@ private:
     static void on_go(GtkEntry *, gpointer);
     static void on_up(GtkButton *, gpointer);
     static void on_back(GtkButton *, gpointer);
+    static void on_forward(GtkButton *, gpointer);
+    static void on_select_all(GtkButton *, gpointer);
     static void on_transfer(GtkButton *, gpointer);
     static void on_loading(GObject *, GParamSpec *, gpointer);
     void navigate(GFile *);
@@ -40,13 +42,15 @@ private:
     GtkWidget *host_{nullptr};
     GtkWidget *path_{nullptr};
     GtkWidget *back_{nullptr};
+    GtkWidget *forward_{nullptr};
     GtkWidget *feedback_{nullptr};
     GtkDirectoryList *primary_{nullptr};
     GtkMultiSelection *primary_selection_{nullptr};
     GtkDirectoryList *secondary_{nullptr};
-    GtkSingleSelection *secondary_selection_{nullptr};
+    GtkMultiSelection *secondary_selection_{nullptr};
     GtkWidget *status_label_{nullptr};
     std::vector<std::string> history_;
+    std::vector<std::string> forward_history_;
 };
 
 } // namespace infiltrator::files

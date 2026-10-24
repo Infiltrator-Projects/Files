@@ -34,3 +34,7 @@ against a temporary filesystem root. The CI build and packaging pipeline
 provide compile and static acceptance evidence. It does not constitute a
 real-device power-loss matrix, remote-provider certification or visual Mint
 Day/Night acceptance.
+
+## Follow-up workspace qualification
+
+The secondary list now uses multi-selection for bounded directional native transfers (the same maximum of 256 source items as the primary pane). It supplies explicit Select all and independent Back/Forward history, with forward history invalidated by a new navigation. Both transfer directions still invoke ClipboardController and the shared journalled batch engine; no remote mutations are admitted. History and the secondary browse target remain intentionally in-window only and are released on collapse.

@@ -34,8 +34,7 @@ DualPaneController::DualPaneController(GtkWindow *window, GtkWidget *host,
     g_object_ref(primary_selection_);
     secondary_ = gtk_directory_list_new(kAttributes, nullptr);
     gtk_directory_list_set_monitored(secondary_, TRUE);
-    secondary_selection_ = gtk_single_selection_new(G_LIST_MODEL(g_object_ref(secondary_)));
-    gtk_single_selection_set_autoselect(secondary_selection_, FALSE);
+    secondary_selection_ = gtk_multi_selection_new(G_LIST_MODEL(g_object_ref(secondary_)));
     GtkWidget *bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
     gtk_widget_set_margin_start(bar, 8);
     gtk_widget_set_margin_end(bar, 8);
@@ -45,6 +44,10 @@ DualPaneController::DualPaneController(GtkWindow *window, GtkWidget *host,
     gtk_widget_set_tooltip_text(back_, "Second pane: Back");
     g_signal_connect(back_, "clicked", G_CALLBACK(on_back), this);
     gtk_box_append(GTK_BOX(bar), back_);
+    forward_ = gtk_button_new_from_icon_name("go-next-symbolic");
+    gtk_widget_set_tooltip_text(forward_, "Second pane: Forward");
+    g_signal_connect(forward_, "clicked", G_CALLBACK(on_forward), this);
+    gtk_box_append(GTK_BOX(bar), forward_);
     GtkWidget *up = gtk_button_new_from_icon_name("go-up-symbolic");
     gtk_widget_set_tooltip_text(up, "Second pane: Parent");
     g_signal_connect(up, "clicked", G_CALLBACK(on_up), this);
@@ -75,8 +78,12 @@ DualPaneController::DualPaneController(GtkWindow *window, GtkWidget *host,
     gtk_widget_set_margin_bottom(toolbar, 5);
     action(toolbar, "Copy →", "Copy selected items in the main pane into the second pane", 1, this, G_CALLBACK(on_transfer));
     action(toolbar, "Move →", "Move selected items in the main pane into the second pane", 2, this, G_CALLBACK(on_transfer));
-    action(toolbar, "← Copy", "Copy selected item in the second pane into the main pane", 3, this, G_CALLBACK(on_transfer));
-    action(toolbar, "← Move", "Move selected item in the second pane into the main pane", 4, this, G_CALLBACK(on_transfer));
+    action(toolbar, "← Copy", "Copy selected items in the second pane into the main pane", 3, this, G_CALLBACK(on_transfer));
+    action(toolbar, "← Move", "Move selected items in the second pane into the main pane", 4, this, G_CALLBACK(on_transfer));
+    GtkWidget *select_all = gtk_button_new_with_label("Select all");
+    gtk_widget_set_tooltip_text(select_all, "Select every visible item in the second pane");
+    g_signal_connect(select_all, "clicked", G_CALLBACK(on_select_all), this);
+    gtk_box_append(GTK_BOX(toolbar), select_all);
     gtk_box_append(GTK_BOX(host_), toolbar);
     feedback_ = gtk_label_new("");
     gtk_label_set_xalign(GTK_LABEL(feedback_), 0);
@@ -89,6 +96,7 @@ DualPaneController::DualPaneController(GtkWindow *window, GtkWidget *host,
     g_object_set_data(G_OBJECT(window_), "ifm-dual-pane-controller", this);
     gtk_widget_set_visible(host_, FALSE);
     gtk_widget_set_sensitive(back_, FALSE);
+    gtk_widget_set_sensitive(forward_, FALSE);
     g_object_weak_ref(G_OBJECT(window_), &DualPaneController::on_window_finalized, this);
 }
 
@@ -117,6 +125,9 @@ void DualPaneController::toggle()
         gtk_widget_set_visible(host_, FALSE);
         gtk_directory_list_set_file(secondary_, nullptr);
         history_.clear();
+        forward_history_.clear();
+        gtk_widget_set_sensitive(back_, FALSE);
+        gtk_widget_set_sensitive(forward_, FALSE);
         return;
     }
     GFile *origin = gtk_directory_list_get_file(primary_);
@@ -140,15 +151,20 @@ void DualPaneController::navigate(GFile *file)
     }
     if (old != nullptr) {
         char *prior = g_file_get_uri(old);
-        if (prior != nullptr && history_.size() < 128) history_.emplace_back(prior);
+        if (prior != nullptr) {
+            if (history_.size() == 128U) history_.erase(history_.begin());
+            history_.emplace_back(prior);
+        }
         g_free(prior);
     }
+    forward_history_.clear();
     gtk_directory_list_set_file(secondary_, file);
     char *display = g_file_get_parse_name(file);
     gtk_editable_set_text(GTK_EDITABLE(path_), display != nullptr ? display : uri);
     g_free(display);
     g_free(uri);
     gtk_widget_set_sensitive(back_, !history_.empty());
+    gtk_widget_set_sensitive(forward_, FALSE);
     gtk_label_set_text(GTK_LABEL(feedback_), "");
 }
 
@@ -228,6 +244,16 @@ void DualPaneController::on_back(GtkButton *, gpointer data)
 {
     auto *self = static_cast<DualPaneController *>(data);
     if (self->history_.empty()) return;
+    GFile *current = gtk_directory_list_get_file(self->secondary_);
+    if (current != nullptr) {
+        char *uri = g_file_get_uri(current);
+        if (uri != nullptr) {
+            if (self->forward_history_.size() == 128U)
+                self->forward_history_.erase(self->forward_history_.begin());
+            self->forward_history_.emplace_back(uri);
+        }
+        g_free(uri);
+    }
     const std::string uri = self->history_.back();
     self->history_.pop_back();
     GFile *file = g_file_new_for_uri(uri.c_str());
@@ -237,6 +263,40 @@ void DualPaneController::on_back(GtkButton *, gpointer data)
     g_free(label);
     g_object_unref(file);
     gtk_widget_set_sensitive(self->back_, !self->history_.empty());
+    gtk_widget_set_sensitive(self->forward_, !self->forward_history_.empty());
+    gtk_label_set_text(GTK_LABEL(self->feedback_), "");
+}
+
+void DualPaneController::on_forward(GtkButton *, gpointer data)
+{
+    auto *self = static_cast<DualPaneController *>(data);
+    if (self->forward_history_.empty()) return;
+    GFile *current = gtk_directory_list_get_file(self->secondary_);
+    if (current != nullptr) {
+        char *uri = g_file_get_uri(current);
+        if (uri != nullptr) {
+            if (self->history_.size() == 128U) self->history_.erase(self->history_.begin());
+            self->history_.emplace_back(uri);
+        }
+        g_free(uri);
+    }
+    const std::string uri = self->forward_history_.back();
+    self->forward_history_.pop_back();
+    GFile *file = g_file_new_for_uri(uri.c_str());
+    gtk_directory_list_set_file(self->secondary_, file);
+    char *label = g_file_get_parse_name(file);
+    gtk_editable_set_text(GTK_EDITABLE(self->path_), label != nullptr ? label : uri.c_str());
+    g_free(label);
+    g_object_unref(file);
+    gtk_widget_set_sensitive(self->back_, !self->history_.empty());
+    gtk_widget_set_sensitive(self->forward_, !self->forward_history_.empty());
+    gtk_label_set_text(GTK_LABEL(self->feedback_), "");
+}
+
+void DualPaneController::on_select_all(GtkButton *, gpointer data)
+{
+    auto *self = static_cast<DualPaneController *>(data);
+    gtk_selection_model_select_all(GTK_SELECTION_MODEL(self->secondary_selection_));
 }
 
 void DualPaneController::on_loading(GObject *, GParamSpec *, gpointer data)
@@ -257,20 +317,10 @@ std::vector<std::string> DualPaneController::selected_sources(bool from_primary)
     GtkDirectoryList *directory = from_primary ? primary_ : secondary_;
     GFile *parent = gtk_directory_list_get_file(directory);
     if (parent == nullptr || !g_file_is_native(parent)) return result;
-    GListModel *model = from_primary ? gtk_multi_selection_get_model(primary_selection_)
-                                    : G_LIST_MODEL(secondary_);
+    GtkMultiSelection *selection = from_primary ? primary_selection_ : secondary_selection_;
+    GListModel *model = gtk_multi_selection_get_model(selection);
     if (model == nullptr) return result;
-    if (!from_primary) {
-        auto *info = G_FILE_INFO(gtk_single_selection_get_selected_item(secondary_selection_));
-        if (info != nullptr && g_file_info_get_name(info) != nullptr) {
-            GFile *child = g_file_get_child(parent, g_file_info_get_name(info));
-            char *path = g_file_get_path(child);
-            if (path != nullptr) { result.emplace_back(path); g_free(path); }
-            g_object_unref(child);
-        }
-        return result;
-    }
-    GtkBitset *bits = gtk_selection_model_get_selection(GTK_SELECTION_MODEL(primary_selection_));
+    GtkBitset *bits = gtk_selection_model_get_selection(GTK_SELECTION_MODEL(selection));
     if (gtk_bitset_get_size(bits) > 256U) {
         gtk_bitset_unref(bits);
         return result;
