@@ -23,6 +23,10 @@ struct SearchOptions {
     std::optional<std::uint64_t> minimum_size;
     std::optional<std::uint64_t> maximum_size;
     std::optional<std::int64_t> modified_since; // Unix seconds, inclusive
+    std::optional<std::int64_t> modified_before; // Unix seconds, exclusive
+    std::optional<std::uint32_t> owner_uid; // Provider must expose unix::uid
+    bool duplicates_by_sha256{false}; // Bounded digest search, not byte equality
+    std::vector<std::string> excluded_uris; // Exact URI or descendant only
     std::string content; // UTF-8 substring, regular text files <=1 MiB only
 };
 
@@ -38,6 +42,7 @@ struct SearchReport {
     std::vector<SearchHit> hits;
     std::uint64_t visited{0};
     std::uint64_t content_skipped{0};
+    std::uint64_t duplicate_skipped{0};
     bool complete{true};
     std::string limitation;
 };
