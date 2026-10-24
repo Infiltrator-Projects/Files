@@ -43,6 +43,7 @@ public:
     void move_active_tab_to_new_window();
     [[nodiscard]] bool move_active_tab_to(FileManagerWindow &destination);
     void toggle_show_hidden();
+    void toggle_bookmark_for_selected();
     void toggle_extensions();
     [[nodiscard]] bool show_extensions() const noexcept { return show_extensions_; }
     void toggle_folders_first();
