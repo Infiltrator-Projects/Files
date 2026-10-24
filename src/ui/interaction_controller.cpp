@@ -1559,13 +1559,13 @@ void InteractionController::show_tags_dialog()
     gtk_bitset_unref(bits);
     if (uris.empty() || uris.size() > 128) {
         if (status_label_ != nullptr)
-            gtk_label_set_text(status_label_, "Select 1–128 items for tagging.");
+            gtk_label_set_text(GTK_LABEL(status_label_), "Select 1–128 items for tagging.");
         return;
     }
     const TagCatalogue existing = load_tag_catalogue();
     if (!existing.writable) {
         if (status_label_ != nullptr)
-            gtk_label_set_text(status_label_, existing.error.c_str());
+            gtk_label_set_text(GTK_LABEL(status_label_), existing.error.c_str());
         return;
     }
     struct TagsRequest {
