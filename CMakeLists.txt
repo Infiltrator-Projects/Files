@@ -130,6 +130,7 @@ add_library(infiltrator-files-ui STATIC
     src/ui/presentation_store.cpp
     src/ui/quick_preview.cpp
     src/ui/recursive_search.cpp
+    src/ui/search_persistence.cpp
     src/ui/tag_catalogue.cpp
     src/ui/theme_controller.cpp
     src/ui/transfer_progress_view.cpp
