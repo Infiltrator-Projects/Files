@@ -1924,7 +1924,9 @@ void FileManagerWindow::on_sidebar_row_activated(GtkListBox *box, GtkListBoxRow 
     const auto *target = static_cast<const char *>(g_object_get_data(G_OBJECT(row), "ifm-target"));
     GFile *file = self->file_from_location_text(target);
     if (file != nullptr) {
-        self->navigate_to(file, true);
+        // A sidebar reference may denote either a folder or a pinned file.
+        // Let GIO resolve the type asynchronously and reveal files in place.
+        self->open_location(file);
         g_object_unref(file);
     }
 }
