@@ -328,6 +328,16 @@ void qualify_selection_actions(infiltrator::files::FileManagerWindow &w,
     require(await_text(GTK_WIDGET(inspection), "SHA-256 VERIFIED"),
             "Known external SHA-256 should verify the test file");
     gtk_editable_set_text(GTK_EDITABLE(input),
+        "5cf9a9f38be47af7123f6f8f1ef8e22682262a83991de5e932967857e322a188 *first.pdf");
+    g_signal_emit_by_name(verify, "clicked");
+    require(await_text(GTK_WIDGET(inspection), "SHA-256 VERIFIED"),
+            "Qualified sha256sum line must verify the selected basename");
+    gtk_editable_set_text(GTK_EDITABLE(input),
+        "5cf9a9f38be47af7123f6f8f1ef8e22682262a83991de5e932967857e322a188 *other.pdf");
+    g_signal_emit_by_name(verify, "clicked");
+    require(await_text(GTK_WIDGET(inspection), "exact filename"),
+            "Manifest for a different filename must never be accepted");
+    gtk_editable_set_text(GTK_EDITABLE(input),
         "0000000000000000000000000000000000000000000000000000000000000000");
     g_signal_emit_by_name(verify, "clicked");
     require(await_text(GTK_WIDGET(inspection), "SHA-256 MISMATCH"),
