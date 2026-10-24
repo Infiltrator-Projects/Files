@@ -14,6 +14,7 @@
 namespace infiltrator::files {
 namespace {
 namespace fs = std::filesystem;
+constexpr std::uint64_t kMaxImport = 1024ULL * 1024ULL * 1024ULL;
 template <typename T> struct Unref {
     void operator()(T *ptr) const noexcept { if (ptr) g_object_unref(ptr); }
 };
@@ -28,6 +29,35 @@ std::string message_from(GError *error, const char *fallback)
 {
     return error != nullptr ? error->message : fallback;
 }
+std::string source_error(GError *error, GFile *source, const char *fallback)
+{
+    const std::string why = message_from(error, fallback);
+    const bool portable = g_file_has_uri_scheme(source, "mtp") ||
+                          g_file_has_uri_scheme(source, "gphoto2");
+    const bool disconnected = error != nullptr &&
+        (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_MOUNTED) ||
+         g_error_matches(error, G_IO_ERROR, G_IO_ERROR_HOST_UNREACHABLE) ||
+         g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NETWORK_UNREACHABLE) ||
+         g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CONNECTION_CLOSED) ||
+         g_error_matches(error, G_IO_ERROR, G_IO_ERROR_TIMED_OUT));
+    if (disconnected)
+        return (portable ? "Portable device disconnected: " :
+                           "Remote provider disconnected: ") + why;
+    if (portable && error != nullptr &&
+        g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND))
+        return "Portable device item disappeared: " + why;
+    return why;
+}
+struct ProgressBudget { GCancellable *cancellable; bool exceeded{false}; };
+void import_progress(goffset copied, goffset total, gpointer user_data)
+{
+    auto *budget = static_cast<ProgressBudget *>(user_data);
+    if ((copied >= 0 && static_cast<std::uint64_t>(copied) > kMaxImport) ||
+        (total >= 0 && static_cast<std::uint64_t>(total) > kMaxImport)) {
+        budget->exceeded = true;
+        g_cancellable_cancel(budget->cancellable);
+    }
+}
 bool cancelled(GCancellable *cancellable)
 {
     return cancellable != nullptr && g_cancellable_is_cancelled(cancellable);
@@ -39,7 +69,7 @@ bool verify_against_provider(GFile *original, GFile *staged,
     GOwned<GFileInputStream> remote(g_file_read(original, cancel, &error));
     if (!remote) {
         reason = "Could not reopen the provider object to verify imported bytes: " +
-                 message_from(error, "unknown provider error");
+                 source_error(error, original, "unknown provider error");
         g_clear_error(&error);
         return false;
     }
@@ -56,7 +86,7 @@ bool verify_against_provider(GFile *original, GFile *staged,
         gboolean first = g_input_stream_read_all(G_INPUT_STREAM(remote.get()),
                                                   a.data(), a.size(), &left, cancel, &error);
         if (!first) {
-            reason = "Provider reread failed: " + message_from(error, "unknown read error");
+            reason = "Provider reread failed: " + source_error(error, original, "unknown read error");
             g_clear_error(&error);
             return false;
         }
@@ -99,10 +129,10 @@ OperationResult ProviderImportEngine::import_regular_file(
     GOwned<GFile> source(g_file_new_for_uri(uri.c_str()));
     GError *error = nullptr;
     GOwned<GFileInfo> metadata(g_file_query_info(
-        source.get(), G_FILE_ATTRIBUTE_STANDARD_TYPE "," G_FILE_ATTRIBUTE_STANDARD_NAME,
+        source.get(), G_FILE_ATTRIBUTE_STANDARD_TYPE "," G_FILE_ATTRIBUTE_STANDARD_NAME "," G_FILE_ATTRIBUTE_STANDARD_SIZE,
         G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, cancel, &error));
     if (!metadata) {
-        const std::string why = message_from(error, "provider unavailable");
+        const std::string why = source_error(error, source.get(), "provider unavailable");
         const bool was_cancelled = cancelled(cancel);
         g_clear_error(&error);
         return failure(was_cancelled ? OperationStatus::Cancelled : OperationStatus::ExecutionFailure,
@@ -112,6 +142,10 @@ OperationResult ProviderImportEngine::import_regular_file(
     if (g_file_info_get_file_type(metadata.get()) != G_FILE_TYPE_REGULAR)
         return failure(OperationStatus::UnsupportedCapability, OperationPhase::Preflight,
                        destination_parent, "Only regular provider files may be imported. Directories and links are not imported.");
+    if (g_file_info_has_attribute(metadata.get(), G_FILE_ATTRIBUTE_STANDARD_SIZE) &&
+        g_file_info_get_size(metadata.get()) > static_cast<goffset>(kMaxImport))
+        return failure(OperationStatus::UnsupportedCapability, OperationPhase::Preflight,
+                       destination_parent, "Provider file exceeds the qualified 1 GiB import limit.");
     const char *raw = g_file_info_get_name(metadata.get());
     if (raw == nullptr || !OperationEngine::validate_item_name(raw))
         return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight,
@@ -139,13 +173,19 @@ OperationResult ProviderImportEngine::import_regular_file(
                          final, "Provider import cancelled.");
     } else {
         GOwned<GFile> stage(g_file_new_for_path(staging_file.c_str()));
+        // Progress remains authoritative when a device supplies no trustworthy size.
+        GOwned<GCancellable> local_cancel(g_cancellable_new());
+        GCancellable *effective = cancel != nullptr ? cancel : local_cancel.get();
+        ProgressBudget budget{effective};
         if (!g_file_copy(source.get(), stage.get(), G_FILE_COPY_NOFOLLOW_SYMLINKS,
-                         cancel, nullptr, nullptr, &error)) {
+                         effective, import_progress, &budget, &error)) {
             const bool was_cancelled = cancelled(cancel);
-            result = failure(was_cancelled ? OperationStatus::Cancelled
-                                          : OperationStatus::ExecutionFailure,
+            result = failure(budget.exceeded ? OperationStatus::UnsupportedCapability :
+                             was_cancelled ? OperationStatus::Cancelled :
+                                             OperationStatus::ExecutionFailure,
                              OperationPhase::Execute, final,
-                             "Provider import failed: " + message_from(error, "unknown I/O error"));
+                             budget.exceeded ? "Provider data exceeded the 1 GiB import limit." :
+                             "Provider import failed: " + source_error(error, source.get(), "unknown I/O error"));
             g_clear_error(&error);
         } else {
             std::string verification;
