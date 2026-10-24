@@ -1,5 +1,10 @@
 # Validation
 
+## 0.1.67 source/release evidence
+
+The [0.1.67 implementation audit](FEATURE-AUDIT-0.1.67.md) anchors the 24 post-v0.1.66 changes to source, original requirements and tests. The prior main source \`d562d113...\` passed 20 hosted CTest executables and package/native-installer checks in [Verify run 40075635698](https://github.com/Infiltrator-Projects/Files/actions/runs/40075635698). This is evidence for the **earlier exact commit only**. The 0.1.67 versioned/audited commit requires **its own** successful Verify, GitHub asset/tag qualification and central beta APT SHA-256 match. Physical Linux Mint Day/Night, accessibility, cross-filesystem and unplug/crash tests remain explicitly unproven.
+
+
 ## Qualification
 
 The 0.1.66 extension/identity/created-time tranche adds explicit `detail_metadata_test` contract checks for presence-aware raw creation sorting, missing timestamp behaviour, extension-preserving underlying names, symlink identity, hidden identity and special file type. `interaction_surface_test` drives real GTK action surfaces to toggle filename extensions, check updated command labels and ensure selection remains identical. Tested source passed 20/20 hosted CTest suites and native-installer/DEB qualification. Release, APT digest and physical Linux Mint visual acceptance are independently tracked.

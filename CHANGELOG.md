@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.67 — 2026-10-24
+
+- Publish the previously unreleased 24 post-v0.1.66 commits using a distinct immutable version. Do not retag or overwrite the earlier release.
+- Add regular-file sidebar bookmarks and native missing/unavailable reference states; selection by visible filename pattern, file type, size and modification date; confirmed broken-link indicators.
+- Add opt-in single-click activation, mouse history controls, configurable folder activation policy, bounded icon sizes and remote image thumbnail preference.
+- Add validated atomic TSV reconstruction of the derived tag catalogue, apply private-location exclusions to Recent/activity, and persist bounded crash-safe browsing session checkpoints (without resuming file operations).
+- Reaudit the complete 520-entry intended scope by catalogue section and reconcile original v0.1.61 requirements with current source, test evidence and remaining gaps in \`docs/FEATURE-AUDIT-0.1.67.md\`. This is **not** a claim of full feature completeness.
+- Exact-source CI, publishing, native package identities and central APT digest are separate required gates; never infer publication solely from a passing Verify job.
+
+
 ## 0.1.66 — 2026-10-24
 
 - Qualify four additional **original v0.1.61 catalogue requirements**: created-time sorting (line 165), hidden/special visual distinctions (181), optional filename-extension display (182), and symlink/shortcut identity markers (183).

@@ -1,5 +1,8 @@
 # Files — Complete Feature Catalogue
 
+**Current 0.1.67 reconciliation:** [source-backed catalogue audit](FEATURE-AUDIT-0.1.67.md) compares the 24 commits after published v0.1.66 with the original v0.1.61 entries, documents actual additional implementations and identifies remaining gaps across all 35 catalogue sections. It does not count each control as a feature or claim whole-product completion. The original catalogue below remains unchanged.
+
+
 The 0.1.66 feature audit maps four further independently specified v0.1.61 entries to code and acceptance tests: created-time sorting (#165), hidden/special visual distinctions (#181), optional filename-extension display (#182), and symlink/shortcut identity (#183). Together with eleven bounded-complete originals in 0.1.65 this qualifies fifteen distinct catalogue entries; four additional partial entries stay open, as does confirmed broken-link visual status (#184). See `FEATURE-AUDIT-0.1.66.md` for one-to-one traceability and limitations.
 
 
