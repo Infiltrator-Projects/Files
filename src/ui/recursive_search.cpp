@@ -178,6 +178,14 @@ void run_search(GTask *task, gpointer, gpointer data, GCancellable *cancel)
 {
     auto *work = static_cast<SearchWork *>(data);
     GError *error = nullptr;
+    if (work->roots.size() > 1 && work->options.duplicates_by_sha256) {
+        // Duplicate grouping is authoritative only within one bounded search
+        // root. Reporting independent per-root groups as a combined answer
+        // would miss duplicates spanning two selected roots.
+        g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+            "Duplicate detection across multiple selected folders is not yet qualified; search one parent location.");
+        return;
+    }
     SearchReport result;
     for (std::size_t index = 0; index < work->roots.size(); ++index) {
         if (g_cancellable_set_error_if_cancelled(cancel, &error)) break;
