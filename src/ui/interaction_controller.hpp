@@ -75,6 +75,9 @@ private:
     void open_primary();
     void show_open_with();
     void show_properties();
+    void inspect_primary();
+    void compare_selected_hashes();
+    void launch_terminal(bool selected);
     void show_selection_pattern_dialog();
     void select_same_type();
     void copy_selected_text(bool uris);
@@ -131,6 +134,8 @@ private:
     std::vector<GtkWidget *> hidden_actions_;
     std::vector<GtkWidget *> folder_sort_actions_;
     std::vector<GtkWidget *> sidebar_actions_;
+    std::vector<GtkWidget *> folder_terminal_actions_;
+    std::vector<GtkWidget *> compare_actions_;
     std::vector<ProxyAction> overflow_proxies_;
     std::vector<ProxyAction> context_proxies_;
     std::vector<GtkWidget *> context_sections_;
