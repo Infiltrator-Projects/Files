@@ -656,13 +656,17 @@ void show_file_inspection(GtkWindow *parent, GFile *file, GFileInfo *known)
         g_signal_connect(state->hash, "clicked", G_CALLBACK((+[](GtkButton *, gpointer data) {
             begin(GTK_WINDOW(data), InspectionKind::Sha256);
         })), dialog);
+        GtkWidget *root = gtk_window_get_child(dialog);
+        GtkWidget *readout = gtk_widget_get_first_child(root);
+        GtkWidget *verify_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        gtk_box_insert_child_after(GTK_BOX(root), verify_row, readout);
         state->expected_hash = gtk_entry_new();
         gtk_entry_set_placeholder_text(GTK_ENTRY(state->expected_hash),
-            "Expected 64-digit SHA-256 hex");
+            "SHA-256 or sha256sum line for this filename");
         gtk_widget_set_hexpand(state->expected_hash, TRUE);
-        gtk_box_prepend(GTK_BOX(buttons), state->expected_hash);
+        gtk_box_append(GTK_BOX(verify_row), state->expected_hash);
         state->verify_hash = gtk_button_new_with_label("Verify SHA-256");
-        gtk_box_prepend(GTK_BOX(buttons), state->verify_hash);
+        gtk_box_append(GTK_BOX(verify_row), state->verify_hash);
         g_signal_connect(state->verify_hash, "clicked", G_CALLBACK((+[](GtkButton *, gpointer data) {
             GtkWindow *dialog = GTK_WINDOW(data);
             auto *state = static_cast<DialogState *>(
