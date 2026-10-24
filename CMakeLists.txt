@@ -165,6 +165,11 @@ if(BUILD_TESTING)
     add_library(calendar-date-test-fixture MODULE tests/calendar_date_fixture.c)
     target_link_libraries(calendar-date-test-fixture PRIVATE InfiltratrCommon::Portable)
 
+    add_executable(search-persistence-test tests/search_persistence_test.cpp)
+    target_link_libraries(search-persistence-test PRIVATE infiltrator-files-ui)
+    infiltrator_enable_warnings(search-persistence-test)
+    add_test(NAME search-persistence COMMAND search-persistence-test)
+
     add_executable(tag-catalogue-test tests/tag_catalogue_test.cpp)
     target_link_libraries(tag-catalogue-test PRIVATE infiltrator-files-ui)
     infiltrator_enable_warnings(tag-catalogue-test)
