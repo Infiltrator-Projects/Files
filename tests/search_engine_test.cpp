@@ -8,6 +8,8 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <cstdint>
+#include <unistd.h>
 
 using infiltrator::files::SearchHit;
 using infiltrator::files::SearchNameMode;
@@ -61,6 +63,7 @@ int main()
         fs::create_directories(root / "nested" / "more");
         write(root / "Alpha.TXT", "Distinctive blue orchid\n");
         write(root / "notes.txt", "notes\n");
+        write(root / "nested" / "same-notes.txt", "notes\n");
         write(root / "small.txt", "x");
         write(root / "nested" / "more" / "recursed.txt", "deep cobalt text\n");
         write(root / "hidden.txt", "visible name\n");
@@ -136,6 +139,59 @@ int main()
         o.content = "blue orchid";
         require(found(run(location, o), "Alpha.TXT"),
                 "Exact-case content search must succeed");
+
+        // Catalogue #366: duplicates are size+digest matches, without
+        // pretending digest equality is proof of byte identity.
+        o = SearchOptions{};
+        o.duplicates_by_sha256 = true;
+        const auto duplicates = run(location, o);
+        require(duplicates.complete && duplicates.hits.size() == 2 &&
+                found(duplicates, "notes.txt") && found(duplicates, "same-notes.txt"),
+                "Duplicate search must return only genuine matching digest groups");
+        o.recursive = false;
+        require(run(location, o).hits.empty(),
+                "Duplicate search must respect non-recursive scope");
+
+        // Catalogue #359: filter by native UID without making unknown equal zero.
+        o = SearchOptions{};
+        o.name = "notes.txt";
+        o.owner_uid = static_cast<std::uint32_t>(getuid());
+        require(found(run(location, o), "notes.txt"),
+                "Owner UID must match the provider's actual native attribute");
+        o.owner_uid = static_cast<std::uint32_t>(getuid() + 1U);
+        require(run(location, o).hits.empty(),
+                "Owner UID filter must reject a different native owner");
+
+        // Catalogue #397: inclusive start, exclusive end, including invalid
+        // intervals and missing provider timestamp safeguards.
+        o = SearchOptions{};
+        o.name = "notes.txt";
+        o.modified_before = 946684800LL;
+        require(run(location, o).hits.empty(), "Old date upper bound must exclude new files");
+        o.modified_before = 4102444800LL;
+        require(found(run(location, o), "notes.txt"), "Future upper bound must admit new files");
+        o.modified_since = 4102444800LL;
+        GCancellable *invalid_cancel = g_cancellable_new();
+        GError *invalid_error = nullptr;
+        (void)search_files(location, o, invalid_cancel, &invalid_error);
+        require(g_error_matches(invalid_error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT),
+                "An empty modified interval must be rejected before enumeration");
+        g_clear_error(&invalid_error);
+        g_object_unref(invalid_cancel);
+
+        // Catalogue #663: an exclusion must reject an exact path subtree,
+        // never an unrelated pathname with a shared textual prefix.
+        o = SearchOptions{};
+        GFile *hidden = g_file_new_for_path((root / "nested").c_str());
+        gchar *blocked_uri = g_file_get_uri(hidden);
+        o.excluded_uris.emplace_back(blocked_uri);
+        g_free(blocked_uri);
+        g_object_unref(hidden);
+        require(!found(run(location, o), "recursed.txt") &&
+                found(run(location, o), "notes.txt"),
+                "Excluded subtrees must be pruned by GFile identity");
+        o.name = "notes.txt";
+        require(found(run(location, o), "notes.txt"), "Exclusion must not suppress siblings");
 
         o = SearchOptions{};
         o.name = "Alpha";
