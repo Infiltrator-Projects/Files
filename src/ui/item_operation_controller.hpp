@@ -35,12 +35,14 @@ private:
         KeepBothMove,
         ReplaceCopy,
         ReplaceMove,
+        Permissions,
     };
 
     static void on_window_finalized(gpointer user_data, GObject *where_object_was);
     static void on_rename_clicked(GtkButton *button, gpointer user_data);
     static void on_copy_clicked(GtkButton *button, gpointer user_data);
     static void on_move_clicked(GtkButton *button, gpointer user_data);
+    static void on_permissions_clicked(GtkButton *button, gpointer user_data);
     static gboolean on_key_pressed(GtkEventControllerKey *controller,
                                    guint keyval,
                                    guint keycode,
@@ -54,6 +56,10 @@ private:
                                  guint added,
                                  gpointer user_data);
     static void on_rename_dialog_destroy(GtkWidget *widget, gpointer user_data);
+    static void on_permissions_dialog_destroy(GtkWidget *widget, gpointer user_data);
+    static void on_permissions_submit(GtkButton *button, gpointer user_data);
+    static void on_permissions_cancel(GtkButton *button, gpointer user_data);
+    static void on_permissions_entry_activate(GtkEntry *entry, gpointer user_data);
     static void on_rename_cancel(GtkButton *button, gpointer user_data);
     static void on_rename_submit(GtkButton *button, gpointer user_data);
     static void on_rename_entry_activate(GtkEntry *entry, gpointer user_data);
@@ -72,6 +78,8 @@ private:
                                       gpointer user_data);
 
     void show_rename_dialog();
+    void show_permissions_dialog();
+    void submit_permissions();
     void submit_rename();
     void choose_destination(Kind kind);
     void prompt_conflict(Kind completed_kind,
@@ -103,6 +111,11 @@ private:
     GtkWidget *rename_button_{nullptr};
     GtkWidget *copy_button_{nullptr};
     GtkWidget *move_button_{nullptr};
+    GtkWidget *permissions_button_{nullptr};
+    GtkWidget *permissions_dialog_{nullptr};
+    GtkWidget *permissions_entry_{nullptr};
+    GtkWidget *permissions_message_{nullptr};
+    std::string permissions_source_path_;
     GtkWidget *rename_dialog_{nullptr};
     GtkWidget *rename_entry_{nullptr};
     GtkWidget *rename_message_{nullptr};

@@ -41,6 +41,8 @@ const char *busy_text(const int kind)
         return "Replacing item by copy…";
     case 6:
         return "Replacing item by move…";
+    case 7:
+        return "Changing permissions…";
     default:
         return "Working…";
     }
@@ -80,7 +82,8 @@ ItemOperationController::ItemOperationController(GtkWindow *window,
         rename_button_ = gtk_button_new_with_label("Rename");
         copy_button_ = gtk_button_new_with_label("Copy to…");
         move_button_ = gtk_button_new_with_label("Move to…");
-        for (GtkWidget *button : {rename_button_, copy_button_, move_button_}) {
+        permissions_button_ = gtk_button_new_with_label("Edit Permissions…");
+        for (GtkWidget *button : {rename_button_, copy_button_, move_button_, permissions_button_}) {
             gtk_widget_add_css_class(button, "flat");
             gtk_widget_set_halign(button, GTK_ALIGN_FILL);
             gtk_box_append(GTK_BOX(box), button);
@@ -92,6 +95,8 @@ ItemOperationController::ItemOperationController(GtkWindow *window,
                          G_CALLBACK(&ItemOperationController::on_copy_clicked), this);
         g_signal_connect(move_button_, "clicked",
                          G_CALLBACK(&ItemOperationController::on_move_clicked), this);
+        g_signal_connect(permissions_button_, "clicked",
+                         G_CALLBACK(&ItemOperationController::on_permissions_clicked), this);
 
         gtk_popover_set_child(GTK_POPOVER(popover_), box);
         gtk_menu_button_set_popover(GTK_MENU_BUTTON(menu_button_), popover_);
@@ -124,6 +129,11 @@ ItemOperationController::~ItemOperationController()
         g_signal_handlers_disconnect_by_data(rename_dialog_, this);
         gtk_window_destroy(GTK_WINDOW(rename_dialog_));
         rename_dialog_ = nullptr;
+    }
+    if (permissions_dialog_ != nullptr) {
+        g_signal_handlers_disconnect_by_data(permissions_dialog_, this);
+        gtk_window_destroy(GTK_WINDOW(permissions_dialog_));
+        permissions_dialog_ = nullptr;
     }
     if (directory_list_ != nullptr) {
         if (location_handler_ != 0U) {
@@ -161,6 +171,8 @@ const char *ItemOperationController::kind_name(const Kind kind) noexcept
         return "copy-replace";
     case Kind::ReplaceMove:
         return "move-replace";
+    case Kind::Permissions:
+        return "permissions";
     }
     return "unknown";
 }
@@ -185,6 +197,14 @@ void ItemOperationController::on_rename_clicked(GtkButton *button, gpointer user
     auto *self = static_cast<ItemOperationController *>(user_data);
     self->close_menu();
     self->show_rename_dialog();
+}
+
+void ItemOperationController::on_permissions_clicked(GtkButton *button, gpointer user_data)
+{
+    (void)button;
+    auto *self = static_cast<ItemOperationController *>(user_data);
+    self->close_menu();
+    self->show_permissions_dialog();
 }
 
 void ItemOperationController::on_copy_clicked(GtkButton *button, gpointer user_data)
@@ -283,6 +303,134 @@ void ItemOperationController::on_rename_entry_activate(GtkEntry *entry, gpointer
 {
     (void)entry;
     static_cast<ItemOperationController *>(user_data)->submit_rename();
+}
+
+void ItemOperationController::on_permissions_dialog_destroy(GtkWidget *, gpointer data)
+{
+    auto *self = static_cast<ItemOperationController *>(data);
+    self->permissions_dialog_ = nullptr;
+    self->permissions_entry_ = nullptr;
+    self->permissions_message_ = nullptr;
+    self->permissions_source_path_.clear();
+}
+
+void ItemOperationController::on_permissions_submit(GtkButton *, gpointer data)
+{
+    static_cast<ItemOperationController *>(data)->submit_permissions();
+}
+
+void ItemOperationController::on_permissions_cancel(GtkButton *, gpointer data)
+{
+    auto *self = static_cast<ItemOperationController *>(data);
+    if (self->permissions_dialog_ != nullptr)
+        gtk_window_destroy(GTK_WINDOW(self->permissions_dialog_));
+}
+
+void ItemOperationController::on_permissions_entry_activate(GtkEntry *, gpointer data)
+{
+    static_cast<ItemOperationController *>(data)->submit_permissions();
+}
+
+void ItemOperationController::show_permissions_dialog()
+{
+    if (busy_ || chooser_busy_ || window_ == nullptr) return;
+    if (permissions_dialog_ != nullptr) {
+        gtk_window_present(GTK_WINDOW(permissions_dialog_));
+        return;
+    }
+
+    std::string source_path;
+    std::string name;
+    if (!selected_source(source_path, name)) return;
+    permissions_source_path_ = source_path;
+    GtkWidget *dialog = gtk_window_new();
+    permissions_dialog_ = dialog;
+    gtk_window_set_title(GTK_WINDOW(dialog), "Edit Permissions");
+    gtk_window_set_transient_for(GTK_WINDOW(dialog), window_);
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    gtk_window_set_resizable(GTK_WINDOW(dialog), FALSE);
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 400, -1);
+    g_signal_connect(dialog, "destroy",
+                     G_CALLBACK(&ItemOperationController::on_permissions_dialog_destroy), this);
+
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_set_margin_start(box, 18);
+    gtk_widget_set_margin_end(box, 18);
+    gtk_widget_set_margin_top(box, 18);
+    gtk_widget_set_margin_bottom(box, 18);
+    gtk_window_set_child(GTK_WINDOW(dialog), box);
+    GtkWidget *heading = gtk_label_new(name.c_str());
+    gtk_label_set_xalign(GTK_LABEL(heading), 0.0F);
+    gtk_box_append(GTK_BOX(box), heading);
+    GtkWidget *instruction = gtk_label_new(
+        "Owner / group / other permissions (octal: e.g. 0644 or 0755). "
+        "Native regular files and directories only. Special bits, symlinks, "
+        "ACLs and privilege elevation are not changed.");
+    gtk_label_set_wrap(GTK_LABEL(instruction), TRUE);
+    gtk_label_set_xalign(GTK_LABEL(instruction), 0.0F);
+    gtk_box_append(GTK_BOX(box), instruction);
+
+    permissions_entry_ = gtk_entry_new();
+    // The already enumerated GFileInfo supplies the displayed mode. Never
+    // query a potentially slow filesystem synchronously from the UI thread.
+    const guint selected = gtk_single_selection_get_selected(selection_);
+    GFileInfo *info = selected != GTK_INVALID_LIST_POSITION
+        ? G_FILE_INFO(g_list_model_get_item(G_LIST_MODEL(directory_list_), selected))
+        : nullptr;
+    if (info != nullptr && g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_UNIX_MODE)) {
+        const guint32 mode = g_file_info_get_attribute_uint32(info, G_FILE_ATTRIBUTE_UNIX_MODE);
+        char *text = g_strdup_printf("%04o", mode & 07777U);
+        gtk_editable_set_text(GTK_EDITABLE(permissions_entry_), text);
+        g_free(text);
+    }
+    g_clear_object(&info);
+    gtk_box_append(GTK_BOX(box), permissions_entry_);
+    g_signal_connect(permissions_entry_, "activate",
+                     G_CALLBACK(&ItemOperationController::on_permissions_entry_activate), this);
+    permissions_message_ = gtk_label_new("");
+    gtk_label_set_xalign(GTK_LABEL(permissions_message_), 0.0F);
+    gtk_label_set_wrap(GTK_LABEL(permissions_message_), TRUE);
+    gtk_widget_add_css_class(permissions_message_, "error");
+    gtk_widget_set_visible(permissions_message_, FALSE);
+    gtk_box_append(GTK_BOX(box), permissions_message_);
+
+    GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_set_halign(actions, GTK_ALIGN_END);
+    gtk_box_append(GTK_BOX(box), actions);
+    GtkWidget *cancel = gtk_button_new_with_label("Cancel");
+    GtkWidget *apply = gtk_button_new_with_label("Apply Permissions");
+    gtk_widget_add_css_class(apply, "suggested-action");
+    gtk_box_append(GTK_BOX(actions), cancel);
+    gtk_box_append(GTK_BOX(actions), apply);
+    g_signal_connect(cancel, "clicked",
+                     G_CALLBACK(&ItemOperationController::on_permissions_cancel), this);
+    g_signal_connect(apply, "clicked",
+                     G_CALLBACK(&ItemOperationController::on_permissions_submit), this);
+    gtk_window_present(GTK_WINDOW(dialog));
+    gtk_widget_grab_focus(permissions_entry_);
+}
+
+void ItemOperationController::submit_permissions()
+{
+    if (permissions_dialog_ == nullptr || permissions_entry_ == nullptr ||
+        permissions_source_path_.empty() || busy_) return;
+    const char *text = gtk_editable_get_text(GTK_EDITABLE(permissions_entry_));
+    const std::string mode = text != nullptr ? text : "";
+    const bool width_ok = mode.size() == 3U ||
+        (mode.size() == 4U && mode[0] == '0');
+    bool digits_ok = width_ok;
+    for (const char digit : mode) {
+        if (digit < '0' || digit > '7') digits_ok = false;
+    }
+    if (!digits_ok) {
+        gtk_label_set_text(GTK_LABEL(permissions_message_),
+                           "Enter exactly three octal digits, optionally prefixed by 0 (e.g. 0644).");
+        gtk_widget_set_visible(permissions_message_, TRUE);
+        return;
+    }
+    const std::string source = permissions_source_path_;
+    gtk_window_destroy(GTK_WINDOW(permissions_dialog_));
+    start_operation(Kind::Permissions, source, {}, mode);
 }
 
 void ItemOperationController::show_rename_dialog()
@@ -574,9 +722,8 @@ void ItemOperationController::start_operation(const Kind kind,
     }
 
     OperationJournal journal;
-    const std::string journal_destination = kind == Kind::Rename
-                                                ? new_name
-                                                : destination_parent;
+    const std::string journal_destination =
+        kind == Kind::Rename || kind == Kind::Permissions ? new_name : destination_parent;
     const std::string journal_id = journal.begin(kind_name(kind),
                                                  source_path,
                                                  journal_destination);
@@ -629,6 +776,13 @@ void ItemOperationController::on_operation_thread(GTask *task,
     case Kind::Rename:
         operation = ordinary.rename_item(data->source_path, data->new_name);
         break;
+    case Kind::Permissions: {
+        unsigned int permissions = 0U;
+        for (const char digit : data->new_name) permissions = permissions * 8U +
+            static_cast<unsigned int>(digit - '0');
+        operation = ordinary.change_permissions(data->source_path, permissions);
+        break;
+    }
     case Kind::Copy:
         operation = transfer.copy_item(data->source_path,
                                        data->destination_parent,
@@ -779,6 +933,9 @@ void ItemOperationController::update_action_state()
     }
     if (move_button_ != nullptr) {
         gtk_widget_set_sensitive(move_button_, enabled);
+    }
+    if (permissions_button_ != nullptr) {
+        gtk_widget_set_sensitive(permissions_button_, enabled);
     }
 }
 

@@ -245,6 +245,7 @@ void InteractionController::discover_existing_actions()
     rename_target_ = menu_action(single_menu, "Rename");
     copy_target_ = menu_action(single_menu, "Copy to…");
     move_target_ = menu_action(single_menu, "Move to…");
+    permissions_target_ = menu_action(single_menu, "Edit Permissions…");
     batch_copy_target_ = menu_action(batch_menu, "Copy selected to…");
     batch_move_target_ = menu_action(batch_menu, "Move selected to…");
     trash_target_ = menu_action(destructive_menu, "Move to Trash");
@@ -381,6 +382,8 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
     create_action_button(box, "Copy to…", copy_target_,
                          ActionScope::SingleSelection, proxies);
     create_action_button(box, "Move to…", move_target_,
+                         ActionScope::SingleSelection, proxies);
+    create_action_button(box, "Edit Permissions…", permissions_target_,
                          ActionScope::SingleSelection, proxies);
 
     create_action_button(box, "Copy selected to…", batch_copy_target_,
