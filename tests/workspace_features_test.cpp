@@ -297,8 +297,30 @@ int main()
         await([&] { return g_list_model_get_n_items(
             gtk_multi_selection_get_model(pane_selection)) >= 2U; });
         g_signal_emit_by_name(select_all_in_pane, "clicked");
-        require(gtk_selection_model_get_selection(GTK_SELECTION_MODEL(pane_selection)) != nullptr,
-                "Second-pane Select All must apply to the GTK selection model");
+        GtkBitset *all = gtk_selection_model_get_selection(GTK_SELECTION_MODEL(pane_selection));
+        require(gtk_bitset_get_size(all) >= 3U,
+                "Second-pane Select All must select every visible entry");
+        gtk_bitset_unref(all);
+        // The first forward Copy put a file in this directory that already
+        // exists in the reverse destination. Only select the two new files:
+        // all-or-nothing collision preflight must not be silently bypassed.
+        gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(pane_selection));
+        guint reverse_selected = 0;
+        GListModel *reverse_model = gtk_multi_selection_get_model(pane_selection);
+        for (guint i = 0; i < g_list_model_get_n_items(reverse_model); ++i) {
+            auto *info = G_FILE_INFO(g_list_model_get_item(reverse_model, i));
+            const char *name = info != nullptr ? g_file_info_get_name(info) : nullptr;
+            if (g_strcmp0(name, "reverse-one.txt") == 0 ||
+                g_strcmp0(name, "reverse-two.txt") == 0) {
+                if (gtk_selection_model_select_item(GTK_SELECTION_MODEL(pane_selection), i, FALSE))
+                    ++reverse_selected;
+            }
+            g_clear_object(&info);
+        }
+        require(reverse_selected == 2U,
+                "Second-pane selection must identify both exact source names");
+        await([&] { return g_str_has_prefix(gtk_label_get_text(GTK_LABEL(
+            FileManagerWindowTestAccess::status(*source))), "Copied "); });
         g_signal_emit_by_name(copy_left, "clicked");
         await([&] { return fs::exists(a / "reverse-one.txt") &&
                           fs::exists(a / "reverse-two.txt"); });
