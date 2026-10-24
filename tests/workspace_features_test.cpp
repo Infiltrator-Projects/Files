@@ -264,8 +264,12 @@ int main()
         require(g_file_equal(pane->secondary_location(), secondary_target),
                 "Second-pane forward must not corrupt back history");
         g_object_unref(secondary_target);
-        await([&] { return !gtk_directory_list_is_loading(
-            GTK_DIRECTORY_LIST(gtk_multi_selection_get_model(pane_selection))); });
+        GListModel *pane_source_model = gtk_multi_selection_get_model(pane_selection);
+        if (GTK_IS_SORT_LIST_MODEL(pane_source_model))
+            pane_source_model = gtk_sort_list_model_get_model(GTK_SORT_LIST_MODEL(pane_source_model));
+        require(GTK_IS_DIRECTORY_LIST(pane_source_model),
+                "Secondary sort must preserve an underlying directory enumeration");
+        await([&] { return !gtk_directory_list_is_loading(GTK_DIRECTORY_LIST(pane_source_model)); });
         // Exercise the actual user-facing cross-pane action, not just the
         // second GTK directory model. It must delegate to the shared batch
         // transfer machinery and leave the source untouched for Copy.
