@@ -151,6 +151,20 @@ guint selected_count(GtkMultiSelection *selection)
     return count;
 }
 
+GtkWidget *find_entry_by_placeholder(GtkWidget *root, const char *placeholder)
+{
+    if (root == nullptr) return nullptr;
+    if (GTK_IS_ENTRY(root) &&
+        g_strcmp0(gtk_entry_get_placeholder_text(GTK_ENTRY(root)), placeholder) == 0)
+        return root;
+    for (GtkWidget *child = gtk_widget_get_first_child(root); child != nullptr;
+         child = gtk_widget_get_next_sibling(child)) {
+        if (GtkWidget *found = find_entry_by_placeholder(child, placeholder); found != nullptr)
+            return found;
+    }
+    return nullptr;
+}
+
 GtkWidget *find_entry(GtkWidget *root)
 {
     if (root == nullptr) return nullptr;
@@ -514,6 +528,25 @@ void qualify_recursive_search(infiltrator::files::FileManagerWindow &window,
     require(hit != nullptr &&
             gtk_list_box_get_row_at_index(GTK_LIST_BOX(results), 1) == nullptr,
             "Recursive filename query must produce exactly one result");
+    // Catalogue #365: a query is a durable named preset rather than a
+    // transient field value or a fabricated filesystem location.
+    GtkWidget *preset_name = find_entry_by_placeholder(
+        GTK_WIDGET(dialog), "Saved search name");
+    GtkWidget *filename = find_entry_by_placeholder(
+        GTK_WIDGET(dialog), "Part of name, exact name or *.pdf");
+    require(preset_name != nullptr && filename != nullptr,
+            "Named search and query controls must both be available");
+    gtk_editable_set_text(GTK_EDITABLE(preset_name), "Fixture Search");
+    GtkWidget *save = find_button(GTK_WIDGET(dialog), "Save Search");
+    require(save != nullptr, "Named search save action missing");
+    g_signal_emit_by_name(save, "clicked");
+    gtk_editable_set_text(GTK_EDITABLE(filename), "not-the-right-query");
+    GtkWidget *load = find_button(GTK_WIDGET(dialog), "Load saved");
+    require(load != nullptr, "Named search load action missing");
+    g_signal_emit_by_name(load, "clicked");
+    require(g_strcmp0(gtk_editable_get_text(GTK_EDITABLE(filename)),
+                      "target.txt") == 0,
+            "Loading a saved search must restore original query values");
     gtk_list_box_select_row(GTK_LIST_BOX(results), hit);
     GtkWidget *reveal = find_button(GTK_WIDGET(dialog), "Reveal in containing folder");
     require(reveal != nullptr && gtk_widget_get_sensitive(reveal),
