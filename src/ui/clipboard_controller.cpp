@@ -563,6 +563,9 @@ bool ClipboardController::import_provider_files(
     g_task_set_task_data(task, data, [](gpointer value) {
         delete static_cast<ProviderImportTaskData *>(value);
     });
+    // Cancellation must return the structured partial-result count, rather
+    // than replacing it with GTask's synthetic cancelled GError.
+    g_task_set_check_cancellable(task, FALSE);
     g_task_run_in_thread(task, &ClipboardController::on_provider_import_thread);
     g_object_unref(task);
     return true;

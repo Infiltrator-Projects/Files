@@ -178,3 +178,5 @@ OperationResult ProviderImportEngine::import_regular_file(
     }
     return result;
 }
+
+} // namespace infiltrator::files
