@@ -417,6 +417,7 @@ void ItemOperationController::show_permissions_dialog()
     permissions_entry_ = gtk_entry_new();
     guint32 presented_mode = 0U;
     bool has_mode = false;
+    bool ordinary_mode = false;
     // The already enumerated GFileInfo supplies the displayed mode. Never
     // query a potentially slow filesystem synchronously from the UI thread.
     const guint selected = gtk_single_selection_get_selected(selection_);
@@ -427,6 +428,7 @@ void ItemOperationController::show_permissions_dialog()
         const guint32 mode = g_file_info_get_attribute_uint32(info, G_FILE_ATTRIBUTE_UNIX_MODE);
         presented_mode = mode & 0777U;
         has_mode = true;
+        ordinary_mode = (mode & 07000U) == 0U;
         char *text = g_strdup_printf("%04o", mode & 07777U);
         gtk_editable_set_text(GTK_EDITABLE(permissions_entry_), text);
         g_free(text);
@@ -455,7 +457,8 @@ void ItemOperationController::show_permissions_dialog()
             g_signal_connect(check, "toggled", G_CALLBACK(on_permission_toggle), this);
         }
     }
-    gtk_widget_set_sensitive(permissions_grid_, has_mode);
+    // Checkbox editing must never silently clear setuid, setgid or sticky bits.
+    gtk_widget_set_sensitive(permissions_grid_, has_mode && ordinary_mode);
     gtk_box_append(GTK_BOX(box), permissions_grid_);
     g_signal_connect(permissions_entry_, "changed", G_CALLBACK(on_permissions_text_changed), this);
     g_signal_connect(permissions_entry_, "activate",

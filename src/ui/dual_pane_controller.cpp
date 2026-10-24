@@ -321,8 +321,12 @@ gint DualPaneController::compare_names(gconstpointer first, gconstpointer second
     int comparison = 0;
     if (a_folder != b_folder) comparison = a_folder ? -1 : 1;
     else {
-        comparison = g_utf8_collate(g_file_info_get_display_name(const_cast<GFileInfo *>(a)),
-                                     g_file_info_get_display_name(const_cast<GFileInfo *>(b)));
+        const char *left = g_file_info_get_display_name(const_cast<GFileInfo *>(a));
+        const char *right = g_file_info_get_display_name(const_cast<GFileInfo *>(b));
+        if (left == nullptr) left = g_file_info_get_name(const_cast<GFileInfo *>(a));
+        if (right == nullptr) right = g_file_info_get_name(const_cast<GFileInfo *>(b));
+        comparison = left != nullptr && right != nullptr ? g_utf8_collate(left, right) :
+                     g_strcmp0(left, right);
         if (comparison == 0)
             comparison = g_strcmp0(g_file_info_get_name(const_cast<GFileInfo *>(a)),
                                    g_file_info_get_name(const_cast<GFileInfo *>(b)));

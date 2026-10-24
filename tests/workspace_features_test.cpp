@@ -384,6 +384,17 @@ int main()
         });
         require(mode_entry != nullptr && apply_mode != nullptr,
                 "Permission dialog must expose a mode field and Apply action");
+        GtkWidget *owner_execute = find(GTK_WIDGET(mode_dialog), [](GtkWidget *widget) {
+            return GTK_IS_CHECK_BUTTON(widget) &&
+                g_strcmp0(gtk_check_button_get_label(GTK_CHECK_BUTTON(widget)), "Execute") == 0;
+        });
+        require(owner_execute != nullptr, "Permission mode checkboxes must be present");
+        gtk_editable_set_text(GTK_EDITABLE(mode_entry), "0600");
+        require(!gtk_check_button_get_active(GTK_CHECK_BUTTON(owner_execute)),
+                "Octal mode edits must update checkboxes");
+        gtk_check_button_set_active(GTK_CHECK_BUTTON(owner_execute), TRUE);
+        require(g_strcmp0(gtk_editable_get_text(GTK_EDITABLE(mode_entry)), "700") == 0,
+                "Checkbox changes must update the octal mode field");
         gtk_editable_set_text(GTK_EDITABLE(mode_entry), "0600");
         g_signal_emit_by_name(apply_mode, "clicked");
         g_object_unref(mode_dialog);
