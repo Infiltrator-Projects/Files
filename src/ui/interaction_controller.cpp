@@ -845,7 +845,7 @@ void InteractionController::show_selection_pattern_dialog()
         new Inputs(entries, message, window_, this),
         [](gpointer data) { delete static_cast<Inputs *>(data); });
     g_signal_connect_swapped(cancel, "clicked", G_CALLBACK(gtk_window_destroy), dialog);
-    g_signal_connect(apply, "clicked", G_CALLBACK(+[](GtkButton *, gpointer raw) {
+    g_signal_connect(apply, "clicked", G_CALLBACK((+[](GtkButton *, gpointer raw) {
         GtkWindow *dialog = GTK_WINDOW(raw);
         auto *data = static_cast<Inputs *>(
             g_object_get_data(G_OBJECT(dialog), "ifm-pattern-criteria"));
@@ -959,7 +959,7 @@ void InteractionController::show_selection_pattern_dialog()
         }
         gtk_window_destroy(dialog);
         g_object_unref(owner);
-    }), dialog);
+    })), dialog);
     gtk_window_present(GTK_WINDOW(dialog));
 }
 
