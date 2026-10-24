@@ -2,6 +2,7 @@
 #include "interaction_controller.hpp"
 
 #include "detail_metadata.hpp"
+#include "file_inspection.hpp"
 #include "file_manager_window.hpp"
 
 #include <algorithm>
@@ -408,6 +409,21 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
 
     if (&proxies == &overflow_proxies_) {
         add_separator(box);
+        GtkWidget *tools_expander = gtk_expander_new("Inspection and tools");
+        gtk_box_append(GTK_BOX(box), tools_expander);
+        GtkWidget *tools = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+        gtk_expander_set_child(GTK_EXPANDER(tools_expander), tools);
+        add_command(tools, "Open terminal here", "terminal-current",
+                    ActionScope::Always, proxies);
+        folder_terminal_actions_.push_back(add_command(
+            tools, "Open selected folder in terminal", "terminal-selected",
+            ActionScope::SingleSelection, proxies));
+        add_command(tools, "Inspect file…", "inspect",
+                    ActionScope::SingleSelection, proxies);
+        compare_actions_.push_back(add_command(
+            tools, "Compare two file hashes…", "compare-hashes",
+            ActionScope::MultiSelection, proxies));
+        add_separator(box);
         GtkWidget *expander = gtk_expander_new("View and layout");
         gtk_widget_add_css_class(expander, "ifm-layout-section");
         gtk_box_append(GTK_BOX(box), expander);
@@ -512,6 +528,16 @@ GtkWidget *InteractionController::build_context_action_box()
     context_properties_button_ = create_action_button(
         details, "Properties", nullptr, ActionScope::SingleSelection,
         context_proxies_, G_CALLBACK(&InteractionController::on_properties_clicked));
+    add_command(details, "Inspect file…", "inspect",
+                ActionScope::SingleSelection, context_proxies_);
+    folder_terminal_actions_.push_back(add_command(
+        details, "Open folder in terminal", "terminal-selected",
+        ActionScope::SingleSelection, context_proxies_));
+    compare_actions_.push_back(add_command(
+        details, "Compare two file hashes…", "compare-hashes",
+        ActionScope::MultiSelection, context_proxies_));
+    add_command(details, "Open terminal here", "terminal-current",
+                ActionScope::NoSelection, context_proxies_);
     return box;
 }
 
@@ -642,6 +668,14 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
         self->show_selection_pattern_dialog();
     else if (g_strcmp0(command, "select-type") == 0)
         self->select_same_type();
+    else if (g_strcmp0(command, "inspect") == 0)
+        self->inspect_primary();
+    else if (g_strcmp0(command, "compare-hashes") == 0)
+        self->compare_selected_hashes();
+    else if (g_strcmp0(command, "terminal-current") == 0)
+        self->launch_terminal(false);
+    else if (g_strcmp0(command, "terminal-selected") == 0)
+        self->launch_terminal(true);
     else if (g_strcmp0(command, "copy-selected-paths") == 0 ||
              g_strcmp0(command, "copy-selected-uris") == 0)
         self->copy_selected_text(g_strcmp0(command, "copy-selected-uris") == 0);
@@ -1208,6 +1242,52 @@ void InteractionController::update_action_state()
         gtk_widget_set_visible(button, regular);
         gtk_widget_set_sensitive(button, regular);
     }
+    GFile *folder_location = gtk_directory_list_get_file(directory_list_);
+    const bool native_location = folder_location != nullptr &&
+        g_file_is_native(folder_location);
+    bool selected_folder_native = folder && native_location;
+    if (selected_folder_native && info != nullptr) {
+        GFile *child = g_file_get_child(folder_location, g_file_info_get_name(info));
+        selected_folder_native = g_file_is_native(child);
+        g_object_unref(child);
+    }
+    for (GtkWidget *button : folder_terminal_actions_) {
+        gtk_widget_set_visible(button, selected_folder_native);
+        gtk_widget_set_sensitive(button, selected_folder_native);
+    }
+    for (ProxyAction &proxy : overflow_proxies_) {
+        if (g_strcmp0(static_cast<const char *>(
+                g_object_get_data(G_OBJECT(proxy.button), "ifm-workspace-command")),
+                "terminal-current") == 0)
+            gtk_widget_set_sensitive(proxy.button, native_location);
+    }
+    for (ProxyAction &proxy : context_proxies_) {
+        if (g_strcmp0(static_cast<const char *>(
+                g_object_get_data(G_OBJECT(proxy.button), "ifm-workspace-command")),
+                "terminal-current") == 0)
+            gtk_widget_set_sensitive(proxy.button, native_location);
+    }
+    bool compare_two_regular = count == 2U;
+    if (compare_two_regular) {
+        GListModel *model = gtk_multi_selection_get_model(selection_);
+        GtkBitset *bits = gtk_selection_model_get_selection(GTK_SELECTION_MODEL(selection_));
+        GtkBitsetIter iterator;
+        guint position = 0;
+        gboolean valid = gtk_bitset_iter_init_first(&iterator, bits, &position);
+        while (valid) {
+            auto *selected = G_FILE_INFO(g_list_model_get_item(model, position));
+            if (selected == nullptr ||
+                g_file_info_get_file_type(selected) != G_FILE_TYPE_REGULAR)
+                compare_two_regular = false;
+            if (selected != nullptr) g_object_unref(selected);
+            valid = gtk_bitset_iter_next(&iterator, &position);
+        }
+        gtk_bitset_unref(bits);
+    }
+    for (GtkWidget *button : compare_actions_) {
+        gtk_widget_set_visible(button, compare_two_regular);
+        gtk_widget_set_sensitive(button, compare_two_regular);
+    }
     // Suppress empty groups and leading dividers in both selected-file and
     // background menus. Scrolling is only for genuinely crowded contexts.
     bool preceding_section = false;
@@ -1374,6 +1454,58 @@ void InteractionController::open_primary()
         }
     }
     g_free(uri);
+}
+
+
+void InteractionController::inspect_primary()
+{
+    if (window_ == nullptr) return;
+    auto *info = G_FILE_INFO(gtk_single_selection_get_selected_item(primary_selection_));
+    GFile *parent = gtk_directory_list_get_file(directory_list_);
+    if (info == nullptr || parent == nullptr || g_file_info_get_name(info) == nullptr) return;
+    GFile *file = g_file_get_child(parent, g_file_info_get_name(info));
+    show_file_inspection(window_, file, info);
+    g_object_unref(file);
+}
+
+void InteractionController::compare_selected_hashes()
+{
+    if (window_ == nullptr || selection_count() != 2U) return;
+    GFile *parent = gtk_directory_list_get_file(directory_list_);
+    GListModel *model = gtk_multi_selection_get_model(selection_);
+    if (parent == nullptr || model == nullptr) return;
+    GtkBitset *bits = gtk_selection_model_get_selection(GTK_SELECTION_MODEL(selection_));
+    GtkBitsetIter iterator;
+    guint position = 0;
+    gboolean valid = gtk_bitset_iter_init_first(&iterator, bits, &position);
+    std::vector<GFile *> files;
+    while (valid) {
+        auto *info = G_FILE_INFO(g_list_model_get_item(model, position));
+        if (info != nullptr && g_file_info_get_file_type(info) == G_FILE_TYPE_REGULAR &&
+            g_file_info_get_name(info) != nullptr)
+            files.push_back(g_file_get_child(parent, g_file_info_get_name(info)));
+        if (info != nullptr) g_object_unref(info);
+        valid = gtk_bitset_iter_next(&iterator, &position);
+    }
+    gtk_bitset_unref(bits);
+    if (files.size() == 2U) compare_file_hashes(window_, files[0], files[1]);
+    for (GFile *file : files) g_object_unref(file);
+}
+
+void InteractionController::launch_terminal(bool selected)
+{
+    if (window_ == nullptr) return;
+    GFile *parent = gtk_directory_list_get_file(directory_list_);
+    if (parent == nullptr) return;
+    GFile *directory = parent;
+    if (selected) {
+        auto *info = G_FILE_INFO(gtk_single_selection_get_selected_item(primary_selection_));
+        if (info == nullptr || g_file_info_get_file_type(info) != G_FILE_TYPE_DIRECTORY ||
+            g_file_info_get_name(info) == nullptr) return;
+        directory = g_file_get_child(parent, g_file_info_get_name(info));
+    }
+    open_terminal_in_directory(window_, directory);
+    if (selected) g_object_unref(directory);
 }
 
 void InteractionController::show_properties()
