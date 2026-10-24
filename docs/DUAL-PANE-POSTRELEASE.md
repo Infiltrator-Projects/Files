@@ -38,3 +38,14 @@ Day/Night acceptance.
 ## Follow-up workspace qualification
 
 The secondary list now uses multi-selection for bounded directional native transfers (the same maximum of 256 source items as the primary pane). It supplies explicit Select all and independent Back/Forward history, with forward history invalidated by a new navigation. Both transfer directions still invoke ClipboardController and the shared journalled batch engine; no remote mutations are admitted. History and the secondary browse target remain intentionally in-window only and are released on collapse.
+
+## Native cross-pane drag and drop
+
+The secondary list now registers through the one `DragDropController` transport,
+using the same selection-to-identity mapping, source/destination restrictions and
+`ClipboardController` journalled transfers as the primary views. The secondary
+row exposes `GFileInfo::name`, never its display label, for the drag hit-test.
+The tested scope is native filesystem paths with at most 256 items per drop;
+unsupported non-native drags and oversized input fail without partial acceptance.
+Only an explicit Shift-modified same-process drop can request a move. This is
+not yet remote/MTP transfer support or parity in split-pane tab/view modes.

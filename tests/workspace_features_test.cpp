@@ -226,6 +226,12 @@ int main()
         require(pane_list != nullptr &&
                 GTK_IS_MULTI_SELECTION(gtk_list_view_get_model(GTK_LIST_VIEW(pane_list))),
                 "Second pane must support real multi-selection");
+        GObject *pane_drag = controller(pane_list, GTK_TYPE_DRAG_SOURCE);
+        GObject *pane_drop = controller(pane_list, GTK_TYPE_DROP_TARGET);
+        require(pane_drag != nullptr && pane_drop != nullptr,
+                "Second pane must share the native drag/drop transport");
+        g_clear_object(&pane_drag);
+        g_clear_object(&pane_drop);
         auto *pane_selection = GTK_MULTI_SELECTION(
             gtk_list_view_get_model(GTK_LIST_VIEW(pane_list)));
         await([&] { return g_list_model_get_n_items(

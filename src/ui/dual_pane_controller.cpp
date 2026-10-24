@@ -65,6 +65,9 @@ DualPaneController::DualPaneController(GtkWindow *window, GtkWidget *host,
     GtkWidget *view = gtk_list_view_new(
         GTK_SELECTION_MODEL(g_object_ref(secondary_selection_)), factory);
     gtk_list_view_set_single_click_activate(GTK_LIST_VIEW(view), FALSE);
+    // The single transport authority discovers this view after the pane
+    // controller has installed its selection model.
+    g_object_set_data(G_OBJECT(window_), "ifm-secondary-pane-list", view);
     g_signal_connect(view, "activate", G_CALLBACK(on_activate), this);
     GtkWidget *scroller = gtk_scrolled_window_new();
     gtk_widget_set_vexpand(scroller, TRUE);
@@ -194,6 +197,9 @@ void DualPaneController::bind_row(GtkSignalListItemFactory *, GtkListItem *item,
     const bool folder = g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY;
     gtk_image_set_from_icon_name(GTK_IMAGE(icon),
                                  folder ? "folder-symbolic" : "text-x-generic-symbolic");
+    const char *source_name = g_file_info_get_name(info);
+    g_object_set_data_full(G_OBJECT(row), "ifm-source-name",
+                           source_name != nullptr ? g_strdup(source_name) : nullptr, g_free);
     const char *name = g_file_info_get_display_name(info);
     gtk_label_set_text(GTK_LABEL(label), name != nullptr ? name : "Unnamed item");
 }

@@ -46,6 +46,20 @@ DragDropController::DragDropController(GtkWindow *window, GtkDirectoryList *dire
             if (view != nullptr) register_view(view);
         }
     }
+    GtkWidget *secondary = GTK_WIDGET(
+        g_object_get_data(G_OBJECT(window_), "ifm-secondary-pane-list"));
+    if (GTK_IS_LIST_VIEW(secondary)) {
+        GtkSelectionModel *model = gtk_list_view_get_model(GTK_LIST_VIEW(secondary));
+        if (GTK_IS_MULTI_SELECTION(model)) {
+            GListModel *directory = gtk_multi_selection_get_model(GTK_MULTI_SELECTION(model));
+            if (GTK_IS_DIRECTORY_LIST(directory)) {
+                secondary_view_ = secondary;
+                secondary_directory_ = GTK_DIRECTORY_LIST(g_object_ref(directory));
+                secondary_selection_ = GTK_MULTI_SELECTION(g_object_ref(model));
+                register_view(secondary_view_);
+            }
+        }
+    }
     GtkDropTarget *sidebar_drop = gtk_drop_target_new(GDK_TYPE_FILE_LIST,
         static_cast<GdkDragAction>(GDK_ACTION_COPY | GDK_ACTION_MOVE));
     g_signal_connect(sidebar_drop, "drop", G_CALLBACK(on_drop), this);
@@ -57,6 +71,8 @@ DragDropController::~DragDropController()
 {
     if (directory_ != nullptr) g_object_unref(directory_);
     if (selection_ != nullptr) g_object_unref(selection_);
+    if (secondary_selection_ != nullptr) g_object_unref(secondary_selection_);
+    if (secondary_directory_ != nullptr) g_object_unref(secondary_directory_);
 }
 void DragDropController::on_window_finalized(gpointer data, GObject *)
 {
@@ -84,14 +100,17 @@ void DragDropController::register_view(GtkWidget *view)
 std::vector<std::string> DragDropController::selected_paths(GtkWidget *view, double x, double y)
 {
     std::vector<std::string> paths;
-    GFile *parent = gtk_directory_list_get_file(directory_);
+    GtkDirectoryList *directory = view == secondary_view_ ? secondary_directory_ : directory_;
+    GtkMultiSelection *selection = view == secondary_view_ ? secondary_selection_ : selection_;
+    if (directory == nullptr || selection == nullptr) return paths;
+    GFile *parent = gtk_directory_list_get_file(directory);
     if (parent == nullptr || !g_file_is_native(parent)) return paths;
     GtkWidget *cell = find_item(view, x, y);
     if (cell == nullptr) return paths;
     const char *clicked = static_cast<const char *>(
         g_object_get_data(G_OBJECT(cell), "ifm-source-name"));
     if (clicked == nullptr) return paths;
-    GListModel *model = gtk_multi_selection_get_model(selection_);
+    GListModel *model = gtk_multi_selection_get_model(selection);
     if (model == nullptr) return paths;
     guint position = GTK_INVALID_LIST_POSITION;
     for (guint i = 0; i < g_list_model_get_n_items(model); ++i) {
@@ -102,11 +121,15 @@ std::vector<std::string> DragDropController::selected_paths(GtkWidget *view, dou
         if (matches) { position = i; break; }
     }
     if (position == GTK_INVALID_LIST_POSITION) return paths;
-    if (!gtk_selection_model_is_selected(GTK_SELECTION_MODEL(selection_), position)) {
-        gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection_));
-        gtk_selection_model_select_item(GTK_SELECTION_MODEL(selection_), position, TRUE);
+    if (!gtk_selection_model_is_selected(GTK_SELECTION_MODEL(selection), position)) {
+        gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection));
+        gtk_selection_model_select_item(GTK_SELECTION_MODEL(selection), position, TRUE);
     }
-    GtkBitset *selected = gtk_selection_model_get_selection(GTK_SELECTION_MODEL(selection_));
+    GtkBitset *selected = gtk_selection_model_get_selection(GTK_SELECTION_MODEL(selection));
+    if (gtk_bitset_get_size(selected) > 256U) {
+        gtk_bitset_unref(selected);
+        return paths;
+    }
     GtkBitsetIter iter;
     guint i = 0;
     for (gboolean valid = gtk_bitset_iter_init_first(&iter, selected, &i);
@@ -155,13 +178,16 @@ GFile *DragDropController::target_folder(GtkWidget *target, double x, double y) 
             g_object_get_data(G_OBJECT(row), "ifm-target"));
         return uri != nullptr ? g_file_new_for_commandline_arg(uri) : nullptr;
     }
-    GFile *parent = gtk_directory_list_get_file(directory_);
+    GtkDirectoryList *directory = target == secondary_view_ ? secondary_directory_ : directory_;
+    GtkMultiSelection *selection = target == secondary_view_ ? secondary_selection_ : selection_;
+    if (directory == nullptr || selection == nullptr) return nullptr;
+    GFile *parent = gtk_directory_list_get_file(directory);
     if (parent == nullptr) return nullptr;
     GtkWidget *cell = find_item(target, x, y);
     const char *name = cell != nullptr ? static_cast<const char *>(
         g_object_get_data(G_OBJECT(cell), "ifm-source-name")) : nullptr;
     if (name != nullptr) {
-        GListModel *model = gtk_multi_selection_get_model(selection_);
+        GListModel *model = gtk_multi_selection_get_model(selection);
         if (model != nullptr) {
             for (guint i = 0; i < g_list_model_get_n_items(model); ++i) {
                 auto *info = G_FILE_INFO(g_list_model_get_item(model, i));
@@ -211,11 +237,27 @@ gboolean DragDropController::on_drop(GtkDropTarget *target, const GValue *value,
     std::vector<std::string> sources;
     GSList *files = gdk_file_list_get_files(
         static_cast<GdkFileList *>(g_value_get_boxed(value)));
-    for (GSList *it = files; it != nullptr && sources.size() < 256U; it = it->next) {
+    // Do not silently truncate a drag batch. A partial accepted drop would
+    // misrepresent both user intent and the recovery journal's input set.
+    if (g_slist_length(files) > 256U) {
+        g_slist_free(files);
+        g_free(destination);
+        return FALSE;
+    }
+    for (GSList *it = files; it != nullptr; it = it->next) {
         auto *file = G_FILE(it->data);
-        if (file == nullptr || !g_file_is_native(file)) continue;
+        if (file == nullptr || !g_file_is_native(file)) {
+            g_slist_free(files);
+            g_free(destination);
+            return FALSE;
+        }
         char *path = g_file_get_path(file);
-        if (path != nullptr) sources.emplace_back(path);
+        if (path == nullptr) {
+            g_slist_free(files);
+            g_free(destination);
+            return FALSE;
+        }
+        sources.emplace_back(path);
         g_free(path);
     }
     g_slist_free(files);

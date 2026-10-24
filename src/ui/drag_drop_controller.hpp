@@ -24,6 +24,11 @@ private:
     GtkWindow *window_{nullptr};
     GtkDirectoryList *directory_{nullptr};
     GtkMultiSelection *selection_{nullptr};
+    // Owned references keep the secondary model valid until the window closes.
+    // The actual pane widget remains weak and is window-owned.
+    GtkDirectoryList *secondary_directory_{nullptr};
+    GtkMultiSelection *secondary_selection_{nullptr};
+    GtkWidget *secondary_view_{nullptr};
     GtkWidget *stack_{nullptr};
     GtkWidget *sidebar_{nullptr};
 };
