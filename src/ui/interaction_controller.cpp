@@ -445,6 +445,9 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
         gtk_expander_set_child(GTK_EXPANDER(expander), layout);
         hidden_actions_.push_back(add_command(layout, "Show Hidden Files", "toggle-hidden",
                                               ActionScope::Always, proxies));
+        extension_actions_.push_back(add_command(
+            layout, "Hide filename extensions", "toggle-extensions",
+            ActionScope::Always, proxies));
         folder_sort_actions_.push_back(add_command(layout, "Folders First", "folders-first",
                                                    ActionScope::Always, proxies));
         sidebar_actions_.push_back(add_command(layout, "Hide Sidebar", "toggle-sidebar",
@@ -679,6 +682,7 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
     else if (g_strcmp0(command, "detach-tab") == 0) window->move_active_tab_to_new_window();
     else if (g_strcmp0(command, "reopen-tab") == 0) window->reopen_closed_tab();
     else if (g_strcmp0(command, "toggle-hidden") == 0) window->toggle_show_hidden();
+    else if (g_strcmp0(command, "toggle-extensions") == 0) window->toggle_extensions();
     else if (g_strcmp0(command, "folders-first") == 0) window->toggle_folders_first();
     else if (g_strcmp0(command, "toggle-sidebar") == 0) window->toggle_sidebar();
     else if (g_strcmp0(command, "selected-tabs") == 0)
@@ -1385,6 +1389,9 @@ void InteractionController::update_action_state()
         for (GtkWidget *button : hidden_actions_)
             gtk_button_set_label(GTK_BUTTON(button), window->show_hidden()
                                      ? "Hide Hidden Files" : "Show Hidden Files");
+        for (GtkWidget *button : extension_actions_)
+            gtk_button_set_label(GTK_BUTTON(button), window->show_extensions()
+                                     ? "Hide filename extensions" : "Show filename extensions");
         for (GtkWidget *button : folder_sort_actions_)
             gtk_button_set_label(GTK_BUTTON(button), window->folders_first()
                                      ? "Folders First ✓" : "Folders First");
@@ -1448,7 +1455,9 @@ void InteractionController::select_item_at_pointer(GtkWidget *view,
     if (name_label == nullptr) {
         return;
     }
-    const char *display_name = gtk_label_get_text(name_label);
+    const char *source_name = static_cast<const char *>(
+        g_object_get_data(G_OBJECT(named_tile), "ifm-source-name"));
+    if (source_name == nullptr) return;
 
     GListModel *model = gtk_multi_selection_get_model(selection_);
     if (model == nullptr) {
@@ -1461,7 +1470,7 @@ void InteractionController::select_item_at_pointer(GtkWidget *view,
     for (guint position = 0U; position < count; ++position) {
         GFileInfo *info = G_FILE_INFO(g_list_model_get_item(model, position));
         if (info != nullptr &&
-            g_strcmp0(g_file_info_get_display_name(info), display_name) == 0) {
+            g_strcmp0(g_file_info_get_name(info), source_name) == 0) {
             match = position;
             ++matches;
         }
