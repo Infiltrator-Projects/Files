@@ -458,6 +458,26 @@ void work_thread(GTask *task, gpointer, gpointer data, GCancellable *cancel)
         break;
     }
     case InspectionKind::Compare: {
+        // Source/destination logical sizes belong to the original comparison
+        // contract; an unavailable size is never reported as zero.
+        for (const auto &item : std::array<std::pair<GFile *, const char *>, 2>{
+                 std::pair{work->first, "First logical size"},
+                 std::pair{work->second, "Second logical size"}}) {
+            GError *size_error = nullptr;
+            GFileInfo *info = g_file_query_info(
+                item.first, G_FILE_ATTRIBUTE_STANDARD_SIZE,
+                G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, cancel, &size_error);
+            if (info != nullptr &&
+                g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_STANDARD_SIZE) &&
+                g_file_info_get_size(info) >= 0)
+                append_line(result, item.second,
+                    size_text(static_cast<guint64>(g_file_info_get_size(info))));
+            else
+                append_line(result, item.second, "Unavailable");
+            if (info != nullptr) g_object_unref(info);
+            g_clear_error(&size_error);
+        }
+        if (g_cancellable_set_error_if_cancelled(cancel, &error)) break;
         const std::string first = checksum(work->first, cancel, &error);
         if (error != nullptr) break;
         const std::string second = checksum(work->second, cancel, &error);
