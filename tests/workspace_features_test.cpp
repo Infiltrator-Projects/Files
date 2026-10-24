@@ -8,6 +8,7 @@
 #include <functional>
 #include <iostream>
 #include <stdexcept>
+#include <sys/stat.h>
 
 namespace infiltrator::files {
 struct FileManagerWindowTestAccess {
@@ -345,6 +346,46 @@ int main()
         open(*source, a / "file with spaces.txt");
         require(at(*source, a) && selected(*source, "file with spaces.txt"),
                 "Opening a file must reveal and select its exact filename");
+        GtkWidget *permissions_action = find(GTK_WIDGET(source->native_window()),
+            [](GtkWidget *widget) {
+                return GTK_IS_BUTTON(widget) &&
+                    g_strcmp0(gtk_button_get_label(GTK_BUTTON(widget)),
+                              "Edit Permissions…") == 0;
+            });
+        require(permissions_action != nullptr,
+                "The selected item must expose native permissions editing");
+        g_signal_emit_by_name(permissions_action, "clicked");
+        GtkWindow *mode_dialog = nullptr;
+        auto *mode_toplevels = gtk_window_get_toplevels();
+        for (guint i = 0; i < g_list_model_get_n_items(mode_toplevels); ++i) {
+            auto *candidate = GTK_WINDOW(g_list_model_get_item(mode_toplevels, i));
+            if (g_strcmp0(gtk_window_get_title(candidate), "Edit Permissions") == 0) {
+                mode_dialog = candidate;
+                break;
+            }
+            g_object_unref(candidate);
+        }
+        require(mode_dialog != nullptr,
+                "Permission operation must require an explicit modal confirmation");
+        auto *mode_entry = find(GTK_WIDGET(mode_dialog), [](GtkWidget *widget) {
+            return GTK_IS_ENTRY(widget);
+        });
+        auto *apply_mode = find(GTK_WIDGET(mode_dialog), [](GtkWidget *widget) {
+            return GTK_IS_BUTTON(widget) &&
+                g_strcmp0(gtk_button_get_label(GTK_BUTTON(widget)),
+                          "Apply Permissions") == 0;
+        });
+        require(mode_entry != nullptr && apply_mode != nullptr,
+                "Permission dialog must expose a mode field and Apply action");
+        gtk_editable_set_text(GTK_EDITABLE(mode_entry), "0600");
+        g_signal_emit_by_name(apply_mode, "clicked");
+        g_object_unref(mode_dialog);
+        await([&] {
+            struct stat mode_stat {};
+            return ::stat((a / "file with spaces.txt").c_str(), &mode_stat) == 0 &&
+                   (mode_stat.st_mode & 0777) == 0600;
+        });
+
         open(*source, a / ".hidden");
         require(selected(*source, ".hidden") && !source->show_hidden(),
                 "Explicitly opened hidden files must be revealed without changing the saved preference");
