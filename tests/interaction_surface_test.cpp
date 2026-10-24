@@ -428,11 +428,39 @@ void qualify_selection_actions(infiltrator::files::FileManagerWindow &w,
             "Unsupported binary format must show bounded hex, never launch another app");
     gtk_window_destroy(look);
 
+    // Catalogue #357: search can span a user-selected set of locations
+    // without accidentally widening scope to the entire containing folder.
+    { std::ofstream(root / "alpha" / "alpha-found.txt") << "alpha"; }
+    { std::ofstream(root / "beta" / "beta-found.txt") << "beta"; }
     gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection));
     gtk_selection_model_select_item(GTK_SELECTION_MODEL(selection),
                                     position_for(selection, "alpha"), TRUE);
     gtk_selection_model_select_item(GTK_SELECTION_MODEL(selection),
                                     position_for(selection, "beta"), FALSE);
+    GtkWidget *selected_search = find_button(popover, "Search selected folders…");
+    require(selected_search != nullptr, "Multi-folder search command missing");
+    g_signal_emit_by_name(selected_search, "clicked");
+    GtkWindow *scoped = window_named("Search files");
+    require(scoped != nullptr, "Selected-directory search did not open");
+    GtkWidget *name_query = find_entry(GTK_WIDGET(scoped));
+    require(name_query != nullptr, "Selected-directory search needs a query field");
+    gtk_editable_set_text(GTK_EDITABLE(name_query), "found.txt");
+    GtkWidget *search_now = find_button(GTK_WIDGET(scoped), "Search");
+    require(search_now != nullptr, "Selected-directory search action missing");
+    g_signal_emit_by_name(search_now, "clicked");
+    GtkWidget *scoped_results = GTK_WIDGET(g_object_get_data(
+        G_OBJECT(scoped), "ifm-recursive-results"));
+    bool scoped_complete = false;
+    for (int i = 0; i < 5000 && !scoped_complete; ++i) {
+        while (g_main_context_iteration(nullptr, FALSE)) {}
+        scoped_complete = gtk_list_box_get_row_at_index(GTK_LIST_BOX(scoped_results), 1) != nullptr;
+        if (!scoped_complete) g_usleep(1000);
+    }
+    require(scoped_complete &&
+            gtk_list_box_get_row_at_index(GTK_LIST_BOX(scoped_results), 2) == nullptr,
+            "Exactly two selected folders must contribute results");
+    gtk_window_destroy(scoped);
+
     const std::size_t before = infiltrator::files::FileManagerWindowTestAccess::tabs(w);
     g_signal_emit_by_name(tabs_action, "clicked");
     require(infiltrator::files::FileManagerWindowTestAccess::tabs(w) == before + 2U,
