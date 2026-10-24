@@ -304,6 +304,20 @@ void qualify_selection_actions(infiltrator::files::FileManagerWindow &w,
     g_signal_emit_by_name(hash, "clicked");
     require(await_text(GTK_WIDGET(inspection), "SHA-256:"),
             "SHA-256 worker failed or did not report its result");
+    GtkWidget *verify = find_button(GTK_WIDGET(inspection), "Verify SHA-256");
+    require(verify != nullptr, "The catalogue's external checksum verification is missing");
+    GtkWidget *input = find_entry(GTK_WIDGET(inspection));
+    require(input != nullptr, "SHA-256 verification must accept a supplied digest");
+    gtk_editable_set_text(GTK_EDITABLE(input),
+        "5cf9a9f38be47af7123f6f8f1ef8e22682262a83991de5e932967857e322a188");
+    g_signal_emit_by_name(verify, "clicked");
+    require(await_text(GTK_WIDGET(inspection), "SHA-256 VERIFIED"),
+            "Known external SHA-256 should verify the test file");
+    gtk_editable_set_text(GTK_EDITABLE(input),
+        "0000000000000000000000000000000000000000000000000000000000000000");
+    g_signal_emit_by_name(verify, "clicked");
+    require(await_text(GTK_WIDGET(inspection), "SHA-256 MISMATCH"),
+            "Wrong external SHA-256 must produce an unmistakable mismatch");
     GtkWidget *copy_details = find_button(GTK_WIDGET(inspection), "Copy details");
     require(copy_details != nullptr, "Copy details action missing");
     g_signal_emit_by_name(copy_details, "clicked");
