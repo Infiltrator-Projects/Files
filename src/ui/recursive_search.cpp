@@ -4,8 +4,10 @@
 #include "file_manager_window.hpp"
 #include "../core/search_engine.hpp"
 #include "tag_catalogue.hpp"
+#include "search_persistence.hpp"
 
 #include <charconv>
+#include <algorithm>
 #include <cstring>
 #include <cstdint>
 #include <memory>
@@ -43,6 +45,12 @@ struct SearchWindow {
     GtkWidget *search{nullptr};
     GtkWidget *cancel{nullptr};
     GtkWidget *reveal{nullptr};
+    GtkWidget *scope_label{nullptr};
+    GtkWidget *preset_name{nullptr};
+    GtkWidget *preset_choice{nullptr};
+    GtkWidget *preset_save{nullptr};
+    GtkWidget *privacy_save{nullptr};
+    std::optional<SearchOptions> last_options;
     GCancellable *active{nullptr};
     ~SearchWindow() {
         if (active != nullptr) {
@@ -334,12 +342,27 @@ void start(GtkButton *, gpointer data)
             "Enter a name, text or filter to start a bounded search.");
         return;
     }
+    const auto privacy = load_search_privacy();
+    if (!privacy.valid) {
+        gtk_label_set_text(GTK_LABEL(s->status), privacy.error.c_str());
+        return;
+    }
+    for (const std::string &uri : privacy.excluded_uris) {
+        if (std::find(o.excluded_uris.begin(), o.excluded_uris.end(), uri) ==
+            o.excluded_uris.end())
+            o.excluded_uris.push_back(uri);
+    }
+    if (o.excluded_uris.size() > 64) {
+        gtk_label_set_text(GTK_LABEL(s->status), "Combined exclusions exceed 64 locations.");
+        return;
+    }
     if (!g_utf8_validate(o.name.c_str(), -1, nullptr) ||
         !g_utf8_validate(o.content.c_str(), -1, nullptr)) {
         gtk_label_set_text(GTK_LABEL(s->status), "Search text must be valid UTF-8.");
         return;
     }
 
+    s->last_options = o;
     GtkWidget *row = gtk_widget_get_first_child(s->results);
     while (row != nullptr) {
         gtk_list_box_remove(GTK_LIST_BOX(s->results), row);
@@ -362,6 +385,190 @@ void start(GtkButton *, gpointer data)
 }
 
 } // namespace
+
+
+void refresh_presets(SearchWindow *s)
+{
+    if (s == nullptr || s->preset_choice == nullptr) return;
+    const SavedSearchList presets = load_saved_searches();
+    if (!presets.writable) {
+        gtk_label_set_text(GTK_LABEL(s->status), presets.error.c_str());
+        gtk_widget_set_sensitive(s->preset_save, FALSE);
+        return;
+    }
+    GtkStringList *names = gtk_string_list_new(nullptr);
+    for (const SavedSearch &item : presets.items)
+        gtk_string_list_append(names, item.title.c_str());
+    gtk_drop_down_set_model(GTK_DROP_DOWN(s->preset_choice), G_LIST_MODEL(names));
+    g_object_unref(names);
+}
+
+void save_preset(GtkButton *, gpointer data)
+{
+    auto *s = state(GTK_WIDGET(data));
+    if (s == nullptr || !s->last_options || !s->selected_roots.empty()) {
+        if (s != nullptr)
+            gtk_label_set_text(GTK_LABEL(s->status),
+                "Run a current-folder search before saving (multi-folder presets not supported).");
+        return;
+    }
+    const char *raw_name = gtk_editable_get_text(GTK_EDITABLE(s->preset_name));
+    const std::string title = raw_name != nullptr ? raw_name : "";
+    if (title.empty() || title.size() > 80 ||
+        !g_utf8_validate(title.c_str(), -1, nullptr)) {
+        gtk_label_set_text(GTK_LABEL(s->status), "Preset names must contain 1–80 UTF-8 bytes.");
+        return;
+    }
+    SavedSearchList saved = load_saved_searches();
+    if (!saved.writable) {
+        gtk_label_set_text(GTK_LABEL(s->status), saved.error.c_str());
+        return;
+    }
+    SavedSearch entry;
+    entry.title = title;
+    char *uri = g_file_get_uri(s->root);
+    entry.root_uri = uri != nullptr ? uri : "";
+    g_free(uri);
+    entry.options = *s->last_options;
+    // Privacy exclusions are independently owned, so a saved preset cannot
+    // accidentally override or replace their canonical policy.
+    entry.options.excluded_uris.clear();
+    entry.options.tagged_uris.clear();
+    entry.options.restrict_tagged_uris = false;
+    const char *tag = gtk_editable_get_text(GTK_EDITABLE(s->tag));
+    entry.tag = tag != nullptr ? tag : "";
+    auto it = std::find_if(saved.items.begin(), saved.items.end(),
+        [&](const SavedSearch &candidate) { return candidate.title == title; });
+    if (it != saved.items.end()) *it = std::move(entry);
+    else if (saved.items.size() < 16) saved.items.push_back(std::move(entry));
+    else {
+        gtk_label_set_text(GTK_LABEL(s->status), "Saved-search limit: 16 named presets.");
+        return;
+    }
+    std::string error;
+    if (!save_saved_searches(saved, error)) {
+        gtk_label_set_text(GTK_LABEL(s->status), error.c_str());
+        return;
+    }
+    refresh_presets(s);
+    gtk_label_set_text(GTK_LABEL(s->status), "Named search saved atomically.");
+}
+
+void set_date_field(GtkWidget *entry, std::optional<std::int64_t> seconds)
+{
+    if (!seconds) { gtk_editable_set_text(GTK_EDITABLE(entry), ""); return; }
+    GDateTime *time = g_date_time_new_from_unix_local(*seconds);
+    if (time == nullptr) { gtk_editable_set_text(GTK_EDITABLE(entry), ""); return; }
+    char *value = g_date_time_format(time, "%Y-%m-%d");
+    gtk_editable_set_text(GTK_EDITABLE(entry), value != nullptr ? value : "");
+    g_free(value);
+    g_date_time_unref(time);
+}
+
+void load_preset(GtkButton *, gpointer data)
+{
+    auto *s = state(GTK_WIDGET(data));
+    if (s == nullptr) return;
+    const auto saved = load_saved_searches();
+    if (!saved.writable) {
+        gtk_label_set_text(GTK_LABEL(s->status), saved.error.c_str());
+        return;
+    }
+    const guint index = gtk_drop_down_get_selected(GTK_DROP_DOWN(s->preset_choice));
+    if (index >= saved.items.size()) return;
+    const SavedSearch &p = saved.items[index];
+    GFile *folder = g_file_new_for_uri(p.root_uri.c_str());
+    if (s->root != nullptr) g_object_unref(s->root);
+    s->root = folder;
+    for (GFile *selected : s->selected_roots) g_object_unref(selected);
+    s->selected_roots.clear();
+    const auto &o = p.options;
+    gtk_editable_set_text(GTK_EDITABLE(s->preset_name), p.title.c_str());
+    gtk_editable_set_text(GTK_EDITABLE(s->name), o.name.c_str());
+    gtk_editable_set_text(GTK_EDITABLE(s->content), o.content.c_str());
+    gtk_editable_set_text(GTK_EDITABLE(s->tag), p.tag.c_str());
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(s->mode),
+                               static_cast<guint>(o.name_mode));
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(s->kind), static_cast<guint>(o.kind));
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(s->case_sensitive), o.case_sensitive);
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(s->recursive), o.recursive);
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(s->include_hidden), o.include_hidden);
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(s->duplicates), o.duplicates_by_sha256);
+    const auto field = [](GtkWidget *target, auto value) {
+        const std::string text = value ? std::to_string(*value) : "";
+        gtk_editable_set_text(GTK_EDITABLE(target), text.c_str());
+    };
+    field(s->minimum, o.minimum_size);
+    field(s->maximum, o.maximum_size);
+    field(s->owner_uid, o.owner_uid);
+    set_date_field(s->since, o.modified_since);
+    set_date_field(s->before, o.modified_before);
+    gtk_label_set_text(GTK_LABEL(s->scope_label),
+        ("Saved scope: " + p.root_uri).c_str());
+    s->last_options.reset();
+    gtk_label_set_text(GTK_LABEL(s->status), "Saved search loaded. Select Search to run.");
+}
+
+void remove_preset(GtkButton *, gpointer data)
+{
+    auto *s = state(GTK_WIDGET(data));
+    if (s == nullptr) return;
+    auto presets = load_saved_searches();
+    if (!presets.writable) {
+        gtk_label_set_text(GTK_LABEL(s->status), presets.error.c_str());
+        return;
+    }
+    const guint index = gtk_drop_down_get_selected(GTK_DROP_DOWN(s->preset_choice));
+    if (index >= presets.items.size()) return;
+    presets.items.erase(presets.items.begin() + static_cast<std::ptrdiff_t>(index));
+    std::string error;
+    if (!save_saved_searches(presets, error)) {
+        gtk_label_set_text(GTK_LABEL(s->status), error.c_str());
+        return;
+    }
+    refresh_presets(s);
+    gtk_label_set_text(GTK_LABEL(s->status), "Saved search removed.");
+}
+
+void persist_privacy(GtkButton *, gpointer data)
+{
+    auto *s = state(GTK_WIDGET(data));
+    if (s == nullptr) return;
+    // Retain the same strict absolute-path/URI parsing as the search operation.
+    // The resulting persisted list becomes mandatory on every subsequent scan.
+    const char *raw = gtk_editable_get_text(GTK_EDITABLE(s->excluded));
+    gchar **parts = g_strsplit(raw != nullptr ? raw : "", ";", 65);
+    std::vector<std::string> uris;
+    bool valid = true;
+    for (gchar **p = parts; p != nullptr && *p != nullptr; ++p) {
+        char *part = g_strstrip(*p);
+        if (*part == '\0') continue;
+        if (!(g_str_has_prefix(part, "/") || strstr(part, "://") != nullptr)) {
+            valid = false;
+            break;
+        }
+        GFile *file = strstr(part, "://") != nullptr ?
+            g_file_new_for_uri(part) : g_file_new_for_path(part);
+        char *uri = g_file_get_uri(file);
+        if (uri != nullptr) uris.emplace_back(uri);
+        g_free(uri);
+        g_object_unref(file);
+    }
+    g_strfreev(parts);
+    if (!valid || uris.size() > 64) {
+        gtk_label_set_text(GTK_LABEL(s->status),
+            "Private exclusions require absolute locations (maximum 64).");
+        return;
+    }
+    std::string error;
+    if (!save_search_privacy(uris, error)) {
+        gtk_label_set_text(GTK_LABEL(s->status), error.c_str());
+        return;
+    }
+    gtk_label_set_text(GTK_LABEL(s->status),
+        "Private exclusions saved. They apply to every subsequent search.");
+}
+
 
 void show_recursive_search_impl(GtkWindow *owner, GFile *location,
                                const std::vector<GFile *> &selected)
@@ -395,9 +602,26 @@ void show_recursive_search_impl(GtkWindow *owner, GFile *location,
         " selected folders (at most 16)";
     g_free(location_name);
     GtkWidget *intro = gtk_label_new(scope.c_str());
+    s->scope_label = intro;
     gtk_label_set_xalign(GTK_LABEL(intro), 0);
     gtk_label_set_ellipsize(GTK_LABEL(intro), PANGO_ELLIPSIZE_MIDDLE);
     gtk_box_append(GTK_BOX(outer), intro);
+
+    GtkWidget *saved_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_box_append(GTK_BOX(outer), saved_row);
+    s->preset_name = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(s->preset_name), "Saved search name");
+    gtk_widget_set_hexpand(s->preset_name, TRUE);
+    gtk_box_append(GTK_BOX(saved_row), s->preset_name);
+    s->preset_save = gtk_button_new_with_label("Save Search");
+    gtk_box_append(GTK_BOX(saved_row), s->preset_save);
+    constexpr const char *empty_presets[] = {nullptr};
+    s->preset_choice = gtk_drop_down_new_from_strings(empty_presets);
+    gtk_box_append(GTK_BOX(saved_row), s->preset_choice);
+    GtkWidget *load_saved = gtk_button_new_with_label("Load saved");
+    GtkWidget *remove_saved = gtk_button_new_with_label("Remove saved");
+    gtk_box_append(GTK_BOX(saved_row), load_saved);
+    gtk_box_append(GTK_BOX(saved_row), remove_saved);
 
     GtkWidget *options = gtk_grid_new();
     gtk_grid_set_column_spacing(GTK_GRID(options), 14);
@@ -416,6 +640,15 @@ void show_recursive_search_impl(GtkWindow *owner, GFile *location,
     s->owner_uid = field(GTK_GRID(options), "Owner UID (native providers)", 0, 4, "Optional numeric UID");
     s->tag = field(GTK_GRID(options), "Tag filter (derived catalogue)", 0, 5, "Optional exact label");
     s->excluded = field(GTK_GRID(options), "Exclude locations (paths/URIs separated by ;)", 1, 4, "Optional private locations");
+    const auto privacy = load_search_privacy();
+    if (privacy.valid) {
+        std::string text;
+        for (const auto &uri : privacy.excluded_uris) {
+            if (!text.empty()) text += "; ";
+            text += uri;
+        }
+        gtk_editable_set_text(GTK_EDITABLE(s->excluded), text.c_str());
+    }
     GtkWidget *flags = gtk_box_new(GTK_ORIENTATION_VERTICAL, 3);
     s->recursive = gtk_check_button_new_with_label("Include subfolders");
     gtk_check_button_set_active(GTK_CHECK_BUTTON(s->recursive), TRUE);
@@ -428,6 +661,8 @@ void show_recursive_search_impl(GtkWindow *owner, GFile *location,
         "Find duplicate regular files by SHA-256 (8 MiB/file limit)");
     gtk_box_append(GTK_BOX(flags), s->duplicates);
     gtk_grid_attach(GTK_GRID(options), flags, 1, 5, 1, 1);
+    s->privacy_save = gtk_button_new_with_label("Save private exclusions");
+    gtk_grid_attach(GTK_GRID(options), s->privacy_save, 1, 6, 1, 1);
 
     GtkWidget *toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_box_append(GTK_BOX(outer), toolbar);
@@ -437,7 +672,8 @@ void show_recursive_search_impl(GtkWindow *owner, GFile *location,
     gtk_widget_set_sensitive(s->cancel, FALSE);
     gtk_box_append(GTK_BOX(toolbar), s->search);
     gtk_box_append(GTK_BOX(toolbar), s->cancel);
-    s->status = gtk_label_new("Ready — read-only search, up to 500 matches and 100,000 entries");
+    s->status = gtk_label_new(privacy.valid ?
+        "Ready — bounded read-only search" : privacy.error.c_str());
     gtk_label_set_xalign(GTK_LABEL(s->status), 0);
     gtk_label_set_wrap(GTK_LABEL(s->status), TRUE);
     gtk_box_append(GTK_BOX(outer), s->status);
@@ -460,6 +696,15 @@ void show_recursive_search_impl(GtkWindow *owner, GFile *location,
     gtk_widget_set_hexpand(close, TRUE);
     gtk_widget_set_halign(close, GTK_ALIGN_END);
     gtk_box_append(GTK_BOX(footer), close);
+    refresh_presets(s);
+    if (!privacy.valid) {
+        gtk_widget_set_sensitive(s->search, FALSE);
+        gtk_widget_set_sensitive(s->privacy_save, FALSE);
+    }
+    g_signal_connect(s->preset_save, "clicked", G_CALLBACK(save_preset), dialog);
+    g_signal_connect(load_saved, "clicked", G_CALLBACK(load_preset), dialog);
+    g_signal_connect(remove_saved, "clicked", G_CALLBACK(remove_preset), dialog);
+    g_signal_connect(s->privacy_save, "clicked", G_CALLBACK(persist_privacy), dialog);
     g_signal_connect(s->search, "clicked", G_CALLBACK(start), dialog);
     g_signal_connect(s->cancel, "clicked", G_CALLBACK((+[](GtkButton *, gpointer data) {
         SearchWindow *state = static_cast<SearchWindow *>(data);
