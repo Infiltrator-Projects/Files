@@ -111,7 +111,12 @@ std::string file_metadata(GFile *file, GCancellable *cancel, GError **error)
     append_line(report, "Kind", kind == G_FILE_TYPE_DIRECTORY ? "Directory" :
                 kind == G_FILE_TYPE_REGULAR ? "Regular file" :
                 kind == G_FILE_TYPE_SYMBOLIC_LINK ? "Symbolic link" : "Other");
-    append_line(report, "Logical size", size_text(g_file_info_get_size(info)));
+    if (g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_STANDARD_SIZE) &&
+        g_file_info_get_size(info) >= 0)
+        append_line(report, "Logical size", size_text(
+            static_cast<guint64>(g_file_info_get_size(info))));
+    else
+        append_line(report, "Logical size", "Unknown");
     if (g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_UNIX_BLOCKS)) {
         const guint64 blocks = g_file_info_get_attribute_uint64(info, G_FILE_ATTRIBUTE_UNIX_BLOCKS);
         if (blocks <= G_MAXUINT64 / 512U)
@@ -214,7 +219,7 @@ std::string checksum(GFile *file, GCancellable *cancel, GError **error)
     std::array<char, 131072> buffer{};
     while (true) {
         const gssize n = g_input_stream_read(
-            G_INPUT_STREAM(stream), buffer.data(), buffer.size(), cancel, error);
+            G_INPUT_STREAM(stream), buffer.data(), static_cast<gsize>(buffer.size()), cancel, error);
         if (n < 0) break;
         if (n == 0) break;
         g_checksum_update(hash, reinterpret_cast<const guchar *>(buffer.data()),
@@ -232,6 +237,7 @@ std::string folder_size(GFile *root, GCancellable *cancel, GError **error)
     struct Frame { GFile *file; GFileEnumerator *enumerator; };
     std::vector<Frame> stack;
     guint64 logical = 0, allocated = 0, items = 0, folders = 0;
+    bool logical_known = true, allocated_known = true;
     constexpr guint64 limit = 250000;
     const char *attributes =
         "standard::name,standard::type,standard::size,unix::blocks,unix::device";
@@ -268,7 +274,11 @@ std::string folder_size(GFile *root, GCancellable *cancel, GError **error)
             g_object_unref(info);
             break;
         }
-        const guint64 bytes = g_file_info_get_size(info);
+        if (!g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_STANDARD_SIZE))
+            logical_known = false;
+        const goffset raw_size = g_file_info_get_size(info);
+        if (raw_size < 0) logical_known = false;
+        const guint64 bytes = raw_size >= 0 ? static_cast<guint64>(raw_size) : 0U;
         if (G_MAXUINT64 - logical < bytes) {
             g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "Logical size overflow");
             g_object_unref(info);
@@ -285,6 +295,8 @@ std::string folder_size(GFile *root, GCancellable *cancel, GError **error)
                 break;
             }
             allocated += blocks * 512U;
+        } else {
+            allocated_known = false;
         }
         if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY) {
             ++folders;
@@ -318,8 +330,10 @@ std::string folder_size(GFile *root, GCancellable *cancel, GError **error)
     append_line(result, "Folder", display(root));
     append_line(result, "Items scanned", std::to_string(items));
     append_line(result, "Subfolders", std::to_string(folders));
-    append_line(result, "Logical total", size_text(logical));
-    append_line(result, "Allocated total", size_text(allocated));
+    append_line(result, "Logical total",
+                logical_known ? size_text(logical) : "Unknown (some sizes not supplied)");
+    append_line(result, "Allocated total",
+                allocated_known ? size_text(allocated) : "Unknown (some block counts not supplied)");
     result += "Counts include directory entries; hard links may be counted more than once.\n"
               "Symlinks and separately mounted filesystems are not traversed.\n";
     return result;
