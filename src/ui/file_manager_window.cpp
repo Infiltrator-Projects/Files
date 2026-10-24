@@ -1272,6 +1272,10 @@ void FileManagerWindow::activate_position(const guint position)
     GFile *child = g_file_get_child(current_location_, name);
     if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY) {
         navigate_to(child, true);
+    } else if (g_file_info_get_is_symlink(info)) {
+        // Follow for browsing only: the directory model still identifies the
+        // link itself and the breadcrumb retains the link-relative namespace.
+        open_location(child);
     } else {
         char *uri = g_file_get_uri(child);
         if (uri != nullptr) {
