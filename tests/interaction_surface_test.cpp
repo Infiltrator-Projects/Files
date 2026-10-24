@@ -349,6 +349,80 @@ void qualify_selection_actions(infiltrator::files::FileManagerWindow &w,
     fs::remove_all(root);
 }
 
+
+void qualify_recursive_search(infiltrator::files::FileManagerWindow &window,
+                              GtkWidget *popover)
+{
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() /
+        ("files-search-ui-" + std::to_string(g_get_monotonic_time()));
+    fs::create_directories(root / "nested");
+    { std::ofstream(root / "nested" / "target.txt") << "unique search content"; }
+    { std::ofstream(root / "unrelated.txt") << "other"; }
+    GFile *folder = g_file_new_for_path(root.c_str());
+    window.open_location(folder);
+    auto *listing = infiltrator::files::FileManagerWindowTestAccess::listing(window);
+    bool open = false;
+    for (int i = 0; i < 5000 && !open; ++i) {
+        while (g_main_context_iteration(nullptr, FALSE)) {}
+        GFile *current = gtk_directory_list_get_file(listing);
+        open = current != nullptr && g_file_equal(current, folder) &&
+               !gtk_directory_list_is_loading(listing);
+        if (!open) g_usleep(1000);
+    }
+    require(open, "Search UI fixture folder failed to open");
+    GtkWidget *action = find_button(popover, "Search in subfolders…");
+    require(action != nullptr, "Recursive search must be exposed in File actions");
+    g_signal_emit_by_name(action, "clicked");
+    GtkWindow *dialog = window_named("Search files");
+    require(dialog != nullptr, "Recursive search dialog did not open");
+    GtkWidget *name = find_entry(GTK_WIDGET(dialog));
+    require(GTK_IS_EDITABLE(name), "Search filename input missing");
+    gtk_editable_set_text(GTK_EDITABLE(name), "target.txt");
+    GtkWidget *start = find_button(GTK_WIDGET(dialog), "Search");
+    require(start != nullptr, "Search launch control missing");
+    g_signal_emit_by_name(start, "clicked");
+    GtkWidget *results = GTK_WIDGET(g_object_get_data(
+        G_OBJECT(dialog), "ifm-recursive-results"));
+    require(GTK_IS_LIST_BOX(results), "Search result list missing");
+    GtkListBoxRow *hit = nullptr;
+    for (int n = 0; n < 5000 && hit == nullptr; ++n) {
+        while (g_main_context_iteration(nullptr, FALSE)) {}
+        hit = gtk_list_box_get_row_at_index(GTK_LIST_BOX(results), 0);
+        if (hit == nullptr) g_usleep(1000);
+    }
+    require(hit != nullptr &&
+            gtk_list_box_get_row_at_index(GTK_LIST_BOX(results), 1) == nullptr,
+            "Recursive filename query must produce exactly one result");
+    gtk_list_box_select_row(GTK_LIST_BOX(results), hit);
+    GtkWidget *reveal = find_button(GTK_WIDGET(dialog), "Reveal in containing folder");
+    require(reveal != nullptr && gtk_widget_get_sensitive(reveal),
+            "Search result reveal action must be available");
+    g_signal_emit_by_name(reveal, "clicked");
+    GFile *nested = g_file_get_child(folder, "nested");
+    bool revealed = false;
+    for (int n = 0; n < 5000 && !revealed; ++n) {
+        while (g_main_context_iteration(nullptr, FALSE)) {}
+        GFile *current = gtk_directory_list_get_file(listing);
+        if (current != nullptr && g_file_equal(current, nested) &&
+            !gtk_directory_list_is_loading(listing)) {
+            auto *selection = infiltrator::files::FileManagerWindowTestAccess::selection(window);
+            if (gtk_multi_selection_get_model(selection) != nullptr) {
+                const guint selected = selected_count(selection);
+                if (selected == 1U) {
+                    const guint pos = position_for(selection, "target.txt");
+                    revealed = gtk_selection_model_is_selected(GTK_SELECTION_MODEL(selection), pos);
+                }
+            }
+        }
+        if (!revealed) g_usleep(1000);
+    }
+    require(revealed, "Reveal must navigate to the parent and select the original file");
+    g_object_unref(nested);
+    g_object_unref(folder);
+    fs::remove_all(root);
+}
+
 } // namespace
 
 int main()
@@ -458,6 +532,7 @@ int main()
                 "Closing File actions must dismiss its popover");
 
         qualify_selection_actions(*window, popover);
+        qualify_recursive_search(*window, popover);
 
         bool finalized = false;
         g_object_weak_ref(G_OBJECT(window->native_window()), [](gpointer data, GObject *) {
