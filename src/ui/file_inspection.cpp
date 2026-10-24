@@ -4,6 +4,7 @@
 #include <gdk-pixbuf/gdk-pixbuf.h>
 #include <gio/gio.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstdint>
@@ -19,15 +20,17 @@
 namespace infiltrator::files {
 namespace {
 
-enum class InspectionKind { Details, FolderSize, Sha256, Compare };
+enum class InspectionKind { Details, FolderSize, Sha256, VerifySha256, Compare };
 
 struct Work {
     InspectionKind kind;
     GFile *first;
     GFile *second;
-    Work(InspectionKind value, GFile *a, GFile *b = nullptr)
+    std::string expected;
+    Work(InspectionKind value, GFile *a, GFile *b = nullptr, std::string digest = {})
         : kind(value), first(G_FILE(g_object_ref(a))),
-          second(b != nullptr ? G_FILE(g_object_ref(b)) : nullptr) {}
+          second(b != nullptr ? G_FILE(g_object_ref(b)) : nullptr),
+          expected(std::move(digest)) {}
     ~Work() {
         g_object_unref(first);
         if (second != nullptr) g_object_unref(second);
@@ -40,6 +43,8 @@ struct DialogState {
     GtkWidget *details{nullptr};
     GtkWidget *folder{nullptr};
     GtkWidget *hash{nullptr};
+    GtkWidget *expected_hash{nullptr};
+    GtkWidget *verify_hash{nullptr};
     GtkWidget *cancel{nullptr};
     GCancellable *active{nullptr};
     bool busy{false};
@@ -232,6 +237,52 @@ std::string checksum(GFile *file, GCancellable *cancel, GError **error)
     return value;
 }
 
+
+bool identical_bytes(GFile *first, GFile *second,
+                     GCancellable *cancel, GError **error)
+{
+    GFileInputStream *left = g_file_read(first, cancel, error);
+    if (left == nullptr) return false;
+    GFileInputStream *right = g_file_read(second, cancel, error);
+    if (right == nullptr) {
+        g_input_stream_close(G_INPUT_STREAM(left), nullptr, nullptr);
+        g_object_unref(left);
+        return false;
+    }
+    std::array<guint8, 65536> a{}, b{};
+    auto chunk = [&](GInputStream *stream, std::array<guint8, 65536> &buffer,
+                     gsize &length) {
+        length = 0;
+        while (length < buffer.size()) {
+            const gssize got = g_input_stream_read(stream,
+                buffer.data() + length, buffer.size() - length, cancel, error);
+            if (got <= 0) return got == 0 && *error == nullptr;
+            length += static_cast<gsize>(got);
+        }
+        return true;
+    };
+    bool equal = true;
+    while (*error == nullptr) {
+        gsize l = 0, r = 0;
+        if (!chunk(G_INPUT_STREAM(left), a, l) ||
+            !chunk(G_INPUT_STREAM(right), b, r)) {
+            equal = false;
+            break;
+        }
+        if (l != r || !std::equal(a.begin(), a.begin() + static_cast<std::ptrdiff_t>(l),
+                                  b.begin())) {
+            equal = false;
+            break;
+        }
+        if (l == 0) break;
+    }
+    g_input_stream_close(G_INPUT_STREAM(left), nullptr, nullptr);
+    g_input_stream_close(G_INPUT_STREAM(right), nullptr, nullptr);
+    g_object_unref(left);
+    g_object_unref(right);
+    return equal && *error == nullptr;
+}
+
 std::string folder_size(GFile *root, GCancellable *cancel, GError **error)
 {
     struct Frame { GFile *file; GFileEnumerator *enumerator; };
@@ -356,6 +407,18 @@ void work_thread(GTask *task, gpointer, gpointer data, GCancellable *cancel)
         if (error == nullptr) result = "SHA-256: " + result + "\n" + display(work->first);
         break;
     }
+    case InspectionKind::VerifySha256: {
+        const std::string actual = checksum(work->first, cancel, &error);
+        if (error != nullptr) break;
+        append_line(result, "Source", display(work->first));
+        append_line(result, "Expected SHA-256", work->expected);
+        append_line(result, "Calculated SHA-256", actual);
+        result += actual == work->expected ?
+            "SHA-256 VERIFIED: calculated digest matches the supplied value.\n" :
+            "SHA-256 MISMATCH: supplied and calculated digests differ.\n";
+        result += "A matching digest does not establish trusted provenance.\n";
+        break;
+    }
     case InspectionKind::Compare: {
         const std::string first = checksum(work->first, cancel, &error);
         if (error != nullptr) break;
@@ -367,7 +430,13 @@ void work_thread(GTask *task, gpointer, gpointer data, GCancellable *cancel)
         append_line(result, "Second SHA-256", second);
         result += first == second ? "Matching SHA-256 digests.\n" :
                                    "Different SHA-256 digests.\n";
-        result += "Hash agreement is not a byte-for-byte comparison.\n";
+        if (first == second) {
+            const bool identical = identical_bytes(work->first, work->second, cancel, &error);
+            if (error != nullptr) break;
+            result += identical ? "Byte-for-byte comparison matched on this read.\n" :
+                                  "Byte-for-byte comparison found differences.\n";
+            result += "Concurrent file modifications can invalidate a live comparison.\n";
+        }
         break;
     }
     }
@@ -402,6 +471,7 @@ void on_done(GObject *, GAsyncResult *result, gpointer user_data)
             if (state->details != nullptr) gtk_widget_set_sensitive(state->details, TRUE);
             if (state->folder != nullptr) gtk_widget_set_sensitive(state->folder, TRUE);
             if (state->hash != nullptr) gtk_widget_set_sensitive(state->hash, TRUE);
+            if (state->verify_hash != nullptr) gtk_widget_set_sensitive(state->verify_hash, TRUE);
             if (state->cancel != nullptr) gtk_widget_set_sensitive(state->cancel, FALSE);
             if (error != nullptr)
                 set_text(state->view, error->message);
@@ -416,7 +486,8 @@ void on_done(GObject *, GAsyncResult *result, gpointer user_data)
     delete weak;
 }
 
-void begin(GtkWindow *dialog, InspectionKind kind, GFile *other = nullptr)
+void begin(GtkWindow *dialog, InspectionKind kind, GFile *other = nullptr,
+           std::string expected = {})
 {
     auto *state = static_cast<DialogState *>(
         g_object_get_data(G_OBJECT(dialog), "ifm-inspection-state"));
@@ -426,12 +497,13 @@ void begin(GtkWindow *dialog, InspectionKind kind, GFile *other = nullptr)
     if (state->details != nullptr) gtk_widget_set_sensitive(state->details, FALSE);
     if (state->folder != nullptr) gtk_widget_set_sensitive(state->folder, FALSE);
     if (state->hash != nullptr) gtk_widget_set_sensitive(state->hash, FALSE);
+    if (state->verify_hash != nullptr) gtk_widget_set_sensitive(state->verify_hash, FALSE);
     if (state->cancel != nullptr) gtk_widget_set_sensitive(state->cancel, TRUE);
     set_text(state->view, "Reading… (Cancel to stop)");
     auto *weak = new GWeakRef;
     g_weak_ref_init(weak, G_OBJECT(dialog));
     GTask *task = g_task_new(nullptr, state->active, on_done, weak);
-    g_task_set_task_data(task, new Work(kind, state->file, other),
+    g_task_set_task_data(task, new Work(kind, state->file, other, std::move(expected)),
         [](gpointer data) { delete static_cast<Work *>(data); });
     g_task_run_in_thread(task, work_thread);
     g_object_unref(task);
@@ -525,6 +597,31 @@ void show_file_inspection(GtkWindow *parent, GFile *file, GFileInfo *known)
         gtk_box_prepend(GTK_BOX(buttons), state->hash);
         g_signal_connect(state->hash, "clicked", G_CALLBACK((+[](GtkButton *, gpointer data) {
             begin(GTK_WINDOW(data), InspectionKind::Sha256);
+        })), dialog);
+        state->expected_hash = gtk_entry_new();
+        gtk_entry_set_placeholder_text(GTK_ENTRY(state->expected_hash),
+            "Expected 64-digit SHA-256 hex");
+        gtk_widget_set_hexpand(state->expected_hash, TRUE);
+        gtk_box_prepend(GTK_BOX(buttons), state->expected_hash);
+        state->verify_hash = gtk_button_new_with_label("Verify SHA-256");
+        gtk_box_prepend(GTK_BOX(buttons), state->verify_hash);
+        g_signal_connect(state->verify_hash, "clicked", G_CALLBACK((+[](GtkButton *, gpointer data) {
+            GtkWindow *dialog = GTK_WINDOW(data);
+            auto *state = static_cast<DialogState *>(
+                g_object_get_data(G_OBJECT(dialog), "ifm-inspection-state"));
+            if (state == nullptr || state->busy) return;
+            const char *input = gtk_editable_get_text(GTK_EDITABLE(state->expected_hash));
+            std::string expected = input != nullptr ? input : "";
+            if (expected.size() != 64 ||
+                !std::all_of(expected.begin(), expected.end(), [](unsigned char ch) {
+                    return g_ascii_isxdigit(ch);
+                })) {
+                set_text(state->view, "Enter exactly 64 hexadecimal SHA-256 digits.");
+                return;
+            }
+            for (char &ch : expected)
+                ch = g_ascii_tolower(ch);
+            begin(dialog, InspectionKind::VerifySha256, nullptr, std::move(expected));
         })), dialog);
     }
     gtk_window_present(dialog);
