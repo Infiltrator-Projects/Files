@@ -10,6 +10,9 @@
 #include <string>
 
 using infiltrator::files::detail_compare_modified;
+using infiltrator::files::detail_compare_created;
+using infiltrator::files::detail_created_text;
+using infiltrator::files::detail_visual_label;
 using infiltrator::files::detail_compare_name;
 using infiltrator::files::detail_compare_size;
 using infiltrator::files::detail_compare_type;
@@ -375,6 +378,39 @@ int main()
         }
     }
 
+    // Four distinct original catalogue requirements: created-time sorting,
+    // optional extension rendering, visual link identity and special-file
+    // identity. All are presentation-only; missing creation time stays unknown.
+    GFileInfo *early = g_file_info_new();
+    GFileInfo *late = g_file_info_new();
+    g_file_info_set_attribute_uint64(early, G_FILE_ATTRIBUTE_TIME_CREATED, 100);
+    g_file_info_set_attribute_uint64(late, G_FILE_ATTRIBUTE_TIME_CREATED, 200);
+    const bool created_order = detail_compare_created(early, late) < 0 &&
+        detail_compare_created(late, early) > 0 &&
+        detail_compare_created(early, early) == 0 &&
+        detail_compare_created(file, early) != 0 &&
+        detail_created_text(early) != "—";
+    g_file_info_set_file_type(early, G_FILE_TYPE_REGULAR);
+    g_file_info_set_name(early, "report.final.txt");
+    g_file_info_set_display_name(early, "report.final.txt");
+    const bool names = detail_visual_label(early, true) == "report.final.txt" &&
+        detail_visual_label(early, false) == "report.final";
+    g_file_info_set_is_symlink(early, TRUE);
+    const bool link = detail_visual_label(early, false) == "↗ report.final";
+    g_file_info_set_is_symlink(early, FALSE);
+    g_file_info_set_file_type(early, G_FILE_TYPE_SPECIAL);
+    const bool special = detail_visual_label(early, false) == "◆ report.final.txt";
+    g_file_info_set_file_type(early, G_FILE_TYPE_REGULAR);
+    g_file_info_set_display_name(early, ".hidden");
+    g_file_info_set_is_hidden(early, TRUE);
+    const bool hidden = detail_visual_label(early, false) == "· .hidden";
+    g_object_unref(early);
+    g_object_unref(late);
+    if (!created_order || !names || !link || !special || !hidden) {
+        g_free(config_home);
+        g_object_unref(file);
+        return detail_metadata_failure(40);
+    }
     g_free(config_home);
     g_object_unref(file);
     return 0;
