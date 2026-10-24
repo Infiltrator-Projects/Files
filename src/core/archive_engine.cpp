@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <sys/stat.h>
 #include <system_error>
 #include <unistd.h>
 
@@ -27,6 +28,10 @@ struct ReaderCloser { void operator()(struct archive *ptr) const noexcept {
     if (ptr != nullptr) archive_read_free(ptr);
 } };
 using Reader = std::unique_ptr<struct archive, ReaderCloser>;
+struct WriterCloser { void operator()(struct archive *p) const noexcept {
+    if (p != nullptr) archive_write_free(p);
+} };
+using Writer = std::unique_ptr<struct archive, WriterCloser>;
 
 OperationResult failure(OperationStatus state, OperationPhase phase,
                         const fs::path &path, std::string message)
@@ -107,6 +112,112 @@ void reflect_cleanup(OperationResult &result, const fs::path &private_directory)
     }
 }
 } // namespace
+
+
+OperationResult ArchiveEngine::create_zip(const fs::path &source,
+                                          const fs::path &destination_parent,
+                                          const std::string &journal_id,
+                                          GCancellable *cancel) const
+{
+    const std::string source_name = source.filename().string();
+    const std::string output_name = source_name + ".zip";
+    const fs::path destination = destination_parent / output_name;
+    if (!source.is_absolute() || !destination_parent.is_absolute() ||
+        !safe_component_name(source_name) || !safe_component_name(output_name) ||
+        journal_id.empty() || journal_id.size() > 100U ||
+        !std::all_of(journal_id.begin(), journal_id.end(), [](char c) {
+            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                   (c >= '0' && c <= '9') || c == '-';
+        }))
+        return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight,
+                       destination, "ZIP creation requires native paths and a valid journal ID.");
+    if (cancelled(cancel))
+        return failure(OperationStatus::Cancelled, OperationPhase::Preflight,
+                       destination, "ZIP creation cancelled.");
+    std::error_code ec;
+    if (!fs::is_regular_file(fs::symlink_status(source, ec)) || ec)
+        return failure(OperationStatus::UnsupportedCapability, OperationPhase::Preflight,
+                       destination, "ZIP creation currently supports one native regular file.");
+    ec.clear();
+    if (!fs::is_directory(destination_parent, ec) || ec)
+        return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight,
+                       destination, "ZIP destination is not an accessible native directory.");
+    ec.clear();
+    if (fs::exists(destination, ec) || ec)
+        return failure(OperationStatus::DestinationConflict, OperationPhase::Preflight,
+                       destination, "A ZIP with that name already exists.");
+    ec.clear();
+    const std::uintmax_t expected = fs::file_size(source, ec);
+    if (ec || expected > kMaxFile)
+        return failure(OperationStatus::UnsupportedCapability, OperationPhase::Preflight,
+                       destination, "ZIP input exceeds the qualified 1 GiB file limit.");
+
+    std::string pattern = (destination_parent /
+        (".files-archive-create-" + journal_id + "-XXXXXX")).string();
+    if (::mkdtemp(pattern.data()) == nullptr)
+        return failure(OperationStatus::PermissionFailure, OperationPhase::Preflight,
+                       destination, "Could not allocate private ZIP staging.");
+    const fs::path staging(pattern);
+    const fs::path private_zip = staging / output_name;
+    OperationResult result = failure(OperationStatus::ExecutionFailure,
+                                     OperationPhase::Execute, destination,
+                                     "ZIP creation failed.");
+    Writer writer(archive_write_new());
+    bool good = writer && archive_write_set_format_zip(writer.get()) == ARCHIVE_OK &&
+        archive_write_open_filename(writer.get(), private_zip.c_str()) == ARCHIVE_OK;
+    if (good) {
+        archive_entry *entry = archive_entry_new();
+        good = entry != nullptr;
+        if (good) {
+            archive_entry_set_pathname(entry, source_name.c_str());
+            archive_entry_set_filetype(entry, AE_IFREG);
+            archive_entry_set_perm(entry, 0644);
+            archive_entry_set_size(entry, static_cast<la_int64_t>(expected));
+            good = archive_write_header(writer.get(), entry) == ARCHIVE_OK;
+        }
+        if (entry) archive_entry_free(entry);
+    }
+    if (good) {
+        const int fd = ::open(source.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+        struct stat observed{};
+        good = fd >= 0 && ::fstat(fd, &observed) == 0 && S_ISREG(observed.st_mode) &&
+            observed.st_size >= 0 && static_cast<std::uintmax_t>(observed.st_size) == expected;
+        std::array<char, 65536> bytes{};
+        std::uintmax_t written = 0U;
+        while (good && written < expected) {
+            if (cancelled(cancel)) { good = false; break; }
+            const std::size_t count = static_cast<std::size_t>(
+                std::min<std::uintmax_t>(bytes.size(), expected - written));
+            const ssize_t n = ::read(fd, bytes.data(), count);
+            if (n < 0 && errno == EINTR) continue;
+            if (n <= 0 || archive_write_data(writer.get(), bytes.data(),
+                    static_cast<std::size_t>(n)) != n) { good = false; break; }
+            written += static_cast<std::uintmax_t>(n);
+        }
+        if (fd >= 0 && ::close(fd) != 0) good = false;
+        if (written != expected) good = false;
+    }
+    if (good) good = archive_write_close(writer.get()) == ARCHIVE_OK;
+    writer.reset();
+    if (!good || cancelled(cancel)) {
+        result = failure(cancelled(cancel) ? OperationStatus::Cancelled :
+                         OperationStatus::VerificationFailure, OperationPhase::Verify,
+                         destination, "ZIP input changed or archive writing failed; nothing published.");
+    } else {
+        const int fd = ::open(private_zip.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+        const bool flushed = fd >= 0 && ::fsync(fd) == 0;
+        if (fd >= 0) ::close(fd);
+        if (!flushed)
+            result = failure(OperationStatus::VerificationFailure, OperationPhase::Verify,
+                             destination, "Private ZIP could not be synchronised.");
+        else {
+            TransferOperationEngine transfer;
+            result = transfer.copy_item(private_zip, destination_parent, ConflictPolicy::Fail);
+        }
+    }
+    reflect_cleanup(result, staging);
+    return result;
+}
 
 OperationResult ArchiveEngine::extract(const fs::path &source,
                                        const fs::path &destination_parent,

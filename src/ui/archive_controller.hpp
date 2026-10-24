@@ -13,9 +13,11 @@ public:
                       GtkSingleSelection *selection, GtkWidget *status);
     ~ArchiveController();
     void extract_selected();
+    void create_selected();
     ArchiveController(const ArchiveController &) = delete;
     ArchiveController &operator=(const ArchiveController &) = delete;
 private:
+    void start_selected(bool create);
     static void on_window_finalized(gpointer, GObject *);
     static void on_window_destroyed(GtkWidget *, gpointer);
     static void on_thread(GTask *, gpointer, gpointer, GCancellable *);

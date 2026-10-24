@@ -49,6 +49,17 @@ int main()
         const auto collision = engine.extract(good, root, "fixture-2");
         if (collision.ok()) throw std::runtime_error("Extraction overwrote an existing destination");
 
+        const fs::path input = root / "payload.txt";
+        { std::ofstream writer(input); writer << "hello"; }
+        const auto zipped = engine.create_zip(input, root, "zip-1");
+        if (!zipped.ok() || !fs::exists(root / "payload.txt.zip"))
+            throw std::runtime_error("Safe ZIP creation failed: " + zipped.message);
+        if (engine.create_zip(input, root, "zip-2").ok())
+            throw std::runtime_error("ZIP creation silently overwrote an existing archive");
+        fs::create_directory(root / "unpack");
+        const auto unzipped = engine.extract(root / "payload.txt.zip", root / "unpack", "zip-3");
+        if (!unzipped.ok() || !fs::exists(root / "unpack" / "payload.txt" / "payload.txt"))
+            throw std::runtime_error("ZIP round-trip failed: " + unzipped.message);
         const fs::path evil = root / "escape.zip";
         sample_archive(evil, "../outside.txt");
         const auto refused = engine.extract(evil, root, "fixture-3");

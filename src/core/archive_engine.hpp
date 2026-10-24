@@ -12,6 +12,10 @@ namespace infiltrator::files {
 // untrusted; no entry may create a link, device or path outside private staging.
 class ArchiveEngine final {
 public:
+    [[nodiscard]] OperationResult create_zip(const std::filesystem::path &source,
+                                             const std::filesystem::path &destination_parent,
+                                             const std::string &journal_id,
+                                             GCancellable *cancel = nullptr) const;
     [[nodiscard]] OperationResult extract(const std::filesystem::path &archive_path,
                                           const std::filesystem::path &destination_parent,
                                           const std::string &journal_id,

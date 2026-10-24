@@ -440,6 +440,8 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
                     ActionScope::SingleSelection, proxies);
         add_command(tools, "Extract archive safely", "extract-archive",
                     ActionScope::SingleSelection, proxies);
+        add_command(tools, "Create ZIP archive", "create-archive",
+                    ActionScope::SingleSelection, proxies);
         add_command(tools, "Tag selected files…", "tag-selected",
                     ActionScope::AnySelection, proxies);
         add_command(tools, "Copy tag catalogue as TSV", "export-tags",
@@ -724,6 +726,11 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
         auto *archive = static_cast<ArchiveController *>(
             g_object_get_data(G_OBJECT(self->window_), "ifm-archive-controller"));
         if (archive != nullptr) archive->extract_selected();
+    }
+    else if (g_strcmp0(command, "create-archive") == 0) {
+        auto *archive = static_cast<ArchiveController *>(
+            g_object_get_data(G_OBJECT(self->window_), "ifm-archive-controller"));
+        if (archive != nullptr) archive->create_selected();
     }
     else if (g_strcmp0(command, "remote-thumbnails") == 0) window->toggle_remote_thumbnails();
     else if (g_strcmp0(command, "icons-smaller") == 0) window->adjust_icon_density(-1);

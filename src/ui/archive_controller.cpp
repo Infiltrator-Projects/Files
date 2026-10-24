@@ -9,6 +9,7 @@ namespace {
 struct Request {
     std::string source;
     std::string destination;
+    bool create{false};
 };
 }
 ArchiveController::ArchiveController(GtkWindow *window, GtkDirectoryList *directory,
@@ -41,7 +42,9 @@ void ArchiveController::on_window_finalized(gpointer data, GObject *)
     self->window_ = nullptr;
     delete self;
 }
-void ArchiveController::extract_selected()
+void ArchiveController::extract_selected() { start_selected(false); }
+void ArchiveController::create_selected() { start_selected(true); }
+void ArchiveController::start_selected(bool create)
 {
     if (busy_ || window_ == nullptr || directory_ == nullptr) return;
     GFile *parent = gtk_directory_list_get_file(directory_);
@@ -62,11 +65,11 @@ void ArchiveController::extract_selected()
     }
     g_clear_object(&cancellable_);
     cancellable_ = g_cancellable_new();
-    auto *request = new Request{source, destination};
+    auto *request = new Request{source, destination, create};
     g_free(source); g_free(destination);
     busy_ = true;
     if (status_ != nullptr)
-        gtk_label_set_text(GTK_LABEL(status_), "Extracting selected archive safely…");
+        gtk_label_set_text(GTK_LABEL(status_), create ? "Creating ZIP archive safely…" : "Extracting selected archive safely…");
     GTask *task = g_task_new(G_OBJECT(window_), cancellable_, on_finished, this);
     g_task_set_task_data(task, request, [](gpointer value) {
         delete static_cast<Request *>(value);
@@ -80,7 +83,8 @@ void ArchiveController::on_thread(GTask *task, gpointer, gpointer user_data,
 {
     const auto *request = static_cast<Request *>(user_data);
     OperationJournal journal;
-    const std::string id = journal.begin("ExtractArchive", request->source,
+    const char *kind = request->create ? "CreateArchive" : "ExtractArchive";
+    const std::string id = journal.begin(kind, request->source,
                                           request->destination);
     OperationResult result;
     if (id.empty()) {
@@ -88,8 +92,10 @@ void ArchiveController::on_thread(GTask *task, gpointer, gpointer user_data,
                   request->destination, "Extraction refused: durable journal unavailable.", false, {}};
     } else {
         ArchiveEngine engine;
-        result = engine.extract(request->source, request->destination, id, cancellable);
-        if (!journal.finish(id, "ExtractArchive", result)) {
+        result = request->create
+            ? engine.create_zip(request->source, request->destination, id, cancellable)
+            : engine.extract(request->source, request->destination, id, cancellable);
+        if (!journal.finish(id, kind, result)) {
             result.status = OperationStatus::VerificationFailure;
             result.phase = OperationPhase::Verify;
             result.message += " The operation journal could not record completion.";
@@ -113,7 +119,7 @@ void ArchiveController::on_finished(GObject *, GAsyncResult *result, gpointer da
     if (self->status_ != nullptr) gtk_label_set_text(GTK_LABEL(self->status_), text.c_str());
     if ((error != nullptr || (operation != nullptr && !operation->ok())) &&
         self->window_ != nullptr) {
-        GtkAlertDialog *dialog = gtk_alert_dialog_new("Archive extraction incomplete");
+        GtkAlertDialog *dialog = gtk_alert_dialog_new("Archive operation incomplete");
         gtk_alert_dialog_set_detail(dialog, text.c_str());
         gtk_alert_dialog_show(dialog, self->window_);
         g_object_unref(dialog);
