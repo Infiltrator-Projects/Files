@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <memory>
 #include <sstream>
 
 namespace infiltrator::files {
@@ -145,6 +146,54 @@ void FileManagerWindow::append_bookmark(const std::string &uri, const std::strin
     g_object_set_data_full(G_OBJECT(row), "ifm-target", g_strdup(uri.c_str()), g_free);
     gtk_list_box_append(GTK_LIST_BOX(sidebar_), row);
     bookmarks_.push_back(BookmarkRow{uri, row, custom_label, name});
+    // A bookmark stores a reference, not an identity proof. A missing native
+    // target is distinguished from an inaccessible provider; neither causes
+    // silent retargeting or deletion from the durable user catalogue.
+    struct Probe {
+        GWeakRef row;
+        std::string label;
+        std::string uri;
+        Probe(GtkWidget *widget, const std::string &caption, const std::string &target)
+            : label(caption), uri(target)
+        { g_weak_ref_init(&row, G_OBJECT(widget)); }
+        ~Probe() { g_weak_ref_clear(&row); }
+    };
+    auto *probe = new Probe(row, !custom_label.empty()
+        ? custom_label : (label != nullptr ? label : uri.c_str()), uri);
+    if (g_file_is_native(file)) {
+        g_file_query_info_async(file, G_FILE_ATTRIBUTE_STANDARD_TYPE,
+            G_FILE_QUERY_INFO_NONE, G_PRIORITY_LOW, nullptr,
+            +[](GObject *source, GAsyncResult *result, gpointer data) {
+                std::unique_ptr<Probe> state(static_cast<Probe *>(data));
+                GError *error = nullptr;
+                GFileInfo *info = g_file_query_info_finish(G_FILE(source), result, &error);
+                GtkWidget *row = GTK_WIDGET(g_weak_ref_get(&state->row));
+                if (row != nullptr) {
+                    GtkWidget *content = gtk_list_box_row_get_child(GTK_LIST_BOX_ROW(row));
+                    GtkWidget *caption = content != nullptr
+                        ? gtk_widget_get_next_sibling(gtk_widget_get_first_child(content))
+                        : nullptr;
+                    if (GTK_IS_LABEL(caption)) {
+                        const bool missing = g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND);
+                        const bool unavailable = info == nullptr && !missing;
+                        const std::string display = (missing ? "Missing: " :
+                            unavailable ? "Unavailable: " : "") + state->label;
+                        gtk_label_set_text(GTK_LABEL(caption), display.c_str());
+                        gtk_widget_set_tooltip_text(row,
+                            missing ? "No file or folder exists at this saved URI." :
+                            unavailable ? "The saved URI could not be verified; it has not been retargeted." :
+                            state->uri.c_str());
+                    }
+                    g_object_unref(row);
+                }
+                g_clear_object(&info);
+                g_clear_error(&error);
+            }, probe);
+    } else {
+        gtk_widget_set_tooltip_text(row,
+            "Remote bookmark: availability has not been verified. Original URI preserved.");
+        delete probe;
+    }
     install_bookmark_drag(row);
     update_sidebar_current_state();
     g_free(label);
