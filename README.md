@@ -58,6 +58,9 @@ Product-level acceptance is defined in [`docs/PRODUCT-QUALITY.md`](docs/PRODUCT-
 
 ## Current implementation
 
+Files 0.1.66 delivers four further distinct original catalogue capabilities: date-created column sorting when provided by GIO, visible link/hidden/special identity cues, and a Show/Hide filename extensions preference. Rendered filenames are never mutation authority; full names remain available as tooltips and underlying GFileInfo names drive file actions. The release's audit at `docs/FEATURE-AUDIT-0.1.66.md` reconciles 15 distinct bounded-complete original requirements across 0.1.65–0.1.66, with four other partially implemented originals still open.
+
+
 Files 0.1.65 advances fifteen **separate original catalogue requirements**, not fifteen buttons. It introduces derived file tags and bulk tagging, tag search/export, persistent scoped saved searches and fail-closed private search exclusions, bounded duplicate lookup, UID and modified-range filtering, selected-folder search, external checksum verification, exact byte comparison, symlink health and provider metadata. Four original requirements remain **partial** rather than falsely declared complete; the per-line evidence and limitations are maintained in [the 0.1.65 audit](docs/FEATURE-AUDIT-0.1.65.md). No additional mutation engine, private filesystem parser or privileged service has been introduced.
 
 

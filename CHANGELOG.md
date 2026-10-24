@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.66 — 2026-10-24
+
+- Qualify four additional **original v0.1.61 catalogue requirements**: created-time sorting (line 165), hidden/special visual distinctions (181), optional filename-extension display (182), and symlink/shortcut identity markers (183).
+- Add a Common-formatted Date Created column with correct raw-GIO sorting and honest unknown values; show presentation-only visual identity cues across list, icon and compact views.
+- Add persisted Show/Hide filename extensions in View and layout, refresh realised labels in place and preserve full raw names for selection, rename, navigation and all mutations.
+- Harden right-click pointer selection to resolve only authoritative `GFileInfo::name`, never a shortened or decorated label; unit and GTK regressions enforce this distinction.
+- Together with the 11 bounded completions in 0.1.65, this advances **15 distinct original requirements**. The four partially delivered 0.1.65 requirements are not silently counted as complete; see `docs/FEATURE-AUDIT-0.1.66.md`.
+- The exact code passed 20 hosted CTest executables and package/native-installer qualification; live desktop visual qualification remains outstanding.
+
+
 ## 0.1.65 — 2026-10-24
 
 - Advance **15 distinct original Files feature-catalogue entries**, with traceability to the untouched v0.1.61 specification: 11 bounded complete and 4 honestly partial; see `docs/FEATURE-AUDIT-0.1.65.md`.

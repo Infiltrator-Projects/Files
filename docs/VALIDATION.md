@@ -2,6 +2,9 @@
 
 ## Qualification
 
+The 0.1.66 extension/identity/created-time tranche adds explicit `detail_metadata_test` contract checks for presence-aware raw creation sorting, missing timestamp behaviour, extension-preserving underlying names, symlink identity, hidden identity and special file type. `interaction_surface_test` drives real GTK action surfaces to toggle filename extensions, check updated command labels and ensure selection remains identical. Tested source passed 20/20 hosted CTest suites and native-installer/DEB qualification. Release, APT digest and physical Linux Mint visual acceptance are independently tracked.
+
+
 The 0.1.65 tranche adds `tag-catalogue` and `search-persistence` CTest executables (raising the hosted suite to 20), including malformed durable-state refusal and exact read-back checks. Search engine fixtures exercise duplicate SHA-256 grouping, UID filtering, modified intervals, per-query exclusions, tag-URI matching and symlink-cycle avoidance. Real GTK tests cover selected-root aggregation, named-search save/reload and expected checksum verification/mismatch including basename-bound sha256sum lines. Exact revision CI, native-install qualification and beta APT publication remain release gates; no headless test proves desktop aesthetic acceptance.
 
 

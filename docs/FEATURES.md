@@ -1,5 +1,8 @@
 # Files — Complete Feature Catalogue
 
+The 0.1.66 feature audit maps four further independently specified v0.1.61 entries to code and acceptance tests: created-time sorting (#165), hidden/special visual distinctions (#181), optional filename-extension display (#182), and symlink/shortcut identity (#183). Together with eleven bounded-complete originals in 0.1.65 this qualifies fifteen distinct catalogue entries; four additional partial entries stay open, as does confirmed broken-link visual status (#184). See `FEATURE-AUDIT-0.1.66.md` for one-to-one traceability and limitations.
+
+
 The 0.1.65 tranche is explicitly reconciled against fifteen distinct entries from the **original v0.1.61 catalogue**, not controls fabricated from one larger feature. See [0.1.65 catalogue audit](FEATURE-AUDIT-0.1.65.md): **11 bounded complete, 4 partial**. In particular, owner/tag and date-range filtering are not yet comprehensive collection metadata search; named saved searches do not yet provide automatically maintained smart collections; SHA-256 duplicate grouping has 8 MiB/500-candidate bounds; tag export has no import/reconciliation. New features also include selection-scoped search, exact byte-stream comparison, checked SHA-256 provenance text, symlink health, provider details and fail-closed private exclusions.
 
 
