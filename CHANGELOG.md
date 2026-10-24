@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.61 — 2026-10-24
+
+- Replace the unbounded right-click action catalogue with a bounded, compact, selection-aware GTK context menu, retaining the complete command surface in File actions.
+- Distinguish empty-directory creation from file selection; show file/folder actions only for applicable types, suppress Restore outside Trash, and remove empty sections and orphaned dividers.
+- Delegate Copy/Cut/Paste and all mutations to the existing qualified controllers; no separate file-operation implementation is introduced.
+- Add headless UI regression coverage for popup bounds, contextual creation/restore visibility and clipboard-action delegation. Real Linux Mint visual inspection remains required for final presentation qualification.
+
 ## 0.1.60 — 2026-10-23
 
 - Restore deterministic GitHub-hosted Ubuntu 24.04 release runners after organisation runner `BigBedroom-Linux-4` failed during `sudo apt-get update` with an interactive password request. Maintain the full dependency installation, installer execution, package integrity and publish checks rather than bypassing privileged operations.
