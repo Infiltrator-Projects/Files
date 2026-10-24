@@ -695,6 +695,25 @@ int main()
                 "Closing File actions must dismiss its popover");
 
         qualify_selection_actions(*window, popover);
+
+        GtkWidget *layout = find_expander(popover, "View and layout");
+        require(layout != nullptr, "View and layout menu is missing");
+        gtk_expander_set_expanded(GTK_EXPANDER(layout), TRUE);
+        while (g_main_context_iteration(nullptr, FALSE)) {}
+        GtkWidget *hide_extensions = find_button(popover, "Hide filename extensions");
+        require(hide_extensions != nullptr && window->show_extensions(),
+                "Default presentation must show real filename extensions");
+        auto *selection = infiltrator::files::FileManagerWindowTestAccess::selection(*window);
+        const auto before_selection = selected_count(selection);
+        g_signal_emit_by_name(hide_extensions, "clicked");
+        require(!window->show_extensions(), "Extension visibility command must apply");
+        require(selected_count(selection) == before_selection,
+                "Presentation choice may not change the authoritative selection");
+        GtkWidget *show_extensions = find_button(popover, "Show filename extensions");
+        require(show_extensions != nullptr, "Extension toggle must reflect current policy");
+        g_signal_emit_by_name(show_extensions, "clicked");
+        require(window->show_extensions(), "Visible file extensions must be restorable");
+
         qualify_recursive_search(*window, popover);
 
         bool finalized = false;
