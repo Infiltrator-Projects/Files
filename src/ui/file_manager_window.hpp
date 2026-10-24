@@ -88,6 +88,7 @@ private:
     void install_tab_drop();
     void display_active_tab();
     [[nodiscard]] bool save_session();
+    void schedule_session_checkpoint();
     void remove_tab(std::size_t index, bool remember_closed);
     [[nodiscard]] bool move_tab_to(FileManagerWindow &destination, std::uint64_t id);
 
@@ -231,6 +232,8 @@ private:
     GtkWidget *recent_popover_{nullptr};
     GtkWidget *empty_title_{nullptr};
     guint search_timeout_{0U};
+    guint session_checkpoint_timeout_{0U};
+    bool session_checkpoint_enabled_{false};
     std::vector<std::string> recent_locations_;
     std::vector<TabState> tabs_;
     std::vector<TabState> recently_closed_tabs_;

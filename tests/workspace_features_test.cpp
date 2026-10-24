@@ -18,6 +18,7 @@ struct FileManagerWindowTestAccess {
     static bool opening(FileManagerWindow &w) { return w.location_request_ != nullptr; }
     static std::size_t count(FileManagerWindow &w) { return w.tabs_.size(); }
     static std::size_t history(FileManagerWindow &w) { return w.history_.size(); }
+    static void checkpoint(FileManagerWindow &w) { w.schedule_session_checkpoint(); }
     static GtkMultiSelection *selection(FileManagerWindow &w) { return w.selection_; }
     static void icons(FileManagerWindow &w) { w.set_view_mode(FileManagerWindow::ViewMode::Icons); }
     static void choose_list(FileManagerWindow &w) {

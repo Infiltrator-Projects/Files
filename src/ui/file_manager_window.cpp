@@ -164,6 +164,27 @@ FileManagerWindow::FileManagerWindow(GtkApplication *application)
     GFile *root = g_file_new_for_path("/");
     navigate_to(root, true);
     g_object_unref(root);
+    // Initial session restore happens synchronously after window creation.
+    // Delay checkpoint activation until the first main-loop idle so startup's
+    // temporary root tab never replaces a valid prior browsing snapshot.
+    auto *weak = new GWeakRef;
+    g_weak_ref_init(weak, G_OBJECT(window_));
+    g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, +[](gpointer ptr) -> gboolean {
+        auto *ref = static_cast<GWeakRef *>(ptr);
+        GtkWindow *owner = GTK_WINDOW(g_weak_ref_get(ref));
+        auto *self = owner != nullptr ? static_cast<FileManagerWindow *>(
+            g_object_get_data(G_OBJECT(owner), "ifm-window-controller")) : nullptr;
+        if (self != nullptr && gtk_window_get_application(owner) != nullptr) {
+            self->session_checkpoint_enabled_ = true;
+            self->schedule_session_checkpoint();
+        }
+        g_clear_object(&owner);
+        return G_SOURCE_REMOVE;
+    }, weak, +[](gpointer ptr) {
+        auto *ref = static_cast<GWeakRef *>(ptr);
+        g_weak_ref_clear(ref);
+        delete ref;
+    });
 }
 
 FileManagerWindow::~FileManagerWindow()
@@ -172,6 +193,10 @@ FileManagerWindow::~FileManagerWindow()
     g_clear_object(&location_request_);
     // Stop external callbacks before any UI/model references owned by this object are released.
     if (search_timeout_ != 0U) g_source_remove(search_timeout_);
+    if (session_checkpoint_timeout_ != 0U) {
+        g_source_remove(session_checkpoint_timeout_);
+        session_checkpoint_timeout_ = 0U;
+    }
     mounted_places_monitor_.reset();
     thumbnails_.reset();
     if (temporal_policy_monitor_ != nullptr) {
@@ -1364,6 +1389,7 @@ void FileManagerWindow::navigate_to(GFile *file, const bool record_history)
     update_tab_buttons();
     update_bookmark_button();
     update_sidebar_current_state();
+    schedule_session_checkpoint();
 }
 
 void FileManagerWindow::navigate_history(const std::ptrdiff_t delta)
@@ -1763,6 +1789,7 @@ void FileManagerWindow::remember_tab()
         }
     }
     gtk_bitset_unref(bitset);
+    schedule_session_checkpoint();
 }
 
 void FileManagerWindow::restore_tab_selection()
@@ -2513,6 +2540,7 @@ void FileManagerWindow::on_multi_selection_changed(GtkSelectionModel *model,
     (void)n_items;
     auto *self = static_cast<FileManagerWindow *>(user_data);
     self->sync_primary_from_multi();
+    self->schedule_session_checkpoint();
     if (self->current_location_available_ && self->directory_list_ != nullptr &&
         !gtk_directory_list_is_loading(self->directory_list_) &&
         gtk_directory_list_get_error(self->directory_list_) == nullptr) {

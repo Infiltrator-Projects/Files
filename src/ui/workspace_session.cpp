@@ -25,6 +25,38 @@ bool integer(GKeyFile *keys, const char *group, const char *name, int min, int m
 }
 }
 
+void FileManagerWindow::schedule_session_checkpoint()
+{
+    if (!session_checkpoint_enabled_ || native_window() == nullptr ||
+        gtk_window_get_application(native_window()) == nullptr)
+        return;
+    if (session_checkpoint_timeout_ != 0U) {
+        g_source_remove(session_checkpoint_timeout_);
+        session_checkpoint_timeout_ = 0U;
+    }
+    // Bounded, browsing-only snapshot: the existing strict v1 serializer
+    // never captures pending file operations or promotes journal entries.
+    auto *weak = new GWeakRef;
+    g_weak_ref_init(weak, G_OBJECT(native_window()));
+    session_checkpoint_timeout_ = g_timeout_add_seconds_full(
+        G_PRIORITY_DEFAULT_IDLE, 2, +[](gpointer ptr) -> gboolean {
+            auto *ref = static_cast<GWeakRef *>(ptr);
+            GtkWindow *window = GTK_WINDOW(g_weak_ref_get(ref));
+            auto *self = window != nullptr ? static_cast<FileManagerWindow *>(
+                g_object_get_data(G_OBJECT(window), "ifm-window-controller")) : nullptr;
+            if (self != nullptr && gtk_window_get_application(window) != nullptr) {
+                self->session_checkpoint_timeout_ = 0U;
+                (void)self->save_session();
+            }
+            g_clear_object(&window);
+            return G_SOURCE_REMOVE;
+        }, weak, +[](gpointer ptr) {
+            auto *ref = static_cast<GWeakRef *>(ptr);
+            g_weak_ref_clear(ref);
+            delete ref;
+        });
+}
+
 bool FileManagerWindow::save_session()
 {
     if (tabs_.empty() || tabs_.size() > 128U || active_tab_ >= tabs_.size()) return false;
