@@ -157,6 +157,8 @@ int main()
         const auto a = root / "a", b = root / "b";
         fs::create_directories(a / "child"); fs::create_directories(b);
         std::ofstream(a / "file with spaces.txt") << "payload";
+        std::ofstream(b / "reverse-one.txt") << "from secondary one";
+        std::ofstream(b / "reverse-two.txt") << "from secondary two";
         std::ofstream(a / ".hidden") << "hidden";
         const auto profile = root / "config" / "infiltrator" / "files";
         fs::create_directories(profile);
@@ -212,6 +214,49 @@ int main()
         require(g_file_equal(pane->secondary_location(), secondary_target) &&
                 at(*source, a), "Second-pane navigation must not retarget the first pane");
         g_object_unref(secondary_target);
+        GtkWidget *pane_host = GTK_WIDGET(g_object_get_data(
+            G_OBJECT(source->native_window()), "ifm-secondary-pane-host"));
+        require(pane_host != nullptr, "Second pane host must remain discoverable");
+        GtkWidget *pane_list = find(pane_host, [](GtkWidget *widget) {
+            return GTK_IS_LIST_VIEW(widget);
+        });
+        require(pane_list != nullptr &&
+                GTK_IS_MULTI_SELECTION(gtk_list_view_get_model(GTK_LIST_VIEW(pane_list))),
+                "Second pane must support real multi-selection");
+        auto *pane_selection = GTK_MULTI_SELECTION(
+            gtk_list_view_get_model(GTK_LIST_VIEW(pane_list)));
+        await([&] { return g_list_model_get_n_items(
+            gtk_multi_selection_get_model(pane_selection)) >= 2U; });
+        GtkWidget *up_in_pane = find(pane_host, [](GtkWidget *widget) {
+            return GTK_IS_BUTTON(widget) && g_strcmp0(
+                gtk_widget_get_tooltip_text(widget), "Second pane: Parent") == 0;
+        });
+        GtkWidget *back_in_pane = find(pane_host, [](GtkWidget *widget) {
+            return GTK_IS_BUTTON(widget) && g_strcmp0(
+                gtk_widget_get_tooltip_text(widget), "Second pane: Back") == 0;
+        });
+        GtkWidget *forward_in_pane = find(pane_host, [](GtkWidget *widget) {
+            return GTK_IS_BUTTON(widget) && g_strcmp0(
+                gtk_widget_get_tooltip_text(widget), "Second pane: Forward") == 0;
+        });
+        require(up_in_pane && back_in_pane && forward_in_pane,
+                "Second pane must expose independent parent/back/forward navigation");
+        g_signal_emit_by_name(up_in_pane, "clicked");
+        GFile *root_file = g_file_new_for_path(root.c_str());
+        require(g_file_equal(pane->secondary_location(), root_file) &&
+                at(*source, a), "Parent navigation must affect only the second pane");
+        g_object_unref(root_file);
+        g_signal_emit_by_name(back_in_pane, "clicked");
+        secondary_target = g_file_new_for_path(b.c_str());
+        require(g_file_equal(pane->secondary_location(), secondary_target),
+                "Second-pane back must restore its earlier location");
+        g_signal_emit_by_name(forward_in_pane, "clicked");
+        g_signal_emit_by_name(back_in_pane, "clicked");
+        require(g_file_equal(pane->secondary_location(), secondary_target),
+                "Second-pane forward must not corrupt back history");
+        g_object_unref(secondary_target);
+        await([&] { return !gtk_directory_list_is_loading(
+            GTK_DIRECTORY_LIST(gtk_multi_selection_get_model(pane_selection))); });
         // Exercise the actual user-facing cross-pane action, not just the
         // second GTK directory model. It must delegate to the shared batch
         // transfer machinery and leave the source untouched for Copy.
@@ -239,6 +284,26 @@ int main()
         require(fs::exists(a / "file with spaces.txt") &&
                 fs::file_size(b / "file with spaces.txt") == fs::file_size(a / "file with spaces.txt"),
                 "Cross-pane Copy must preserve the original and publish its contents");
+        GtkWidget *select_all_in_pane = find(pane_host, [](GtkWidget *widget) {
+            return GTK_IS_BUTTON(widget) &&
+                g_strcmp0(gtk_button_get_label(GTK_BUTTON(widget)), "Select all") == 0;
+        });
+        GtkWidget *copy_left = find(pane_host, [](GtkWidget *widget) {
+            return GTK_IS_BUTTON(widget) &&
+                g_strcmp0(gtk_button_get_label(GTK_BUTTON(widget)), "← Copy") == 0;
+        });
+        require(select_all_in_pane && copy_left,
+                "Second pane must expose multi-item reverse transfer controls");
+        await([&] { return g_list_model_get_n_items(
+            gtk_multi_selection_get_model(pane_selection)) >= 2U; });
+        g_signal_emit_by_name(select_all_in_pane, "clicked");
+        require(gtk_selection_model_get_selection(GTK_SELECTION_MODEL(pane_selection)) != nullptr,
+                "Second-pane Select All must apply to the GTK selection model");
+        g_signal_emit_by_name(copy_left, "clicked");
+        await([&] { return fs::exists(a / "reverse-one.txt") &&
+                          fs::exists(a / "reverse-two.txt"); });
+        require(fs::exists(b / "reverse-one.txt") && fs::exists(b / "reverse-two.txt"),
+                "Reverse multi-item Copy must preserve both originals");
         pane->toggle();
         require(!pane->visible() && pane->secondary_location() == nullptr,
                 "Collapsing secondary pane must relinquish its enumeration location");
