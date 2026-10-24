@@ -410,6 +410,8 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
                 ActionScope::Always, proxies);
     add_command(box, "Select same file type", "select-type",
                 ActionScope::SingleSelection, proxies);
+    add_command(box, "Pin selected file", "pin-selected",
+                ActionScope::SingleSelection, proxies);
     *properties_button = create_action_button(
         box, "Properties", nullptr, ActionScope::SingleSelection, proxies,
         G_CALLBACK(&InteractionController::on_properties_clicked));
@@ -723,6 +725,8 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
         self->show_selection_pattern_dialog();
     else if (g_strcmp0(command, "select-type") == 0)
         self->select_same_type();
+    else if (g_strcmp0(command, "pin-selected") == 0)
+        window->toggle_bookmark_for_selected();
     else if (g_strcmp0(command, "inspect") == 0)
         self->inspect_primary();
     else if (g_strcmp0(command, "tag-selected") == 0)
