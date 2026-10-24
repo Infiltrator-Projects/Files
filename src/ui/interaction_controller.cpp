@@ -3,6 +3,7 @@
 
 #include "detail_metadata.hpp"
 #include "file_inspection.hpp"
+#include "recursive_search.hpp"
 #include "file_manager_window.hpp"
 
 #include <algorithm>
@@ -399,6 +400,8 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
     add_command(box, "Copy selected URIs as text", "copy-selected-uris",
                 ActionScope::MultiSelection, proxies);
     add_separator(box);
+    add_command(box, "Search in subfolders…", "recursive-search",
+                ActionScope::Always, proxies);
     add_command(box, "Select by filename pattern…", "select-pattern",
                 ActionScope::Always, proxies);
     add_command(box, "Select same file type", "select-type",
@@ -664,6 +667,10 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
     else if (g_strcmp0(command, "toggle-sidebar") == 0) window->toggle_sidebar();
     else if (g_strcmp0(command, "selected-tabs") == 0)
         (void)window->open_selected_folders_in_tabs();
+    else if (g_strcmp0(command, "recursive-search") == 0) {
+        GFile *location = gtk_directory_list_get_file(self->directory_list_);
+        if (location != nullptr) show_recursive_search(self->window_, location);
+    }
     else if (g_strcmp0(command, "select-pattern") == 0)
         self->show_selection_pattern_dialog();
     else if (g_strcmp0(command, "select-type") == 0)

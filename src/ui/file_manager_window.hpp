@@ -30,6 +30,8 @@ public:
     void present();
     // Resolve asynchronously: open folders, or reveal a file in its parent.
     void open_location(GFile *file);
+    // Navigate to the result's containing folder and select the original name.
+    void reveal_search_result(GFile *file);
     [[nodiscard]] bool restore_previous_session();
     void install_operation_surface();
     [[nodiscard]] bool open_primary_directory_in_new_tab();
@@ -52,6 +54,7 @@ public:
     [[nodiscard]] GtkWindow *native_window() const noexcept { return GTK_WINDOW(window_); }
 
 private:
+    void open_location_impl(GFile *file, bool reveal);
     friend struct FileManagerWindowTestAccess;
     enum class ViewMode {
         List,

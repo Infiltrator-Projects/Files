@@ -100,6 +100,7 @@ add_library(infiltrator-files-core STATIC
     src/core/operation_engine.cpp
     src/core/operation_journal.cpp
     src/core/recovery_operation_engine.cpp
+    src/core/search_engine.cpp
     src/core/transfer_operation_engine.cpp)
 target_include_directories(infiltrator-files-core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/core")
@@ -127,6 +128,7 @@ add_library(infiltrator-files-ui STATIC
     src/ui/location_open.cpp
     src/ui/operation_surface_install.cpp
     src/ui/presentation_store.cpp
+    src/ui/recursive_search.cpp
     src/ui/theme_controller.cpp
     src/ui/transfer_progress_view.cpp
     src/ui/workspace_tabs.cpp
