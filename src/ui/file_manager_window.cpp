@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "file_manager_window.hpp"
+#include "search_persistence.hpp"
 #include "detail_metadata.hpp"
 #include "item_operation_controller.hpp"
 #include "theme_controller.hpp"
@@ -679,10 +680,12 @@ void FileManagerWindow::load_recents()
                                   "recent-locations", nullptr);
     char *content = nullptr;
     gsize length = 0;
-    if (g_file_get_contents(path, &content, &length, nullptr) && length <= 32U * 1024U) {
+    const SearchPrivacy privacy = load_search_privacy();
+    if (privacy.valid && g_file_get_contents(path, &content, &length, nullptr) &&
+        length <= 32U * 1024U) {
         gchar **lines = g_strsplit(content, "\n", 0);
         for (gchar **line = lines; *line != nullptr && recent_locations_.size() < 20U; ++line) {
-            if (**line == '\0') continue;
+            if (**line == '\0' || !privacy_allows_recent_uri(privacy, *line)) continue;
             GFile *file = g_file_new_for_uri(*line);
             if (g_file_is_native(file)) {
                 char *native = g_file_get_path(file);
@@ -722,7 +725,9 @@ void FileManagerWindow::record_recent(GFile *file)
     char *path = g_file_get_path(file);
     char *uri = g_file_get_uri(file);
     const char *home = g_get_home_dir();
-    if (path != nullptr && uri != nullptr && g_str_has_prefix(path, home) &&
+    const SearchPrivacy privacy = load_search_privacy();
+    if (path != nullptr && uri != nullptr && privacy_allows_recent_uri(privacy, uri) &&
+        g_str_has_prefix(path, home) &&
         path[strlen(home)] == '/' &&
         path[strlen(home) + 1] != '.' &&
         std::string(path + strlen(home) + 1).find("/.") == std::string::npos) {
@@ -741,7 +746,11 @@ void FileManagerWindow::rebuild_recent_menu()
 {
     if (recent_popover_ == nullptr) return;
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+    const SearchPrivacy privacy = load_search_privacy();
+    guint rendered = 0U;
     for (const auto &uri : recent_locations_) {
+        if (!privacy_allows_recent_uri(privacy, uri)) continue;
+        ++rendered;
         GFile *file = g_file_new_for_uri(uri.c_str());
         char *name = g_file_get_parse_name(file);
         GtkWidget *button = gtk_button_new_with_label(name != nullptr ? name : uri.c_str());
@@ -753,10 +762,11 @@ void FileManagerWindow::rebuild_recent_menu()
         g_free(name);
         g_object_unref(file);
     }
-    if (recent_locations_.empty())
-        gtk_box_append(GTK_BOX(box), gtk_label_new("No recent folders"));
+    if (rendered == 0U)
+        gtk_box_append(GTK_BOX(box), gtk_label_new(privacy.valid
+            ? "No recent folders" : "Recent locations unavailable: privacy settings are invalid"));
     GtkWidget *clear = gtk_button_new_with_label("Clear recent locations");
-    gtk_widget_set_sensitive(clear, !recent_locations_.empty());
+    gtk_widget_set_sensitive(clear, !recent_locations_.empty() && privacy.valid);
     g_signal_connect(clear, "clicked", G_CALLBACK(on_recent_clear), this);
     gtk_box_append(GTK_BOX(box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
     gtk_box_append(GTK_BOX(box), clear);

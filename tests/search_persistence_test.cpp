@@ -31,6 +31,11 @@ int main()
         auto privacy = load_search_privacy();
         require(privacy.valid && privacy.excluded_uris.size() == 2,
                 "Two distinct URI exclusions must round-trip");
+        require(!privacy_allows_recent_uri(privacy, "file:///tmp/private/a") &&
+                !privacy_allows_recent_uri(privacy, "file:///tmp/private/a/subfolder") &&
+                privacy_allows_recent_uri(privacy, "file:///tmp/private/ab") &&
+                privacy_allows_recent_uri(privacy, "file:///tmp/public"),
+                "Activity history must use real URI ancestry, never a raw string prefix");
         require(!save_search_privacy({"relative/path"}, error),
                 "Relative/invalid exclusions must be rejected");
         require(load_search_privacy().excluded_uris.size() == 2,
@@ -99,6 +104,8 @@ int main()
                     presentation_store::ReadStatus::Loaded,
                 "Cannot read privacy corruption fixture");
         require(!load_search_privacy().valid, "Invalid privacy file must be detected");
+        require(!privacy_allows_recent_uri(load_search_privacy(), "file:///tmp/public"),
+                "Unreadable privacy state must stop all recent-location tracking");
         require(!save_search_privacy({}, error),
                 "Unparseable privacy state must not be silently cleared");
         require(presentation_store::read("search-private.ini", recovered, error) ==

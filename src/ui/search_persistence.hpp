@@ -29,6 +29,7 @@ struct SearchPrivacy {
 SavedSearchList load_saved_searches();
 bool save_saved_searches(const SavedSearchList &state, std::string &error);
 SearchPrivacy load_search_privacy();
+bool privacy_allows_recent_uri(const SearchPrivacy &privacy, const std::string &uri);
 bool save_search_privacy(const std::vector<std::string> &uris, std::string &error);
 
 } // namespace infiltrator::files

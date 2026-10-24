@@ -269,6 +269,24 @@ SearchPrivacy load_search_privacy()
     return state;
 }
 
+// Activity tracking shares the search privacy authority. Invalid privacy
+// state excludes *every* object: no private path can enter Recent on error.
+bool privacy_allows_recent_uri(const SearchPrivacy &privacy, const std::string &uri)
+{
+    if (!privacy.valid || uri.empty()) return false;
+    GFile *candidate = g_file_new_for_uri(uri.c_str());
+    bool allowed = true;
+    for (const std::string &excluded : privacy.excluded_uris) {
+        GFile *root = g_file_new_for_uri(excluded.c_str());
+        if (g_file_equal(candidate, root) || g_file_has_prefix(candidate, root))
+            allowed = false;
+        g_object_unref(root);
+        if (!allowed) break;
+    }
+    g_object_unref(candidate);
+    return allowed;
+}
+
 bool save_search_privacy(const std::vector<std::string> &uris, std::string &error)
 {
     // Fail closed rather than replacing a malformed exclusion file and
