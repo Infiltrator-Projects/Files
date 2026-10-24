@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <string>
 #include <utility>
@@ -62,6 +63,82 @@ bool path_present(const std::filesystem::path &path, std::error_code &error)
 
 } // namespace
 
+
+
+OperationResult OperationEngine::change_permissions(
+    const std::filesystem::path &source, const unsigned int permissions) const
+{
+    if (!source.is_absolute() || source.empty() || permissions > 0777U) {
+        return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight,
+                       source, "Permissions require an absolute native path and a mode from 0000 to 0777.");
+    }
+
+    // A pathname-only chmod can modify a different inode after the preflight
+    // lookup. Keep the selected inode open for both the mutation and its
+    // durability/verification barrier; never follow the final symlink.
+    const int fd = ::open(source.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    if (fd < 0) {
+        const std::error_code error(errno, std::generic_category());
+        return failure(status_for_error(error), OperationPhase::Preflight, source,
+                       "Could not open the selected item without following symlinks: " +
+                           error.message());
+    }
+    const auto close_fd = [fd]() { return ::close(fd); };
+    struct stat before {};
+    if (::fstat(fd, &before) != 0) {
+        const std::error_code error(errno, std::generic_category());
+        (void)close_fd();
+        return failure(status_for_error(error), OperationPhase::Preflight, source,
+                       "Could not identify the selected item: " + error.message());
+    }
+    if (!S_ISREG(before.st_mode) && !S_ISDIR(before.st_mode)) {
+        (void)close_fd();
+        return failure(OperationStatus::UnsupportedCapability, OperationPhase::Preflight,
+                       source, "Permission editing is supported only for native regular files and directories.");
+    }
+    if ((before.st_mode & 07000) != 0) {
+        (void)close_fd();
+        return failure(OperationStatus::UnsupportedCapability, OperationPhase::Preflight,
+                       source, "Special setuid/setgid/sticky bits require an explicit specialised editor.");
+    }
+    if ((static_cast<unsigned int>(before.st_mode) & 0777U) == permissions) {
+        (void)close_fd();
+        return OperationResult{OperationStatus::Success, OperationPhase::Complete,
+                               source, "Permissions were already set to the requested mode.", false, {}};
+    }
+
+    if (::fchmod(fd, static_cast<mode_t>(permissions)) != 0) {
+        const std::error_code error(errno, std::generic_category());
+        (void)close_fd();
+        return failure(status_for_error(error), OperationPhase::Execute, source,
+                       "Could not change the selected item's permissions: " + error.message());
+    }
+    // After fchmod the object may have changed. A failed barrier is never
+    // reported as success or rolled back against an independently changed inode.
+    if (::fsync(fd) != 0) {
+        const std::error_code error(errno, std::generic_category());
+        (void)close_fd();
+        return failure(OperationStatus::VerificationFailure, OperationPhase::Verify, source,
+                       "Permissions changed, but metadata durability failed: " + error.message(),
+                       true);
+    }
+    struct stat after {};
+    if (::fstat(fd, &after) != 0 ||
+        (static_cast<unsigned int>(after.st_mode) & 0777U) != permissions ||
+        after.st_dev != before.st_dev || after.st_ino != before.st_ino) {
+        (void)close_fd();
+        return failure(OperationStatus::VerificationFailure, OperationPhase::Verify, source,
+                       "Permissions changed but could not be verified on the original inode.", true);
+    }
+    if (close_fd() != 0) {
+        const std::error_code error(errno, std::generic_category());
+        return failure(OperationStatus::VerificationFailure, OperationPhase::Verify, source,
+                       "Permissions changed, but closing the descriptor failed: " + error.message(),
+                       true);
+    }
+    return OperationResult{OperationStatus::Success, OperationPhase::Complete, source,
+                           "Updated permissions on “" + source.filename().string() + "”.", true, {}};
+}
 
 OperationResult OperationEngine::create_empty_file(const std::filesystem::path &parent,
                                                     const std::string_view name) const

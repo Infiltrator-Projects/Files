@@ -76,6 +76,36 @@ int main()
         return 91;
     }
 
+    // Permission changes must be descriptor-bound, refuse symlink targets and
+    // reject attempts to silently erase privileged/special mode bits.
+    const fs::path permission_target = root / "mode-test.txt";
+    if (!write_text(permission_target, "mode fixture") ||
+        ::chmod(permission_target.c_str(), 0644) != 0) {
+        fs::remove_all(root, cleanup_error);
+        return 110;
+    }
+    const auto changed_mode = engine.change_permissions(permission_target, 0600U);
+    struct stat mode_check {};
+    if (!changed_mode.ok() || !changed_mode.changed ||
+        ::stat(permission_target.c_str(), &mode_check) != 0 ||
+        (mode_check.st_mode & 0777) != 0600) {
+        fs::remove_all(root, cleanup_error);
+        return 111;
+    }
+    const auto same_mode = engine.change_permissions(permission_target, 0600U);
+    const auto invalid_mode = engine.change_permissions(permission_target, 01000U);
+    const fs::path permission_link = root / "mode-link";
+    fs::create_symlink(permission_target, permission_link);
+    const auto link_mode = engine.change_permissions(permission_link, 0644U);
+    if (!same_mode.ok() || same_mode.changed ||
+        invalid_mode.status != OperationStatus::InvalidRequest || invalid_mode.changed ||
+        link_mode.ok() || link_mode.changed ||
+        ::stat(permission_target.c_str(), &mode_check) != 0 ||
+        (mode_check.st_mode & 0777) != 0600) {
+        fs::remove_all(root, cleanup_error);
+        return 112;
+    }
+
     // New File must be no-replace, empty, and never damage an existing item.
     const auto new_file = engine.create_empty_file(root, "blank.txt");
     if (!new_file.ok() || !new_file.changed ||

@@ -45,6 +45,10 @@ public:
                                                    std::string_view name) const;
     [[nodiscard]] OperationResult create_empty_file(const std::filesystem::path &parent,
                                                     std::string_view name) const;
+    // Linux-native mode changes are descriptor-bound and never follow the final
+    // component through a symlink. The UI/journal owns operation admission.
+    [[nodiscard]] OperationResult change_permissions(const std::filesystem::path &source,
+                                                      unsigned int permissions) const;
     [[nodiscard]] OperationResult rename_item(const std::filesystem::path &source,
                                               std::string_view new_name) const;
     [[nodiscard]] OperationResult copy_item(const std::filesystem::path &source,
