@@ -1,0 +1,568 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#include "file_inspection.hpp"
+
+#include <gdk-pixbuf/gdk-pixbuf.h>
+#include <gio/gio.h>
+
+#include <array>
+#include <cerrno>
+#include <cstdint>
+#include <cstring>
+#include <string>
+#include <utility>
+#include <vector>
+
+#ifdef __linux__
+#include <sys/xattr.h>
+#endif
+
+namespace infiltrator::files {
+namespace {
+
+enum class InspectionKind { Details, FolderSize, Sha256, Compare };
+
+struct Work {
+    InspectionKind kind;
+    GFile *first;
+    GFile *second;
+    Work(InspectionKind value, GFile *a, GFile *b = nullptr)
+        : kind(value), first(G_FILE(g_object_ref(a))),
+          second(b != nullptr ? G_FILE(g_object_ref(b)) : nullptr) {}
+    ~Work() {
+        g_object_unref(first);
+        if (second != nullptr) g_object_unref(second);
+    }
+};
+
+struct DialogState {
+    GFile *file{nullptr};
+    GtkWidget *view{nullptr};
+    GtkWidget *details{nullptr};
+    GtkWidget *folder{nullptr};
+    GtkWidget *hash{nullptr};
+    GtkWidget *cancel{nullptr};
+    GCancellable *active{nullptr};
+    bool busy{false};
+    ~DialogState() {
+        if (active != nullptr) {
+            g_cancellable_cancel(active);
+            g_object_unref(active);
+        }
+        if (file != nullptr) g_object_unref(file);
+    }
+};
+
+std::string display(GFile *file)
+{
+    char *value = g_file_get_parse_name(file);
+    std::string result = value != nullptr ? value : "(unavailable)";
+    g_free(value);
+    return result;
+}
+
+std::string size_text(guint64 bytes)
+{
+    char *text = g_format_size(bytes);
+    std::string result = text != nullptr ? text : "Unknown";
+    g_free(text);
+    return result;
+}
+
+void append_line(std::string &out, const char *label, const std::string &value)
+{
+    out += label;
+    out += ": ";
+    out += value;
+    out += '\n';
+}
+
+void append_time(std::string &out, GFileInfo *info, const char *attribute,
+                 const char *label)
+{
+    if (!g_file_info_has_attribute(info, attribute)) return;
+    const guint64 seconds = g_file_info_get_attribute_uint64(info, attribute);
+    if (seconds > static_cast<guint64>(G_MAXINT64)) return;
+    GDateTime *time = g_date_time_new_from_unix_local(static_cast<gint64>(seconds));
+    if (time == nullptr) return;
+    char *formatted = g_date_time_format(time, "%Y-%m-%d %H:%M:%S %Z");
+    if (formatted != nullptr) append_line(out, label, formatted);
+    g_free(formatted);
+    g_date_time_unref(time);
+}
+
+std::string file_metadata(GFile *file, GCancellable *cancel, GError **error)
+{
+    constexpr const char *attributes =
+        "standard::name,standard::display-name,standard::type,standard::size,"
+        "standard::content-type,standard::is-symlink,standard::symlink-target,"
+        "time::modified,time::created,time::access,unix::uid,unix::gid,"
+        "unix::mode,unix::blocks,owner::user,owner::group";
+    GFileInfo *info = g_file_query_info(
+        file, attributes, G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, cancel, error);
+    if (info == nullptr) return {};
+
+    std::string report;
+    append_line(report, "Location", display(file));
+    const char *shown = g_file_info_get_display_name(info);
+    if (shown != nullptr) append_line(report, "Name", shown);
+    const char *type = g_file_info_get_content_type(info);
+    if (type != nullptr) append_line(report, "Content type", type);
+    const GFileType kind = g_file_info_get_file_type(info);
+    append_line(report, "Kind", kind == G_FILE_TYPE_DIRECTORY ? "Directory" :
+                kind == G_FILE_TYPE_REGULAR ? "Regular file" :
+                kind == G_FILE_TYPE_SYMBOLIC_LINK ? "Symbolic link" : "Other");
+    append_line(report, "Logical size", size_text(g_file_info_get_size(info)));
+    if (g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_UNIX_BLOCKS)) {
+        const guint64 blocks = g_file_info_get_attribute_uint64(info, G_FILE_ATTRIBUTE_UNIX_BLOCKS);
+        if (blocks <= G_MAXUINT64 / 512U)
+            append_line(report, "Allocated size", size_text(blocks * 512U));
+    }
+    append_time(report, info, G_FILE_ATTRIBUTE_TIME_MODIFIED, "Modified");
+    append_time(report, info, G_FILE_ATTRIBUTE_TIME_CREATED, "Created");
+    append_time(report, info, G_FILE_ATTRIBUTE_TIME_ACCESS, "Accessed");
+    if (g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_UNIX_MODE)) {
+        const guint32 mode = g_file_info_get_attribute_uint32(info, G_FILE_ATTRIBUTE_UNIX_MODE);
+        char *formatted = g_strdup_printf("%04o", mode & 07777U);
+        append_line(report, "Permissions", formatted != nullptr ? formatted : "Unknown");
+        g_free(formatted);
+    }
+    const char *owner = g_file_info_get_attribute_string(info, G_FILE_ATTRIBUTE_OWNER_USER);
+    const char *group = g_file_info_get_attribute_string(info, G_FILE_ATTRIBUTE_OWNER_GROUP);
+    if (owner != nullptr) append_line(report, "Owner", owner);
+    if (group != nullptr) append_line(report, "Group", group);
+    if (g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_UNIX_UID))
+        append_line(report, "Owner ID", std::to_string(
+            g_file_info_get_attribute_uint32(info, G_FILE_ATTRIBUTE_UNIX_UID)));
+    if (g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_UNIX_GID))
+        append_line(report, "Group ID", std::to_string(
+            g_file_info_get_attribute_uint32(info, G_FILE_ATTRIBUTE_UNIX_GID)));
+    if (g_file_info_get_is_symlink(info)) {
+        const char *target = g_file_info_get_symlink_target(info);
+        append_line(report, "Link target", target != nullptr ? target : "Unavailable");
+    }
+    g_object_unref(info);
+
+    // GIO providers may not expose filesystem metadata. Absence is not zero.
+    GError *fs_error = nullptr;
+    GFileInfo *fs = g_file_query_filesystem_info(
+        file, "filesystem::size,filesystem::free,filesystem::readonly",
+        cancel, &fs_error);
+    if (fs != nullptr) {
+        if (g_file_info_has_attribute(fs, G_FILE_ATTRIBUTE_FILESYSTEM_SIZE))
+            append_line(report, "Volume capacity", size_text(
+                g_file_info_get_attribute_uint64(fs, G_FILE_ATTRIBUTE_FILESYSTEM_SIZE)));
+        if (g_file_info_has_attribute(fs, G_FILE_ATTRIBUTE_FILESYSTEM_FREE))
+            append_line(report, "Volume free", size_text(
+                g_file_info_get_attribute_uint64(fs, G_FILE_ATTRIBUTE_FILESYSTEM_FREE)));
+        if (g_file_info_has_attribute(fs, G_FILE_ATTRIBUTE_FILESYSTEM_READONLY))
+            append_line(report, "Volume read-only",
+                g_file_info_get_attribute_boolean(fs, G_FILE_ATTRIBUTE_FILESYSTEM_READONLY)
+                    ? "Yes" : "No");
+        g_object_unref(fs);
+    }
+    g_clear_error(&fs_error);
+    if (g_cancellable_set_error_if_cancelled(cancel, error)) return {};
+
+    char *path = g_file_get_path(file);
+    if (path != nullptr) {
+        int width = 0, height = 0;
+        if (gdk_pixbuf_get_file_info(path, &width, &height) != nullptr &&
+            width > 0 && height > 0)
+            append_line(report, "Image dimensions",
+                        std::to_string(width) + " × " + std::to_string(height));
+#ifdef __linux__
+        // llistxattr never follows the selected final symlink. Bound both the
+        // kernel-returned byte count and rendered list; attributes are data,
+        // not commands or promises of filesystem integrity.
+        errno = 0;
+        const ssize_t length = llistxattr(path, nullptr, 0);
+        if (length >= 0 && length <= 65536) {
+            std::vector<char> names(static_cast<std::size_t>(length));
+            const ssize_t read = length > 0 ? llistxattr(path, names.data(), names.size()) : 0;
+            if (read >= 0 && read <= length) {
+                std::size_t count = 0;
+                bool acl = false;
+                for (std::size_t i = 0; i < static_cast<std::size_t>(read);) {
+                    const std::size_t start = i;
+                    while (i < static_cast<std::size_t>(read) && names[i] != '\0') ++i;
+                    if (i == static_cast<std::size_t>(read)) break;
+                    const std::string name(names.data() + start, i - start);
+                    if (name == "system.posix_acl_access") acl = true;
+                    if (count < 32) append_line(report, "Extended attribute", name);
+                    ++count;
+                    ++i;
+                }
+                append_line(report, "Extended attribute count", std::to_string(count));
+                append_line(report, "POSIX access ACL", acl ? "Extended ACL present" :
+                            "No extended access ACL listed");
+                if (count > 32) report += "Further attribute names omitted.\n";
+            }
+        } else if (length > 65536) {
+            report += "Extended attributes: list exceeds 64 KiB limit.\n";
+        }
+#endif
+        g_free(path);
+    }
+    return report;
+}
+
+std::string checksum(GFile *file, GCancellable *cancel, GError **error)
+{
+    GFileInputStream *stream = g_file_read(file, cancel, error);
+    if (stream == nullptr) return {};
+    GChecksum *hash = g_checksum_new(G_CHECKSUM_SHA256);
+    std::array<char, 131072> buffer{};
+    while (true) {
+        const gssize n = g_input_stream_read(
+            G_INPUT_STREAM(stream), buffer.data(), buffer.size(), cancel, error);
+        if (n < 0) break;
+        if (n == 0) break;
+        g_checksum_update(hash, reinterpret_cast<const guchar *>(buffer.data()),
+                          static_cast<gsize>(n));
+    }
+    const std::string value = *error == nullptr ? g_checksum_get_string(hash) : "";
+    g_checksum_free(hash);
+    g_input_stream_close(G_INPUT_STREAM(stream), nullptr, nullptr);
+    g_object_unref(stream);
+    return value;
+}
+
+std::string folder_size(GFile *root, GCancellable *cancel, GError **error)
+{
+    struct Frame { GFile *file; GFileEnumerator *enumerator; };
+    std::vector<Frame> stack;
+    guint64 logical = 0, allocated = 0, items = 0, folders = 0;
+    constexpr guint64 limit = 250000;
+    const char *attributes =
+        "standard::name,standard::type,standard::size,unix::blocks,unix::device";
+    GFileInfo *root_info = g_file_query_info(
+        root, attributes, G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, cancel, error);
+    if (root_info == nullptr) return {};
+    const bool has_device = g_file_info_has_attribute(root_info, G_FILE_ATTRIBUTE_UNIX_DEVICE);
+    const guint32 device = has_device ?
+        g_file_info_get_attribute_uint32(root_info, G_FILE_ATTRIBUTE_UNIX_DEVICE) : 0U;
+    g_object_unref(root_info);
+    auto push_directory = [&](GFile *folder) {
+        GFileEnumerator *e = g_file_enumerate_children(
+            folder, attributes, G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, cancel, error);
+        if (e == nullptr) return false;
+        stack.push_back(Frame{G_FILE(g_object_ref(folder)), e});
+        return true;
+    };
+    if (!push_directory(root)) return {};
+    while (!stack.empty() && *error == nullptr) {
+        if (g_cancellable_set_error_if_cancelled(cancel, error)) break;
+        Frame &frame = stack.back();
+        GFileInfo *info = g_file_enumerator_next_file(frame.enumerator, cancel, error);
+        if (info == nullptr) {
+            if (*error != nullptr) break;
+            g_object_unref(frame.enumerator);
+            g_object_unref(frame.file);
+            stack.pop_back();
+            continue;
+        }
+        ++items;
+        if (items > limit) {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_TOO_MANY_OPEN_FILES,
+                        "Folder contains over 250,000 items; calculation is bounded.");
+            g_object_unref(info);
+            break;
+        }
+        const guint64 bytes = g_file_info_get_size(info);
+        if (G_MAXUINT64 - logical < bytes) {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "Logical size overflow");
+            g_object_unref(info);
+            break;
+        }
+        logical += bytes;
+        if (g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_UNIX_BLOCKS)) {
+            const guint64 blocks =
+                g_file_info_get_attribute_uint64(info, G_FILE_ATTRIBUTE_UNIX_BLOCKS);
+            if (blocks > G_MAXUINT64 / 512U ||
+                G_MAXUINT64 - allocated < blocks * 512U) {
+                g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "Allocated size overflow");
+                g_object_unref(info);
+                break;
+            }
+            allocated += blocks * 512U;
+        }
+        if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY) {
+            ++folders;
+            const bool crosses_mount = has_device &&
+                g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_UNIX_DEVICE) &&
+                g_file_info_get_attribute_uint32(info, G_FILE_ATTRIBUTE_UNIX_DEVICE) != device;
+            const char *name = g_file_info_get_name(info);
+            if (!crosses_mount && name != nullptr && stack.size() < 64) {
+                GFile *child = g_file_get_child(frame.file, name);
+                const bool ok = push_directory(child);
+                g_object_unref(child);
+                if (!ok) {
+                    g_object_unref(info);
+                    break;
+                }
+            } else if (!crosses_mount && stack.size() >= 64) {
+                g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                            "Folder nesting exceeds 64 levels; no partial total reported.");
+                g_object_unref(info);
+                break;
+            }
+        }
+        g_object_unref(info);
+    }
+    for (Frame &f : stack) {
+        g_object_unref(f.enumerator);
+        g_object_unref(f.file);
+    }
+    if (*error != nullptr) return {};
+    std::string result;
+    append_line(result, "Folder", display(root));
+    append_line(result, "Items scanned", std::to_string(items));
+    append_line(result, "Subfolders", std::to_string(folders));
+    append_line(result, "Logical total", size_text(logical));
+    append_line(result, "Allocated total", size_text(allocated));
+    result += "Counts include directory entries; hard links may be counted more than once.\n"
+              "Symlinks and separately mounted filesystems are not traversed.\n";
+    return result;
+}
+
+void work_thread(GTask *task, gpointer, gpointer data, GCancellable *cancel)
+{
+    auto *work = static_cast<Work *>(data);
+    GError *error = nullptr;
+    std::string result;
+    switch (work->kind) {
+    case InspectionKind::Details:
+        result = file_metadata(work->first, cancel, &error);
+        break;
+    case InspectionKind::FolderSize:
+        result = folder_size(work->first, cancel, &error);
+        break;
+    case InspectionKind::Sha256: {
+        result = checksum(work->first, cancel, &error);
+        if (error == nullptr) result = "SHA-256: " + result + "\n" + display(work->first);
+        break;
+    }
+    case InspectionKind::Compare: {
+        const std::string first = checksum(work->first, cancel, &error);
+        if (error != nullptr) break;
+        const std::string second = checksum(work->second, cancel, &error);
+        if (error != nullptr) break;
+        append_line(result, "First", display(work->first));
+        append_line(result, "Second", display(work->second));
+        append_line(result, "First SHA-256", first);
+        append_line(result, "Second SHA-256", second);
+        result += first == second ? "Matching SHA-256 digests.\n" :
+                                   "Different SHA-256 digests.\n";
+        result += "Hash agreement is not a byte-for-byte comparison.\n";
+        break;
+    }
+    }
+    if (error != nullptr) {
+        g_task_return_error(task, error);
+    } else {
+        g_task_return_pointer(task, g_strdup(result.c_str()), g_free);
+    }
+}
+
+void set_text(GtkWidget *view, const char *value)
+{
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(view));
+    gtk_text_buffer_set_text(buffer, value, -1);
+}
+
+void on_done(GObject *, GAsyncResult *result, gpointer user_data)
+{
+    auto *weak = static_cast<GWeakRef *>(user_data);
+    GError *error = nullptr;
+    char *text = static_cast<char *>(g_task_propagate_pointer(G_TASK(result), &error));
+    GObject *object = g_weak_ref_get(weak);
+    if (object != nullptr) {
+        auto *state = static_cast<DialogState *>(
+            g_object_get_data(object, "ifm-inspection-state"));
+        if (state != nullptr) {
+            state->busy = false;
+            if (state->active != nullptr) {
+                g_object_unref(state->active);
+                state->active = nullptr;
+            }
+            if (state->details != nullptr) gtk_widget_set_sensitive(state->details, TRUE);
+            if (state->folder != nullptr) gtk_widget_set_sensitive(state->folder, TRUE);
+            if (state->hash != nullptr) gtk_widget_set_sensitive(state->hash, TRUE);
+            if (state->cancel != nullptr) gtk_widget_set_sensitive(state->cancel, FALSE);
+            if (error != nullptr)
+                set_text(state->view, error->message);
+            else if (text != nullptr)
+                set_text(state->view, text);
+        }
+        g_object_unref(object);
+    }
+    g_free(text);
+    g_clear_error(&error);
+    g_weak_ref_clear(weak);
+    delete weak;
+}
+
+void begin(GtkWindow *dialog, InspectionKind kind, GFile *other = nullptr)
+{
+    auto *state = static_cast<DialogState *>(
+        g_object_get_data(G_OBJECT(dialog), "ifm-inspection-state"));
+    if (state == nullptr || state->busy) return;
+    state->busy = true;
+    state->active = g_cancellable_new();
+    if (state->details != nullptr) gtk_widget_set_sensitive(state->details, FALSE);
+    if (state->folder != nullptr) gtk_widget_set_sensitive(state->folder, FALSE);
+    if (state->hash != nullptr) gtk_widget_set_sensitive(state->hash, FALSE);
+    if (state->cancel != nullptr) gtk_widget_set_sensitive(state->cancel, TRUE);
+    set_text(state->view, "Reading… (Cancel to stop)");
+    auto *weak = new GWeakRef;
+    g_weak_ref_init(weak, G_OBJECT(dialog));
+    GTask *task = g_task_new(nullptr, state->active, on_done, weak);
+    g_task_set_task_data(task, new Work(kind, state->file, other),
+        [](gpointer data) { delete static_cast<Work *>(data); });
+    g_task_run_in_thread(task, work_thread);
+    g_object_unref(task);
+}
+
+GtkWindow *make_dialog(GtkWindow *parent, GFile *file, const char *title)
+{
+    GtkWidget *dialog = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(dialog), title);
+    gtk_window_set_transient_for(GTK_WINDOW(dialog), parent);
+    gtk_window_set_destroy_with_parent(GTK_WINDOW(dialog), TRUE);
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 600, 480);
+
+    auto *state = new DialogState;
+    state->file = G_FILE(g_object_ref(file));
+    g_object_set_data_full(G_OBJECT(dialog), "ifm-inspection-state", state,
+                           [](gpointer data) { delete static_cast<DialogState *>(data); });
+    GtkWidget *root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_set_margin_start(root, 14);
+    gtk_widget_set_margin_end(root, 14);
+    gtk_widget_set_margin_top(root, 14);
+    gtk_widget_set_margin_bottom(root, 14);
+    gtk_window_set_child(GTK_WINDOW(dialog), root);
+    GtkWidget *scroll = gtk_scrolled_window_new();
+    gtk_widget_set_vexpand(scroll, TRUE);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
+                                   GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+    state->view = gtk_text_view_new();
+    gtk_text_view_set_editable(GTK_TEXT_VIEW(state->view), FALSE);
+    gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(state->view), FALSE);
+    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(state->view), GTK_WRAP_WORD_CHAR);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), state->view);
+    gtk_box_append(GTK_BOX(root), scroll);
+    GtkWidget *buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_append(GTK_BOX(root), buttons);
+    GtkWidget *copy = gtk_button_new_with_label("Copy details");
+    gtk_box_append(GTK_BOX(buttons), copy);
+    g_signal_connect(copy, "clicked", G_CALLBACK(+[](GtkButton *, gpointer data) {
+        auto *state = static_cast<DialogState *>(
+            g_object_get_data(G_OBJECT(data), "ifm-inspection-state"));
+        if (state == nullptr) return;
+        GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(state->view));
+        GtkTextIter begin_iter, end_iter;
+        gtk_text_buffer_get_bounds(buffer, &begin_iter, &end_iter);
+        char *text = gtk_text_buffer_get_text(buffer, &begin_iter, &end_iter, FALSE);
+        GdkClipboard *clipboard = gtk_widget_get_clipboard(GTK_WIDGET(data));
+        if (clipboard != nullptr && text != nullptr)
+            gdk_clipboard_set_text(clipboard, text);
+        g_free(text);
+    }), dialog);
+    state->cancel = gtk_button_new_with_label("Cancel");
+    gtk_box_append(GTK_BOX(buttons), state->cancel);
+    gtk_widget_set_sensitive(state->cancel, FALSE);
+    g_signal_connect(state->cancel, "clicked", G_CALLBACK(+[](GtkButton *, gpointer data) {
+        auto *state = static_cast<DialogState *>(
+            g_object_get_data(G_OBJECT(data), "ifm-inspection-state"));
+        if (state != nullptr && state->active != nullptr)
+            g_cancellable_cancel(state->active);
+    }), dialog);
+    GtkWidget *close = gtk_button_new_with_label("Close");
+    gtk_widget_set_hexpand(close, TRUE);
+    gtk_widget_set_halign(close, GTK_ALIGN_END);
+    gtk_box_append(GTK_BOX(buttons), close);
+    g_signal_connect_swapped(close, "clicked", G_CALLBACK(gtk_window_destroy), dialog);
+    return GTK_WINDOW(dialog);
+}
+
+} // namespace
+
+void show_file_inspection(GtkWindow *parent, GFile *file, GFileInfo *known)
+{
+    if (parent == nullptr || file == nullptr || known == nullptr) return;
+    GtkWindow *dialog = make_dialog(parent, file, "Inspect file");
+    auto *state = static_cast<DialogState *>(
+        g_object_get_data(G_OBJECT(dialog), "ifm-inspection-state"));
+    GtkWidget *buttons = gtk_widget_get_last_child(gtk_window_get_child(dialog));
+    state->details = gtk_button_new_with_label("Details");
+    gtk_box_prepend(GTK_BOX(buttons), state->details);
+    g_signal_connect(state->details, "clicked", G_CALLBACK(+[](GtkButton *, gpointer data) {
+        begin(GTK_WINDOW(data), InspectionKind::Details);
+    }), dialog);
+    if (g_file_info_get_file_type(known) == G_FILE_TYPE_DIRECTORY) {
+        state->folder = gtk_button_new_with_label("Calculate folder size");
+        gtk_box_prepend(GTK_BOX(buttons), state->folder);
+        g_signal_connect(state->folder, "clicked", G_CALLBACK(+[](GtkButton *, gpointer data) {
+            begin(GTK_WINDOW(data), InspectionKind::FolderSize);
+        }), dialog);
+    } else if (g_file_info_get_file_type(known) == G_FILE_TYPE_REGULAR) {
+        state->hash = gtk_button_new_with_label("SHA-256");
+        gtk_box_prepend(GTK_BOX(buttons), state->hash);
+        g_signal_connect(state->hash, "clicked", G_CALLBACK(+[](GtkButton *, gpointer data) {
+            begin(GTK_WINDOW(data), InspectionKind::Sha256);
+        }), dialog);
+    }
+    gtk_window_present(dialog);
+    begin(dialog, InspectionKind::Details);
+}
+
+void compare_file_hashes(GtkWindow *parent, GFile *first, GFile *second)
+{
+    if (parent == nullptr || first == nullptr || second == nullptr) return;
+    GtkWindow *dialog = make_dialog(parent, first, "Compare file hashes");
+    gtk_window_present(dialog);
+    begin(dialog, InspectionKind::Compare, second);
+}
+
+void open_terminal_in_directory(GtkWindow *parent, GFile *directory)
+{
+    if (parent == nullptr || directory == nullptr) return;
+    char *path = g_file_get_path(directory);
+    if (path == nullptr) {
+        GtkAlertDialog *alert = gtk_alert_dialog_new("Terminal requires a native folder");
+        gtk_alert_dialog_show(alert, parent);
+        g_object_unref(alert);
+        return;
+    }
+    constexpr const char *programs[] = {
+        "x-terminal-emulator", "gnome-terminal", "mate-terminal",
+        "xfce4-terminal", "konsole", "kgx", "xterm"
+    };
+    GError *error = nullptr;
+    bool launched = false;
+    for (const char *program : programs) {
+        char *binary = g_find_program_in_path(program);
+        if (binary == nullptr) continue;
+        GSubprocessLauncher *launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_NONE);
+        g_subprocess_launcher_set_cwd(launcher, path);
+        const char *argv[] = {binary, nullptr};
+        GSubprocess *process = g_subprocess_launcher_spawnv(launcher, argv, &error);
+        g_object_unref(launcher);
+        g_free(binary);
+        if (process != nullptr) {
+            g_object_unref(process);
+            launched = true;
+            break;
+        }
+        g_clear_error(&error);
+    }
+    g_free(path);
+    if (!launched) {
+        GtkAlertDialog *alert = gtk_alert_dialog_new("No supported terminal could be started");
+        gtk_alert_dialog_show(alert, parent);
+        g_object_unref(alert);
+    }
+}
+
+} // namespace infiltrator::files
