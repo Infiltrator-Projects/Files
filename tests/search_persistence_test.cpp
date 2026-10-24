@@ -77,6 +77,10 @@ int main()
         std::string malformed = "[Saved Searches]\nversion=99\ncount=1\n";
         require(presentation_store::write("saved-searches.ini", malformed, error),
                 "Malformed fixture setup failed");
+        std::string baseline_search;
+        require(presentation_store::read("saved-searches.ini", baseline_search, error) ==
+                    presentation_store::ReadStatus::Loaded,
+                "Cannot read saved-search corruption fixture");
         restored = load_saved_searches();
         require(!restored.writable &&
                 !save_saved_searches(restored, error),
@@ -84,18 +88,22 @@ int main()
         std::string recovered;
         require(presentation_store::read("saved-searches.ini", recovered, error) ==
                     presentation_store::ReadStatus::Loaded &&
-                recovered == malformed,
+                recovered == baseline_search,
                 "Rejected preset writes must preserve original malformed evidence");
 
         malformed = "[Privacy]\nversion=99\ncount=1\n";
         require(presentation_store::write("search-private.ini", malformed, error),
                 "Privacy corruption fixture setup failed");
+        std::string baseline_privacy;
+        require(presentation_store::read("search-private.ini", baseline_privacy, error) ==
+                    presentation_store::ReadStatus::Loaded,
+                "Cannot read privacy corruption fixture");
         require(!load_search_privacy().valid, "Invalid privacy file must be detected");
         require(!save_search_privacy({}, error),
                 "Unparseable privacy state must not be silently cleared");
         require(presentation_store::read("search-private.ini", recovered, error) ==
                     presentation_store::ReadStatus::Loaded &&
-                recovered == malformed,
+                recovered == baseline_privacy,
                 "Rejected privacy write must preserve prior bytes");
         fs::remove_all(root);
         return 0;
