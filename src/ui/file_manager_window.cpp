@@ -34,6 +34,7 @@ enum class DetailField {
     Type,
     Size,
     Modified,
+    Created,
 };
 
 struct DetailSortContext {
@@ -91,6 +92,8 @@ int compare_detail_items(gconstpointer left, gconstpointer right, gpointer user_
         return detail_compare_size(left_info, right_info);
     case DetailField::Modified:
         return detail_compare_modified(left_info, right_info);
+    case DetailField::Created:
+        return detail_compare_created(left_info, right_info);
     }
     return 0;
 }
@@ -478,6 +481,7 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     append_detail_column("Type", DetailField::Type, kDetailTypeWidth, false);
     append_detail_column("Size", DetailField::Size, kDetailSizeWidth, false);
     append_detail_column("Date Modified", DetailField::Modified, kDetailModifiedWidth, false);
+    append_detail_column("Date Created", DetailField::Created, kDetailModifiedWidth, false);
 
     // GtkColumnView owns the active column/direction state in its aggregate
     // sorter. Feeding that sorter into the shared presentation model makes a
@@ -774,6 +778,8 @@ void FileManagerWindow::load_preferences()
     if (g_key_file_load_from_file(keys, path, G_KEY_FILE_NONE, nullptr)) {
         if (g_key_file_has_key(keys, "Appearance", "show-hidden", nullptr))
             show_hidden_ = g_key_file_get_boolean(keys, "Appearance", "show-hidden", nullptr);
+        if (g_key_file_has_key(keys, "Appearance", "show-extensions", nullptr))
+            show_extensions_ = g_key_file_get_boolean(keys, "Appearance", "show-extensions", nullptr);
         if (g_key_file_has_key(keys, "Appearance", "sidebar-visible", nullptr))
             sidebar_visible_ = g_key_file_get_boolean(keys, "Appearance", "sidebar-visible", nullptr);
         if (g_key_file_has_key(keys, "Appearance", "folders-first", nullptr))
@@ -800,6 +806,7 @@ void FileManagerWindow::save_preferences() const
     char *path = g_build_filename(folder, "preferences.ini", nullptr);
     GKeyFile *keys = g_key_file_new();
     g_key_file_set_boolean(keys, "Appearance", "show-hidden", show_hidden_);
+    g_key_file_set_boolean(keys, "Appearance", "show-extensions", show_extensions_);
     g_key_file_set_boolean(keys, "Appearance", "sidebar-visible", sidebar_visible_);
     g_key_file_set_boolean(keys, "Appearance", "folders-first", folders_first_);
     g_key_file_set_integer(keys, "Appearance", "view", static_cast<gint>(view_mode_) + 1);
@@ -847,6 +854,34 @@ void FileManagerWindow::toggle_show_hidden()
         gtk_filter_changed(GTK_FILTER(visibility_filter_), GTK_FILTER_CHANGE_DIFFERENT);
     save_preferences();
     update_status();
+}
+
+void FileManagerWindow::refresh_visible_labels()
+{
+    if (content_stack_ == nullptr) return;
+    // Only realised GTK items are visited. No filter/sort model rebuilding,
+    // file operation state or non-visible row is touched by label policy.
+    const auto walk = [this](auto &&self, GtkWidget *widget) -> void {
+        if (widget == nullptr) return;
+        auto *info = G_FILE_INFO(g_object_get_data(G_OBJECT(widget), "ifm-visual-info"));
+        auto *label = static_cast<GtkLabel *>(
+            g_object_get_data(G_OBJECT(widget), "ifm-name"));
+        if (info != nullptr && label != nullptr) {
+            const std::string text = detail_visual_label(info, show_extensions_);
+            gtk_label_set_text(label, text.c_str());
+        }
+        for (GtkWidget *child = gtk_widget_get_first_child(widget); child != nullptr;
+             child = gtk_widget_get_next_sibling(child))
+            self(self, child);
+    };
+    walk(walk, content_stack_);
+}
+
+void FileManagerWindow::toggle_extensions()
+{
+    show_extensions_ = !show_extensions_;
+    save_preferences();
+    refresh_visible_labels();
 }
 
 void FileManagerWindow::toggle_folders_first()
@@ -1473,7 +1508,10 @@ void FileManagerWindow::refresh_modified_cells()
         if (info == nullptr) {
             continue;
         }
-        const std::string value = detail_modified_text(info);
+        const bool created = GPOINTER_TO_INT(
+            g_object_get_data(G_OBJECT(cell), "ifm-is-created")) != 0;
+        const std::string value = created ? detail_created_text(info) :
+                                           detail_modified_text(info);
         gtk_label_set_text(GTK_LABEL(cell), value.c_str());
     }
 }
@@ -2034,7 +2072,7 @@ void FileManagerWindow::on_factory_setup(GtkSignalListItemFactory *factory,
     const int encoded = GPOINTER_TO_INT(
         g_object_get_data(G_OBJECT(factory), "ifm-detail-field"));
     if (encoded < static_cast<int>(DetailField::Name) ||
-        encoded > static_cast<int>(DetailField::Modified)) {
+        encoded > static_cast<int>(DetailField::Created)) {
         return;
     }
 
@@ -2078,7 +2116,7 @@ void FileManagerWindow::on_factory_setup(GtkSignalListItemFactory *factory,
     gtk_widget_set_halign(label, GTK_ALIGN_FILL);
     gtk_widget_add_css_class(label, "ifm-detail-secondary");
     gtk_list_item_set_child(item, label);
-    if (field == DetailField::Modified) {
+    if (field == DetailField::Modified || field == DetailField::Created) {
         self->modified_cells_.insert(label);
         g_object_weak_ref(
             G_OBJECT(label), &FileManagerWindow::on_modified_cell_finalized, self);
@@ -2100,7 +2138,7 @@ void FileManagerWindow::on_factory_bind(GtkSignalListItemFactory *factory,
     const int encoded = GPOINTER_TO_INT(
         g_object_get_data(G_OBJECT(factory), "ifm-detail-field"));
     if (encoded < static_cast<int>(DetailField::Name) ||
-        encoded > static_cast<int>(DetailField::Modified)) {
+        encoded > static_cast<int>(DetailField::Created)) {
         return;
     }
 
@@ -2108,6 +2146,8 @@ void FileManagerWindow::on_factory_bind(GtkSignalListItemFactory *factory,
         const char *raw = g_file_info_get_name(info);
         g_object_set_data_full(G_OBJECT(child), "ifm-source-name", g_strdup(raw != nullptr ? raw : ""), g_free);
         self->cancel_inline_editor(child);
+        g_object_set_data_full(G_OBJECT(child), "ifm-visual-info",
+            g_object_ref(info), reinterpret_cast<GDestroyNotify>(g_object_unref));
     }
 
     switch (static_cast<DetailField>(encoded)) {
@@ -2120,7 +2160,9 @@ void FileManagerWindow::on_factory_bind(GtkSignalListItemFactory *factory,
             gtk_image_set_from_icon_name(icon, "text-x-generic-symbolic");
         }
         const char *display_name = g_file_info_get_display_name(info);
-        gtk_label_set_text(name, display_name != nullptr ? display_name : "");
+        const std::string presented = detail_visual_label(info, self->show_extensions_);
+        gtk_label_set_text(name, presented.c_str());
+        gtk_widget_set_tooltip_text(GTK_WIDGET(name), display_name);
         if (self->thumbnails_ != nullptr)
             self->thumbnails_->bind(icon, info,
                 gtk_directory_list_get_file(self->directory_list_), kDetailIconSize);
@@ -2136,11 +2178,16 @@ void FileManagerWindow::on_factory_bind(GtkSignalListItemFactory *factory,
         gtk_label_set_text(GTK_LABEL(child), value.c_str());
         break;
     }
-    case DetailField::Modified: {
+    case DetailField::Modified:
+    case DetailField::Created: {
+        const bool created = static_cast<DetailField>(encoded) == DetailField::Created;
         g_object_set_data_full(
             G_OBJECT(child), "ifm-modified-info", g_object_ref(info),
             reinterpret_cast<GDestroyNotify>(g_object_unref));
-        const std::string value = detail_modified_text(info);
+        g_object_set_data(G_OBJECT(child), "ifm-is-created",
+                          GINT_TO_POINTER(created ? 1 : 0));
+        const std::string value = created ? detail_created_text(info) :
+                                           detail_modified_text(info);
         gtk_label_set_text(GTK_LABEL(child), value.c_str());
         break;
     }
@@ -2158,10 +2205,12 @@ void FileManagerWindow::on_factory_unbind(GtkSignalListItemFactory *factory,
         if (GtkWidget *cell = gtk_list_item_get_child(item); cell != nullptr) {
             static_cast<FileManagerWindow *>(user_data)->cancel_inline_editor(cell);
             g_object_set_data_full(G_OBJECT(cell), "ifm-source-name", nullptr, nullptr);
+            g_object_set_data_full(G_OBJECT(cell), "ifm-visual-info", nullptr, nullptr);
         }
         return;
     }
-    if (encoded != static_cast<int>(DetailField::Modified)) return;
+    if (encoded != static_cast<int>(DetailField::Modified) &&
+        encoded != static_cast<int>(DetailField::Created)) return;
     if (GtkWidget *child = gtk_list_item_get_child(item); child != nullptr) {
         g_object_set_data_full(
             G_OBJECT(child), "ifm-modified-info", nullptr, nullptr);
@@ -2266,9 +2315,14 @@ void FileManagerWindow::on_icon_factory_bind(GtkSignalListItemFactory *factory,
     g_object_set_data_full(G_OBJECT(tile), "ifm-source-name",
                            g_strdup(raw_name != nullptr ? raw_name : ""), g_free);
     static_cast<FileManagerWindow *>(user_data)->cancel_inline_editor(tile);
+    auto *self = static_cast<FileManagerWindow *>(user_data);
     const char *display_name = g_file_info_get_display_name(info);
-    gtk_label_set_text(name, display_name != nullptr ? display_name : "");
-    if (static_cast<FileManagerWindow *>(user_data)->thumbnails_ != nullptr)
+    const std::string presented = detail_visual_label(info, self->show_extensions_);
+    gtk_label_set_text(name, presented.c_str());
+    gtk_widget_set_tooltip_text(GTK_WIDGET(name), display_name);
+    g_object_set_data_full(G_OBJECT(tile), "ifm-visual-info",
+        g_object_ref(info), reinterpret_cast<GDestroyNotify>(g_object_unref));
+    if (self->thumbnails_ != nullptr)
         static_cast<FileManagerWindow *>(user_data)->thumbnails_->bind(
             icon, info,
             gtk_directory_list_get_file(static_cast<FileManagerWindow *>(user_data)->directory_list_),
@@ -2281,6 +2335,7 @@ void FileManagerWindow::on_icon_factory_unbind(GtkSignalListItemFactory *, GtkLi
     if (cell != nullptr) {
         static_cast<FileManagerWindow *>(user_data)->cancel_inline_editor(cell);
         g_object_set_data_full(G_OBJECT(cell), "ifm-source-name", nullptr, nullptr);
+        g_object_set_data_full(G_OBJECT(cell), "ifm-visual-info", nullptr, nullptr);
     }
 }
 

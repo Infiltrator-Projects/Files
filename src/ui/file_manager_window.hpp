@@ -43,6 +43,8 @@ public:
     void move_active_tab_to_new_window();
     [[nodiscard]] bool move_active_tab_to(FileManagerWindow &destination);
     void toggle_show_hidden();
+    void toggle_extensions();
+    [[nodiscard]] bool show_extensions() const noexcept { return show_extensions_; }
     void toggle_folders_first();
     void toggle_sidebar();
     void refresh_current_directory();
@@ -208,6 +210,7 @@ private:
     void sync_multi_from_primary();
     void arm_temporal_policy_monitor();
     void refresh_modified_cells();
+    void refresh_visible_labels();
     [[nodiscard]] GFile *file_from_location_text(const char *text) const;
 
     GtkWidget *window_{nullptr};
@@ -267,6 +270,7 @@ private:
     std::size_t history_index_{0};
     ViewMode view_mode_{ViewMode::List};
     bool show_hidden_{false};
+    bool show_extensions_{true};
     bool folders_first_{true};
     bool sidebar_visible_{true};
     bool preferences_ready_{false};
