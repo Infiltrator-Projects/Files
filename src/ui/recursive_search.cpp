@@ -28,6 +28,10 @@ struct SearchWindow {
     GtkWidget *minimum{nullptr};
     GtkWidget *maximum{nullptr};
     GtkWidget *since{nullptr};
+    GtkWidget *before{nullptr};
+    GtkWidget *owner_uid{nullptr};
+    GtkWidget *excluded{nullptr};
+    GtkWidget *duplicates{nullptr};
     GtkWidget *content{nullptr};
     GtkWidget *status{nullptr};
     GtkWidget *results{nullptr};
@@ -209,6 +213,9 @@ void completed(GObject *, GAsyncResult *result, gpointer data)
                 std::string message = std::to_string(report->hits.size()) + " matches across " +
                     std::to_string(report->visited) + " entries";
                 if (!report->complete) message += " — incomplete: " + report->limitation;
+                if (report->duplicate_skipped != 0)
+                    message += " — duplicates not checked in " +
+                        std::to_string(report->duplicate_skipped) + " files";
                 if (report->content_skipped != 0)
                     message += " — content not searched in " +
                         std::to_string(report->content_skipped) + " files";
@@ -240,15 +247,46 @@ void start(GtkButton *, gpointer data)
     o.minimum_size = bytes(s->minimum, valid);
     o.maximum_size = bytes(s->maximum, valid);
     o.modified_since = date(s->since, valid);
+    o.modified_before = date(s->before, valid);
+    const auto owner = bytes(s->owner_uid, valid);
+    if (owner && *owner > G_MAXUINT32) valid = false;
+    else if (owner) o.owner_uid = static_cast<std::uint32_t>(*owner);
+    o.duplicates_by_sha256 =
+        gtk_check_button_get_active(GTK_CHECK_BUTTON(s->duplicates));
+    const char *excluded = gtk_editable_get_text(GTK_EDITABLE(s->excluded));
+    if (excluded != nullptr && *excluded != '\0') {
+        // Per-query exclusions are absolute URIs/paths, not wildcards. A path
+        // is converted to GFile once, then compared by GIO identity.
+        gchar **parts = g_strsplit(excluded, ";", 65);
+        for (gchar **p = parts; p != nullptr && *p != nullptr; ++p) {
+            char *trim = g_strstrip(*p);
+            if (*trim == '\0') continue;
+            if (!(g_str_has_prefix(trim, "/") || g_str_has_prefix(trim, "file://") ||
+                  strstr(trim, "://") != nullptr)) {
+                valid = false;
+                break;
+            }
+            GFile *file = strstr(trim, "://") != nullptr ?
+                g_file_new_for_uri(trim) : g_file_new_for_path(trim);
+            char *uri = g_file_get_uri(file);
+            if (uri != nullptr) o.excluded_uris.emplace_back(uri);
+            g_free(uri);
+            g_object_unref(file);
+        }
+        g_strfreev(parts);
+    }
+    if (o.modified_since && o.modified_before &&
+        *o.modified_since >= *o.modified_before) valid = false;
     if (o.minimum_size && o.maximum_size && *o.minimum_size > *o.maximum_size)
         valid = false;
     if (!valid) {
         gtk_label_set_text(GTK_LABEL(s->status),
-            "Check date (YYYY-MM-DD) and integer byte limits; minimum must not exceed maximum.");
+            "Check date ranges, UID, excluded absolute locations and byte bounds.");
         return;
     }
     if (o.name.empty() && o.content.empty() && o.kind == SearchItemKind::Any &&
-        !o.minimum_size && !o.maximum_size && !o.modified_since) {
+        !o.minimum_size && !o.maximum_size && !o.modified_since &&
+        !o.modified_before && !o.owner_uid && !o.duplicates_by_sha256) {
         gtk_label_set_text(GTK_LABEL(s->status),
             "Enter a name, text or filter to start a bounded search.");
         return;
@@ -323,6 +361,9 @@ void show_recursive_search(GtkWindow *owner, GFile *location)
     s->minimum = field(GTK_GRID(options), "Minimum size in bytes", 0, 2, "Optional");
     s->maximum = field(GTK_GRID(options), "Maximum size in bytes", 1, 2, "Optional");
     s->since = field(GTK_GRID(options), "Modified on/after (local YYYY-MM-DD)", 0, 3, "Optional");
+    s->before = field(GTK_GRID(options), "Modified before (local YYYY-MM-DD)", 1, 3, "Optional");
+    s->owner_uid = field(GTK_GRID(options), "Owner UID (native providers)", 0, 4, "Optional numeric UID");
+    s->excluded = field(GTK_GRID(options), "Exclude locations (paths/URIs separated by ;)", 1, 4, "Optional private locations");
     GtkWidget *flags = gtk_box_new(GTK_ORIENTATION_VERTICAL, 3);
     s->recursive = gtk_check_button_new_with_label("Include subfolders");
     gtk_check_button_set_active(GTK_CHECK_BUTTON(s->recursive), TRUE);
@@ -331,7 +372,10 @@ void show_recursive_search(GtkWindow *owner, GFile *location)
     gtk_box_append(GTK_BOX(flags), s->recursive);
     gtk_box_append(GTK_BOX(flags), s->case_sensitive);
     gtk_box_append(GTK_BOX(flags), s->include_hidden);
-    gtk_grid_attach(GTK_GRID(options), flags, 1, 3, 1, 1);
+    s->duplicates = gtk_check_button_new_with_label(
+        "Find duplicate regular files by SHA-256 (8 MiB/file limit)");
+    gtk_box_append(GTK_BOX(flags), s->duplicates);
+    gtk_grid_attach(GTK_GRID(options), flags, 0, 5, 2, 1);
 
     GtkWidget *toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_box_append(GTK_BOX(outer), toolbar);
