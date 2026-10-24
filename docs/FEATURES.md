@@ -1,5 +1,8 @@
 # Files — Complete Feature Catalogue
 
+The 0.1.64 Quick Look tranche qualifies ten everyday preview interactions (Space, contextual opening, text, image, binary hex, adjacent-file traversal, zoom, copy contents, copy location and metadata/status). Its read-only GIO workers have bounded reads and stale-generation rejection. This is not PDF rendering, media playback, a streaming large-file viewer or a replacement for the preview-provider roadmap.
+
+
 The 0.1.63 search tranche adds ten bounded retrieval interactions: recursive current-location filename search, exact matching, case sensitivity, glob matching, file/folder filtering, minimum and maximum size criteria, modified-since criteria, UTF-8 text-content matching on recognized files <=1 MiB and reveal-in-parent results. No system-wide index, document/PDF parser or semantic search is claimed. The search explicitly reports provider errors, truncated results and skipped content; no filesystem mutation is delegated to a search worker.
 
 

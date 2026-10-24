@@ -2,6 +2,9 @@
 
 ## Qualification
 
+Files 0.1.64 interaction-surface qualification exercises Quick Look on a real temporary directory containing plain text, PNG and intentionally unsupported binary content. It asserts clipboard text/path fidelity, image decode/zoom availability, neighbour actions and explicit binary fallback. The preview work captures GFile references and uses a cancellable generation-fenced background GTask, refusing unknown or >8 MiB inputs. The hosted Ubuntu 24.04 build passed 18/18 CTest executables and the aggressive native-installer qualification. Actual Mint Day/Night screenshots, accessibility review and remote-provider stress remain unproven.
+
+
 The 0.1.63 GIO search-engine test exercises recursive versus direct-child search, exact/Unicode-folded and case-sensitive wildcard matching, file/folder filters, minimum/maximum byte limits, modified-since filtering, content matching, symlink-cycle refusal and cancellation. The actual GTK interaction test opens Search files, finds a nested file and requires Reveal in containing folder to navigate to its parent and select the exact original item. Hosted qualification on Ubuntu 24.04 passes 18 tests and the native-installer/package gate prior to release intent; no stress-performance or GUI screenshot claim is inferred.
 
 

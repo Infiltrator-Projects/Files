@@ -317,6 +317,11 @@ The first active lease holds the GtkApplication, and the last releases it after 
 
 ## 10. Presentation model
 
+### Quick Look preview authority (0.1.64)
+
+`quick_preview` owns only the ephemeral read-only preview session. It snapshots at most 4,096 visible regular-file GFile references so a sort, navigation or selection change cannot retarget an in-progress read. Background GIO reads and image decoding carry per-request cancellables, monotonically increasing generations and weak GTK session references. A late completion can neither resurrect a destroyed preview nor overwrite a newer request. It exposes no mutation commands and consumes no operation-journal lease. For unknown-size or >8 MiB objects it visibly refuses content reads; text and hex rendering are independently bounded. Persistent preview caches or user-visible document/image/media provider contracts are deliberately not introduced by this tranche.
+
+
 ### Workspace persistence and interaction ownership
 
 `workspace_tabs`, `workspace_session` and `workspace_bookmarks` implement cohesive

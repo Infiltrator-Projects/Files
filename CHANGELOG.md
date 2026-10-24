@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.64 — 2026-10-24
+
+- Add opt-in Quick Look (Space and context action) for regular files, preserving the existing open/launch and mutation ownership boundaries.
+- Preview supported images, UTF-8 text up to 256 KiB, and bounded binary hex/ASCII evidence, exposing file name, type, size and availability.
+- Navigate nearby visible files, zoom images, copy text or path and cancel reads. Refuse unbounded or unknown-size files rather than blocking the interface.
+- Run GIO reads and image decoding away from GTK, hold source GFile references, fence stale asynchronous results by generation and reject late callbacks after dialog destruction.
+- Qualify text, PNG image/zoom, binary fallback, copy and navigation against real GTK dialogs under the full hosted CTest and native-installer gates. Real Mint visual qualification remains separate.
+
+
 ## 0.1.63 — 2026-10-24
 
 - Add a bounded, cancellable recursive search UI backed by the GIO provider layer, separate from the existing Ctrl+F current-folder quick filter.

@@ -58,6 +58,9 @@ Product-level acceptance is defined in [`docs/PRODUCT-QUALITY.md`](docs/PRODUCT-
 
 ## Current implementation
 
+Files 0.1.64 adds a bounded, read-only Quick Look surface for selected regular files. Space or the context action opens background-decoded images, UTF-8 text (up to 256 KiB), or a hex fallback for unsupported formats; Previous/Next navigate the current visible file order, with zoom, copy-text, copy-path and cancellation. Unknown-size files and files over 8 MiB are refused. No preview owns filesystem mutations, and desktop Day/Night visual acceptance remains outstanding.
+
+
 Files 0.1.63 extends its read-only retrieval capability with a separate, cancellable Search in subfolders… surface. It searches through GIO with exact/partial/glob matching, case options, file/folder and size/date filters, text matching for recognized UTF-8 files <=1 MiB, and reveal-in-parent results. It bounds enumeration to 100,000 entries, 500 results and 64 levels, reports incomplete coverage explicitly and preserves Ctrl+F as an instantaneous current-folder filter.
 
 
