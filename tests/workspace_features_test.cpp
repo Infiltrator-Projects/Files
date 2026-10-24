@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "../src/ui/file_manager_window.hpp"
+#include "../src/ui/dual_pane_controller.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -188,6 +189,32 @@ int main()
         require(!FileManagerWindowTestAccess::label(*source, file_uri(a), "bad\nlabel"),
                 "Bookmark labels must refuse control characters");
         open(*source, a);
+        source->install_operation_surface();
+        auto *pane = static_cast<DualPaneController *>(
+            g_object_get_data(G_OBJECT(source->native_window()), "ifm-dual-pane-controller"));
+        require(pane != nullptr && !pane->visible(), "Dual-pane controller must start collapsed");
+        pane->toggle();
+        require(pane->visible() && pane->secondary_location() != nullptr,
+                "Second pane must independently enumerate the current folder");
+        GFile *same_folder = g_file_new_for_path(a.c_str());
+        require(g_file_equal(pane->secondary_location(), same_folder),
+                "Second pane must initially target the active source folder");
+        g_object_unref(same_folder);
+        GtkWidget *second_path = find(GTK_WIDGET(source->native_window()), [](GtkWidget *w) {
+            return GTK_IS_ENTRY(w) &&
+                g_strcmp0(gtk_widget_get_tooltip_text(w),
+                          "Second pane location (path or URI)") == 0;
+        });
+        require(second_path != nullptr, "Second pane must expose editable URI navigation");
+        gtk_editable_set_text(GTK_EDITABLE(second_path), b.c_str());
+        g_signal_emit_by_name(second_path, "activate");
+        GFile *secondary_target = g_file_new_for_path(b.c_str());
+        require(g_file_equal(pane->secondary_location(), secondary_target) &&
+                at(*source, a), "Second-pane navigation must not retarget the first pane");
+        g_object_unref(secondary_target);
+        pane->toggle();
+        require(!pane->visible() && pane->secondary_location() == nullptr,
+                "Collapsing secondary pane must relinquish its enumeration location");
         require(at(*source, a), "Opening a directory must browse it");
         GFile *relative = FileManagerWindowTestAccess::resolve(*source, "child/..");
         GFile *expected = g_file_new_for_path(a.c_str());

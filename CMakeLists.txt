@@ -115,6 +115,7 @@ infiltrator_enable_warnings(infiltrator-files-core)
 add_library(infiltrator-files-ui STATIC
     src/ui/batch_item_operation_controller.cpp
     src/ui/clipboard_controller.cpp
+    src/ui/dual_pane_controller.cpp
     src/ui/create_folder_controller.cpp
     src/ui/destructive_operation_controller.cpp
     src/ui/detail_metadata.cpp

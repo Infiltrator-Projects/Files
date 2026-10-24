@@ -676,7 +676,20 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     gtk_box_append(GTK_BOX(empty_state_), empty_detail);
     gtk_widget_set_visible(empty_state_, FALSE);
     gtk_overlay_add_overlay(GTK_OVERLAY(content_overlay), empty_state_);
-    gtk_paned_set_end_child(GTK_PANED(paned), content_overlay);
+    // Two independent browse models share one GTK window. Only the primary
+    // pane owns mutation controllers; the secondary pane routes transfers
+    // through their existing journalled operation authority.
+    GtkWidget *workspace_split = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_paned_set_start_child(GTK_PANED(workspace_split), content_overlay);
+    gtk_paned_set_resize_start_child(GTK_PANED(workspace_split), TRUE);
+    gtk_paned_set_shrink_start_child(GTK_PANED(workspace_split), FALSE);
+    GtkWidget *secondary_host = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_size_request(secondary_host, 320, -1);
+    gtk_paned_set_end_child(GTK_PANED(workspace_split), secondary_host);
+    gtk_paned_set_resize_end_child(GTK_PANED(workspace_split), TRUE);
+    gtk_widget_set_visible(secondary_host, FALSE);
+    g_object_set_data(G_OBJECT(window_), "ifm-secondary-pane-host", secondary_host);
+    gtk_paned_set_end_child(GTK_PANED(paned), workspace_split);
     gtk_paned_set_resize_end_child(GTK_PANED(paned), TRUE);
     gtk_paned_set_shrink_end_child(GTK_PANED(paned), FALSE);
 

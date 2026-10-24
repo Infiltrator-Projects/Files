@@ -7,6 +7,7 @@
 #include "quick_preview.hpp"
 #include "tag_catalogue.hpp"
 #include "file_manager_window.hpp"
+#include "dual_pane_controller.hpp"
 
 #include <algorithm>
 #include <array>
@@ -364,6 +365,7 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
     open_in_window_actions_.push_back(open_window);
     if (&proxies == &overflow_proxies_) {
         add_command(box, "New Window", "new-window", ActionScope::Always, proxies);
+        add_command(box, "Dual pane", "dual-pane", ActionScope::Always, proxies);
         add_command(box, "Duplicate Tab", "duplicate-tab", ActionScope::Always, proxies);
         add_command(box, "Move Tab to New Window", "detach-tab", ActionScope::Always, proxies);
         add_command(box, "Reopen Closed Tab", "reopen-tab", ActionScope::Always, proxies);
@@ -696,6 +698,11 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
     if (window == nullptr) return;
     if (g_strcmp0(command, "open-with") == 0) self->show_open_with();
     else if (g_strcmp0(command, "new-window") == 0) window->open_new_window();
+    else if (g_strcmp0(command, "dual-pane") == 0) {
+        auto *pane = static_cast<DualPaneController *>(
+            g_object_get_data(G_OBJECT(self->window_), "ifm-dual-pane-controller"));
+        if (pane != nullptr) pane->toggle();
+    }
     else if (g_strcmp0(command, "folder-window") == 0) {
         (void)window->open_primary_directory_in_new_window();
     }

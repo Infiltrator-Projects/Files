@@ -6,6 +6,7 @@
 #include "create_folder_controller.hpp"
 #include "destructive_operation_controller.hpp"
 #include "drag_drop_controller.hpp"
+#include "dual_pane_controller.hpp"
 #include "interaction_controller.hpp"
 #include "item_operation_controller.hpp"
 #include "journal_recovery_controller.hpp"
@@ -42,6 +43,11 @@ void FileManagerWindow::install_operation_surface()
     // It is installed last so its Copy/Cut/Paste actions join the consolidated
     // File actions surface created immediately above.
     new ClipboardController(GTK_WINDOW(window_), directory_list_, selection_, status_label_);
+    if (GtkWidget *host = GTK_WIDGET(
+            g_object_get_data(G_OBJECT(window_), "ifm-secondary-pane-host"));
+        host != nullptr)
+        new DualPaneController(GTK_WINDOW(window_), host, directory_list_,
+                               selection_, status_label_);
     new DragDropController(GTK_WINDOW(window_), directory_list_, selection_, content_stack_, sidebar_);
 
     operation_surface_installed_ = true;
