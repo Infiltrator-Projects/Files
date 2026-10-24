@@ -1628,6 +1628,13 @@ void InteractionController::open_primary()
     }
 
     GFile *child = g_file_get_child(parent, name);
+    if (g_file_info_get_is_symlink(info)) {
+        auto *window = static_cast<FileManagerWindow *>(
+            g_object_get_data(G_OBJECT(window_), "ifm-window-controller"));
+        if (window != nullptr) window->open_location(child);
+        g_object_unref(child);
+        return;
+    }
     if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY) {
         char *parse_name = g_file_get_parse_name(child);
         if (parse_name != nullptr) {
