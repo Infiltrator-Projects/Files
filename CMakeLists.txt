@@ -164,6 +164,11 @@ if(BUILD_TESTING)
     add_library(calendar-date-test-fixture MODULE tests/calendar_date_fixture.c)
     target_link_libraries(calendar-date-test-fixture PRIVATE InfiltratrCommon::Portable)
 
+    add_executable(tag-catalogue-test tests/tag_catalogue_test.cpp)
+    target_link_libraries(tag-catalogue-test PRIVATE infiltrator-files-ui)
+    infiltrator_enable_warnings(tag-catalogue-test)
+    add_test(NAME tag-catalogue COMMAND tag-catalogue-test)
+
     add_executable(detail-metadata-test tests/detail_metadata_test.cpp)
     target_compile_definitions(detail-metadata-test PRIVATE
         CALENDAR_DATE_FIXTURE_PATH="$<TARGET_FILE:calendar-date-test-fixture>")
