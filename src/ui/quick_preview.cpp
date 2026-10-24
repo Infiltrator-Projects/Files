@@ -47,7 +47,9 @@ struct Outcome {
 
 struct Work {
     GFile *file{nullptr};
-    Work(GFile *path) : file(G_FILE(g_object_ref(path))) {}
+    guint64 generation{0};
+    Work(GFile *path, guint64 id)
+        : file(G_FILE(g_object_ref(path))), generation(id) {}
     ~Work() { g_object_unref(file); }
 };
 
@@ -192,7 +194,7 @@ void execute(GTask *task, gpointer, gpointer data, GCancellable *cancel)
     } else if (g_cancellable_set_error_if_cancelled(cancel, &error)) {
         g_task_return_error(task, error);
         return;
-    } else if (g_content_type_is_a(content_type.c_str(), "image/*")) {
+    } else if (g_str_has_prefix(content_type.c_str(), "image/")) {
         // The decoder is confined to the worker, including size negotiation.
         // GTK textures and widgets are exclusively constructed on the UI loop.
         GInputStream *memory = g_memory_input_stream_new_from_data(
@@ -252,13 +254,15 @@ void finished(GObject *, GAsyncResult *result, gpointer pointer)
     GError *error = nullptr;
     std::unique_ptr<Outcome> outcome(static_cast<Outcome *>(
         g_task_propagate_pointer(G_TASK(result), &error)));
+    auto *work = static_cast<Work *>(g_task_get_task_data(G_TASK(result)));
+    const guint64 request_id = work != nullptr ? work->generation : 0;
     GObject *dialog_object = static_cast<GObject *>(g_weak_ref_get(weak));
     g_weak_ref_clear(weak);
     delete weak;
     if (dialog_object != nullptr) {
         GtkWidget *dialog = GTK_WIDGET(dialog_object);
         Preview *state = lookup(dialog);
-        if (state != nullptr) {
+        if (state != nullptr && request_id == state->generation) {
             g_clear_object(&state->active);
             gtk_widget_set_sensitive(state->cancel, FALSE);
             if (error != nullptr) {
@@ -322,11 +326,12 @@ void load(GtkWidget *dialog)
     gtk_stack_set_visible_child_name(GTK_STACK(state->stack), "text");
     gtk_text_buffer_set_text(
         gtk_text_view_get_buffer(GTK_TEXT_VIEW(state->text)), "Loading preview…", -1);
+    ++state->generation;
     state->active = g_cancellable_new();
     auto *weak = new GWeakRef;
     g_weak_ref_init(weak, G_OBJECT(dialog));
     GTask *task = g_task_new(nullptr, state->active, finished, weak);
-    g_task_set_task_data(task, new Work(target.file),
+    g_task_set_task_data(task, new Work(target.file, state->generation),
         [](gpointer data) { delete static_cast<Work *>(data); });
     g_task_run_in_thread(task, execute);
     g_object_unref(task);
