@@ -186,4 +186,57 @@ std::string export_tags_tsv(const TagCatalogue &tags)
     return text;
 }
 
+
+bool import_tags_tsv(std::string_view input, std::string &error)
+{
+    constexpr std::string_view header = "File URI\tTag\n";
+    if (input.size() > 1048576U || !input.starts_with(header)) {
+        error = "Tag TSV must have the File URI and Tag header and be at most 1 MiB.";
+        return false;
+    }
+    TagCatalogue rebuilt;
+    std::size_t pos = header.size();
+    auto field = [&](std::string &output) -> bool {
+        if (pos >= input.size() || input[pos++] != '"') return false;
+        output.clear();
+        while (pos < input.size()) {
+            const char ch = input[pos++];
+            if (ch == '"') {
+                if (pos < input.size() && input[pos] == '"') {
+                    output.push_back('"'); ++pos;
+                } else return true;
+            } else {
+                if (ch == '\n' || ch == '\r' || ch == '\0') return false;
+                output.push_back(ch);
+            }
+            if (output.size() > kMaximumUriBytes) return false;
+        }
+        return false;
+    };
+    while (pos < input.size()) {
+        std::string uri, tag;
+        if (!field(uri) || pos >= input.size() || input[pos++] != '\t' ||
+            !field(tag) || pos >= input.size() || input[pos++] != '\n' ||
+            !valid_uri(uri) || !valid_tag(tag)) {
+            error = "Malformed tag TSV row; no existing catalogue was changed.";
+            return false;
+        }
+        auto &labels = rebuilt.items[uri];
+        if (!labels.insert(tag).second || labels.size() > kMaximumLabelsPerItem ||
+            rebuilt.items.size() > kMaximumEntries) {
+            error = "Duplicate tag or catalogue capacity exceeded; nothing imported.";
+            return false;
+        }
+    }
+    // Zero-tag imports are an explicit empty replacement. They may be used to
+    // clear a healthy derived database but never to overwrite corrupt state.
+    TagCatalogue existing = load_tag_catalogue();
+    if (!existing.writable) {
+        error = existing.error;
+        return false;
+    }
+    return save_tag_catalogue(rebuilt, error);
+}
+
+
 } // namespace infiltrator::files

@@ -3,6 +3,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace infiltrator::files {
@@ -23,5 +24,8 @@ bool apply_tags(const std::vector<std::string> &uris,
 std::set<std::string> tags_for(const TagCatalogue &tags, const std::string &uri);
 std::vector<std::string> uris_for_tag(const TagCatalogue &tags, const std::string &label);
 std::string export_tags_tsv(const TagCatalogue &tags);
+// Rebuild the derived catalogue from an exact bounded exported TSV snapshot.
+// Validation is all-or-nothing; corrupt existing state is never overwritten.
+bool import_tags_tsv(std::string_view input, std::string &error);
 
 } // namespace infiltrator::files

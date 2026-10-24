@@ -45,6 +45,22 @@ int main()
                 "Derived tag lookup must return both associated objects");
         require(export_tags_tsv(saved).find("file:///tmp/tagged-file-B") != std::string::npos,
                 "Tag database must have an exportable form");
+        const std::string exported = export_tags_tsv(saved);
+        require(import_tags_tsv(exported, error),
+                "An export must round-trip into a restorable derived tag catalogue");
+        auto imported = load_tag_catalogue();
+        require(imported.writable && imported.items == saved.items,
+                "Import must rebuild the complete original URI/tag associations");
+        std::string before_invalid = export_tags_tsv(imported);
+        require(!import_tags_tsv("File URI\\tTag\\n\"file:///tmp/item\"\\t\"bad\"\\n" , error),
+                "Escaped backslashes may not masquerade as valid TSV records");
+        require(export_tags_tsv(load_tag_catalogue()) == before_invalid,
+                "Rejected TSV must not modify the durable tag state");
+        require(!import_tags_tsv("File URI\tTag\n\"file:///tmp/one\"\t\"Important\"\n"
+                                 "\"file:///tmp/one\"\t\"Important\"\n", error),
+                "Duplicate imported rows must be rejected");
+        require(export_tags_tsv(load_tag_catalogue()) == before_invalid,
+                "Duplicate TSV must leave the durable tag state intact");
         require(apply_tags({files.front()}, {}, error),
                 "Tag removal must not mutate the underlying file");
         saved = load_tag_catalogue();
