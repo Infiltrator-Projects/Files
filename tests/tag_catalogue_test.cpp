@@ -54,6 +54,10 @@ int main()
         std::string broken = "[Tags]\nversion=1\ncount=1\n";
         require(presentation_store::write("tags.ini", broken, error),
                 "Fixture corruption setup failed");
+        std::string written_fixture;
+        require(presentation_store::read("tags.ini", written_fixture, error) ==
+                    presentation_store::ReadStatus::Loaded,
+                "Cannot read back corrupted catalogue fixture");
         const auto malformed = load_tag_catalogue();
         require(!malformed.writable && malformed.items.empty(),
                 "Malformed tag database must disable writes");
@@ -61,7 +65,7 @@ int main()
                 "Malformed catalogue must be preserved, not overwritten");
         std::string retained;
         require(presentation_store::read("tags.ini", retained, error) ==
-                    presentation_store::ReadStatus::Loaded && retained == broken,
+                    presentation_store::ReadStatus::Loaded && retained == written_fixture,
                 "Rejected changes must preserve the exact unreadable database");
         fs::remove_all(root);
         return 0;
