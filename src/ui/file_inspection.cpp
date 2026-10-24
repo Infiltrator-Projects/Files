@@ -108,6 +108,11 @@ std::string file_metadata(GFile *file, GCancellable *cancel, GError **error)
 
     std::string report;
     append_line(report, "Location", display(file));
+    char *scheme = g_file_get_uri_scheme(file);
+    if (scheme != nullptr) {
+        append_line(report, "Location provider", scheme);
+        g_free(scheme);
+    }
     const char *shown = g_file_info_get_display_name(info);
     if (shown != nullptr) append_line(report, "Name", shown);
     const char *type = g_file_info_get_content_type(info);
@@ -149,15 +154,37 @@ std::string file_metadata(GFile *file, GCancellable *cancel, GError **error)
     if (g_file_info_get_is_symlink(info)) {
         const char *target = g_file_info_get_symlink_target(info);
         append_line(report, "Link target", target != nullptr ? target : "Unavailable");
+        GError *link_error = nullptr;
+        GFileInfo *resolved = g_file_query_info(file,
+            G_FILE_ATTRIBUTE_STANDARD_TYPE, G_FILE_QUERY_INFO_NONE,
+            cancel, &link_error);
+        if (resolved != nullptr) {
+            const GFileType resolved_type = g_file_info_get_file_type(resolved);
+            append_line(report, "Link status",
+                resolved_type == G_FILE_TYPE_DIRECTORY ? "Target directory available" :
+                resolved_type == G_FILE_TYPE_REGULAR ? "Target file available" :
+                "Target resolves to another object type");
+            g_object_unref(resolved);
+        } else if (g_error_matches(link_error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND) ||
+                   g_error_matches(link_error, G_IO_ERROR, G_IO_ERROR_NOT_DIRECTORY)) {
+            append_line(report, "Link status", "Broken (target not found)");
+        } else {
+            append_line(report, "Link status", "Unknown (target could not be checked)");
+        }
+        g_clear_error(&link_error);
     }
     g_object_unref(info);
 
     // GIO providers may not expose filesystem metadata. Absence is not zero.
     GError *fs_error = nullptr;
     GFileInfo *fs = g_file_query_filesystem_info(
-        file, "filesystem::size,filesystem::free,filesystem::readonly",
+        file, "filesystem::size,filesystem::free,filesystem::readonly,filesystem::type",
         cancel, &fs_error);
     if (fs != nullptr) {
+        const char *filesystem_type =
+            g_file_info_get_attribute_string(fs, G_FILE_ATTRIBUTE_FILESYSTEM_TYPE);
+        if (filesystem_type != nullptr)
+            append_line(report, "Filesystem type", filesystem_type);
         if (g_file_info_has_attribute(fs, G_FILE_ATTRIBUTE_FILESYSTEM_SIZE))
             append_line(report, "Volume capacity", size_text(
                 g_file_info_get_attribute_uint64(fs, G_FILE_ATTRIBUTE_FILESYSTEM_SIZE)));
@@ -171,6 +198,17 @@ std::string file_metadata(GFile *file, GCancellable *cancel, GError **error)
         g_object_unref(fs);
     }
     g_clear_error(&fs_error);
+    if (g_cancellable_set_error_if_cancelled(cancel, error)) return {};
+    GError *mount_error = nullptr;
+    GMount *mount = g_file_find_enclosing_mount(file, cancel, &mount_error);
+    if (mount != nullptr) {
+        char *mount_name = g_mount_get_name(mount);
+        if (mount_name != nullptr)
+            append_line(report, "Mounted volume", mount_name);
+        g_free(mount_name);
+        g_object_unref(mount);
+    }
+    g_clear_error(&mount_error);
     if (g_cancellable_set_error_if_cancelled(cancel, error)) return {};
 
     char *path = g_file_get_path(file);
