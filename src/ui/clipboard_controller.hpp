@@ -22,6 +22,8 @@ public:
     ~ClipboardController();
     [[nodiscard]] bool transfer_from_drop(const std::vector<std::string> &sources,
                                           const std::string &destination, bool move = false);
+    // Read-only operation state for UI qualification and disabled actions.
+    [[nodiscard]] bool transfer_busy() const noexcept { return busy_; }
 
     ClipboardController(const ClipboardController &) = delete;
     ClipboardController &operator=(const ClipboardController &) = delete;

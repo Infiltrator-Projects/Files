@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "../src/ui/file_manager_window.hpp"
 #include "../src/ui/dual_pane_controller.hpp"
+#include "../src/ui/clipboard_controller.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -321,14 +322,16 @@ int main()
         }
         require(reverse_selected == 2U,
                 "Second-pane selection must identify both exact source names");
-        g_printerr("PANE-TEST: awaiting forward transfer completion; status=%s\\n",
-            gtk_label_get_text(GTK_LABEL(FileManagerWindowTestAccess::status(*source))));
-        await([&] { return g_str_has_prefix(gtk_label_get_text(GTK_LABEL(
-            FileManagerWindowTestAccess::status(*source))), "Copied "); });
-        g_printerr("PANE-TEST: reverse copy of two exact names\\n");
+        auto *transfer_controller = static_cast<ClipboardController *>(
+            g_object_get_data(G_OBJECT(source->native_window()),
+                              "ifm-clipboard-controller"));
+        require(transfer_controller != nullptr,
+                "Cross-pane transfer must use the window's shared clipboard controller");
+        await([&] { return !transfer_controller->transfer_busy(); });
         g_signal_emit_by_name(copy_left, "clicked");
         await([&] { return fs::exists(a / "reverse-one.txt") &&
-                          fs::exists(a / "reverse-two.txt"); });
+                          fs::exists(a / "reverse-two.txt") &&
+                          !transfer_controller->transfer_busy(); });
         require(fs::exists(b / "reverse-one.txt") && fs::exists(b / "reverse-two.txt"),
                 "Reverse multi-item Copy must preserve both originals");
         pane->toggle();
