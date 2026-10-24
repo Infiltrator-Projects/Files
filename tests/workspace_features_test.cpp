@@ -2,6 +2,7 @@
 #include "../src/ui/file_manager_window.hpp"
 #include "../src/ui/dual_pane_controller.hpp"
 #include "../src/ui/clipboard_controller.hpp"
+#include "../src/ui/item_operation_controller.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -385,6 +386,14 @@ int main()
             return ::stat((a / "file with spaces.txt").c_str(), &mode_stat) == 0 &&
                    (mode_stat.st_mode & 0777) == 0600;
         });
+        auto *item_controller = static_cast<ItemOperationController *>(
+            g_object_get_data(G_OBJECT(source->native_window()),
+                              "ifm-item-controller"));
+        require(item_controller != nullptr, "Permissions must reuse the item operation controller");
+        // Mode bytes can reach the filesystem before the GTask completion and
+        // directory monitor are processed. Do not navigate while that earlier
+        // mutation still owns its window/monitor lease.
+        await([&] { return !item_controller->operation_busy(); });
 
         open(*source, a / ".hidden");
         require(selected(*source, ".hidden") && !source->show_hidden(),

@@ -22,6 +22,7 @@ public:
                             GtkWidget *status_label);
     ~ItemOperationController();
     void rename_selected_to(const std::string &new_name);
+    [[nodiscard]] bool operation_busy() const noexcept { return busy_; }
 
     ItemOperationController(const ItemOperationController &) = delete;
     ItemOperationController &operator=(const ItemOperationController &) = delete;
