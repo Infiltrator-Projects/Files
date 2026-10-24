@@ -5,6 +5,7 @@
 #include "../core/search_engine.hpp"
 
 #include <charconv>
+#include <cstring>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -350,6 +351,7 @@ void show_recursive_search(GtkWindow *owner, GFile *location)
         GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     gtk_widget_set_vexpand(scroll, TRUE);
     s->results = gtk_list_box_new();
+    g_object_set_data(G_OBJECT(dialog), "ifm-recursive-results", s->results);
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(s->results), GTK_SELECTION_SINGLE);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), s->results);
     gtk_box_append(GTK_BOX(outer), scroll);

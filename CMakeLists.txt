@@ -171,6 +171,7 @@ if(BUILD_TESTING)
     add_test(NAME detail-metadata COMMAND detail-metadata-test)
 
     infiltrator_add_core_test(mounted-places-test tests/mounted_places_test.cpp mounted-places)
+    infiltrator_add_core_test(search-engine-test tests/search_engine_test.cpp search-engine)
 
     add_executable(window-state-test tests/window_state_test.cpp)
     target_link_libraries(window-state-test PRIVATE infiltrator-files-ui)
