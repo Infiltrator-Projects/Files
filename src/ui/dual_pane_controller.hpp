@@ -33,7 +33,7 @@ private:
     static void on_forward(GtkButton *, gpointer);
     static void on_select_all(GtkButton *, gpointer);
     static void on_sort(GtkButton *, gpointer);
-    static GtkOrdering compare_names(gconstpointer, gconstpointer, gpointer);
+    static gint compare_names(gconstpointer, gconstpointer, gpointer);
     static void on_transfer(GtkButton *, gpointer);
     static void on_cancel_import(GtkButton *, gpointer);
     static void on_loading(GObject *, GParamSpec *, gpointer);

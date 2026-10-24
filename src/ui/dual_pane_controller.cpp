@@ -311,7 +311,7 @@ void DualPaneController::on_forward(GtkButton *, gpointer data)
     gtk_label_set_text(GTK_LABEL(self->feedback_), "");
 }
 
-GtkOrdering DualPaneController::compare_names(gconstpointer first, gconstpointer second,
+gint DualPaneController::compare_names(gconstpointer first, gconstpointer second,
                                                gpointer user_data)
 {
     const auto *a = G_FILE_INFO(first);
@@ -327,9 +327,8 @@ GtkOrdering DualPaneController::compare_names(gconstpointer first, gconstpointer
             comparison = g_strcmp0(g_file_info_get_name(const_cast<GFileInfo *>(a)),
                                    g_file_info_get_name(const_cast<GFileInfo *>(b)));
     }
-    if (GPOINTER_TO_INT(user_data)) comparison = -comparison;
-    return comparison < 0 ? GTK_ORDERING_SMALLER :
-           comparison > 0 ? GTK_ORDERING_LARGER : GTK_ORDERING_EQUAL;
+    const gint sign = comparison < 0 ? -1 : comparison > 0 ? 1 : 0;
+    return GPOINTER_TO_INT(user_data) ? -sign : sign;
 }
 
 void DualPaneController::on_sort(GtkButton *, gpointer data)
