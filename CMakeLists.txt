@@ -82,6 +82,7 @@ add_subdirectory("${INFILTRATR_COMMON_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/infiltr
 
 pkg_check_modules(GTK4 REQUIRED IMPORTED_TARGET gtk4>=4.10)
 pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0)
+pkg_check_modules(GDKPIXBUF REQUIRED IMPORTED_TARGET gdk-pixbuf-2.0)
 
 function(infiltrator_enable_warnings target)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
@@ -119,6 +120,7 @@ add_library(infiltrator-files-ui STATIC
     src/ui/directory_mutation_guard.cpp
     src/ui/drag_drop_controller.cpp
     src/ui/file_manager_window.cpp
+    src/ui/file_inspection.cpp
     src/ui/interaction_controller.cpp
     src/ui/item_operation_controller.cpp
     src/ui/journal_recovery_controller.cpp
@@ -137,7 +139,8 @@ target_include_directories(infiltrator-files-ui PUBLIC
 target_compile_features(infiltrator-files-ui PUBLIC cxx_std_20)
 target_link_libraries(infiltrator-files-ui PUBLIC
     infiltrator-files-core
-    PkgConfig::GTK4)
+    PkgConfig::GTK4
+    PkgConfig::GDKPIXBUF)
 infiltrator_enable_warnings(infiltrator-files-ui)
 
 add_executable(files src/main.cpp)
