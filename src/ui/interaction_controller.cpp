@@ -9,6 +9,8 @@
 #include "file_manager_window.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cerrno>
 #include <cstring>
 #include <string>
 #include <utility>
@@ -786,22 +788,38 @@ void InteractionController::show_selection_pattern_dialog()
 {
     if (window_ == nullptr || selection_ == nullptr) return;
     GtkWidget *dialog = gtk_window_new();
-    gtk_window_set_title(GTK_WINDOW(dialog), "Select by filename pattern");
+    gtk_window_set_title(GTK_WINDOW(dialog), "Select by pattern, size or date");
     gtk_window_set_transient_for(GTK_WINDOW(dialog), window_);
     gtk_window_set_destroy_with_parent(GTK_WINDOW(dialog), TRUE);
     gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
-    gtk_window_set_default_size(GTK_WINDOW(dialog), 380, -1);
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
-    gtk_widget_set_margin_start(box, 18);
-    gtk_widget_set_margin_end(box, 18);
-    gtk_widget_set_margin_top(box, 18);
-    gtk_widget_set_margin_bottom(box, 18);
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 420, -1);
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    for (auto setter : {gtk_widget_set_margin_top, gtk_widget_set_margin_bottom,
+                         gtk_widget_set_margin_start, gtk_widget_set_margin_end})
+        setter(box, 16);
     gtk_window_set_child(GTK_WINDOW(dialog), box);
-    gtk_box_append(GTK_BOX(box), gtk_label_new("Select visible filenames matching * and ?"));
-    GtkWidget *entry = gtk_entry_new();
-    gtk_entry_set_max_length(GTK_ENTRY(entry), 256);
-    gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "*.pdf");
-    gtk_box_append(GTK_BOX(box), entry);
+    GtkWidget *note = gtk_label_new(
+        "Select currently visible items; leave unwanted criteria blank.\n"
+        "Unknown file size or modification time never matches a required filter.");
+    gtk_label_set_xalign(GTK_LABEL(note), 0);
+    gtk_label_set_wrap(GTK_LABEL(note), TRUE);
+    gtk_box_append(GTK_BOX(box), note);
+    std::array<GtkWidget *, 5> entries{};
+    const std::array<const char *, 5> captions{
+        "Filename pattern (* and ?)", "Minimum bytes", "Maximum bytes",
+        "Modified on/after (YYYY-MM-DD)", "Modified on/before (YYYY-MM-DD)"};
+    for (std::size_t index = 0; index < entries.size(); ++index) {
+        GtkWidget *label = gtk_label_new(captions[index]);
+        gtk_label_set_xalign(GTK_LABEL(label), 0);
+        gtk_box_append(GTK_BOX(box), label);
+        entries[index] = gtk_entry_new();
+        gtk_entry_set_max_length(GTK_ENTRY(entries[index]), index == 0 ? 256 : index < 3 ? 20 : 10);
+        gtk_box_append(GTK_BOX(box), entries[index]);
+    }
+    GtkWidget *message = gtk_label_new("");
+    gtk_label_set_wrap(GTK_LABEL(message), TRUE);
+    gtk_widget_add_css_class(message, "error");
+    gtk_box_append(GTK_BOX(box), message);
     GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_set_halign(actions, GTK_ALIGN_END);
     gtk_box_append(GTK_BOX(box), actions);
@@ -809,42 +827,135 @@ void InteractionController::show_selection_pattern_dialog()
     GtkWidget *apply = gtk_button_new_with_label("Select matches");
     gtk_box_append(GTK_BOX(actions), cancel);
     gtk_box_append(GTK_BOX(actions), apply);
-    g_object_set_data(G_OBJECT(dialog), "ifm-pattern-entry", entry);
-    g_object_set_data(G_OBJECT(dialog), "ifm-pattern-controller", this);
+    struct Inputs {
+        std::array<GtkWidget *, 5> entries;
+        GtkWidget *message;
+        GWeakRef window;
+        InteractionController *controller;
+        Inputs(std::array<GtkWidget *, 5> e, GtkWidget *label,
+               GtkWindow *owner, InteractionController *self)
+            : entries(e), message(label), controller(self)
+        { g_weak_ref_init(&window, G_OBJECT(owner)); }
+        ~Inputs() { g_weak_ref_clear(&window); }
+    };
+    g_object_set_data_full(G_OBJECT(dialog), "ifm-pattern-criteria",
+        new Inputs(entries, message, window_, this),
+        [](gpointer data) { delete static_cast<Inputs *>(data); });
     g_signal_connect_swapped(cancel, "clicked", G_CALLBACK(gtk_window_destroy), dialog);
-    g_signal_connect(apply, "clicked", G_CALLBACK(+[](GtkButton *, gpointer data) {
-        auto *win = GTK_WINDOW(data);
-        auto *self = static_cast<InteractionController *>(
-            g_object_get_data(G_OBJECT(win), "ifm-pattern-controller"));
-        auto *input = GTK_EDITABLE(g_object_get_data(G_OBJECT(win), "ifm-pattern-entry"));
-        if (self == nullptr || input == nullptr || self->selection_ == nullptr) return;
-        const char *pattern = gtk_editable_get_text(input);
-        if (pattern == nullptr || *pattern == '\0' ||
-            !g_utf8_validate(pattern, -1, nullptr)) return;
-        GListModel *model = gtk_multi_selection_get_model(self->selection_);
-        if (model == nullptr) return;
+    g_signal_connect(apply, "clicked", G_CALLBACK(+[](GtkButton *, gpointer raw) {
+        GtkWindow *dialog = GTK_WINDOW(raw);
+        auto *data = static_cast<Inputs *>(
+            g_object_get_data(G_OBJECT(dialog), "ifm-pattern-criteria"));
+        if (data == nullptr) return;
+        GtkWindow *owner = GTK_WINDOW(g_weak_ref_get(&data->window));
+        if (owner == nullptr) return;
+        if (gtk_window_get_application(owner) == nullptr ||
+            data->controller->selection_ == nullptr) {
+            g_object_unref(owner); return;
+        }
+        auto text = [&](std::size_t n) {
+            return gtk_editable_get_text(GTK_EDITABLE(data->entries[n]));
+        };
+        const char *pattern = text(0);
+        guint64 min_bytes = 0, max_bytes = G_MAXUINT64;
+        bool has_min = false, has_max = false;
+        auto parse_size = [&](int i, guint64 &size, bool &present) {
+            const char *value = text(i);
+            if (value == nullptr || *value == '\0') return true;
+            if (!g_ascii_isdigit(*value)) return false;
+            char *after = nullptr;
+            errno = 0;
+            const guint64 parsed = g_ascii_strtoull(value, &after, 10);
+            if (errno == ERANGE || after == value || *after != '\0') return false;
+            size = parsed; present = true; return true;
+        };
+        gint64 first = G_MININT64, last = G_MAXINT64;
+        bool since = false, until = false;
+        auto parse_date = [&](int i, gint64 &time, bool upper, bool &present) {
+            const char *value = text(i);
+            if (value == nullptr || *value == '\0') return true;
+            if (strlen(value) != 10 || value[4] != '-' || value[7] != '-') return false;
+            for (int j = 0; j < 10; ++j)
+                if (j != 4 && j != 7 && !g_ascii_isdigit(value[j])) return false;
+            const int year = (value[0]-'0')*1000+(value[1]-'0')*100+
+                (value[2]-'0')*10+value[3]-'0';
+            const int month = (value[5]-'0')*10+value[6]-'0';
+            const int day = (value[8]-'0')*10+value[9]-'0';
+            if (!g_date_valid_dmy(static_cast<GDateDay>(day),
+                                  static_cast<GDateMonth>(month),
+                                  static_cast<GDateYear>(year))) return false;
+            GDateTime *date = g_date_time_new_local(year, month, day, 0, 0, 0);
+            if (date == nullptr) return false;
+            if (upper) {
+                GDateTime *next = g_date_time_add_days(date, 1);
+                g_date_time_unref(date); date = next;
+                if (date == nullptr) return false;
+            }
+            time = g_date_time_to_unix(date);
+            g_date_time_unref(date); present = true; return true;
+        };
+        if (!parse_size(1, min_bytes, has_min) ||
+            !parse_size(2, max_bytes, has_max) ||
+            !parse_date(3, first, false, since) ||
+            !parse_date(4, last, true, until) ||
+            ((pattern == nullptr || *pattern == '\0') &&
+                !has_min && !has_max && !since && !until) ||
+            (has_min && has_max && min_bytes > max_bytes) ||
+            (since && until && first >= last) ||
+            (pattern != nullptr && !g_utf8_validate(pattern, -1, nullptr))) {
+            gtk_label_set_text(GTK_LABEL(data->message),
+                "Enter at least one valid pattern, byte size or local date range.");
+            g_object_unref(owner); return;
+        }
+        GListModel *model = gtk_multi_selection_get_model(data->controller->selection_);
+        const guint count = model != nullptr ? g_list_model_get_n_items(model) : 0U;
+        if (count > 100000U) {
+            gtk_label_set_text(GTK_LABEL(data->message),
+                               "Selection is limited to 100,000 visible entries.");
+            g_object_unref(owner); return;
+        }
         GtkBitset *mask = gtk_bitset_new_empty();
         GtkBitset *matches = gtk_bitset_new_empty();
-        const guint count = g_list_model_get_n_items(model);
-        for (guint i = 0U; i < count; ++i) {
-            gtk_bitset_add(mask, i);
-            auto *info = G_FILE_INFO(g_list_model_get_item(model, i));
-            if (info != nullptr) {
+        for (guint index = 0; index < count; ++index) {
+            gtk_bitset_add(mask, index);
+            auto *info = G_FILE_INFO(g_list_model_get_item(model, index));
+            if (info == nullptr) continue;
+            bool match = true;
+            if (pattern != nullptr && *pattern != '\0') {
                 const char *name = g_file_info_get_name(info);
-                if (name != nullptr && g_pattern_match_simple(pattern, name))
-                    gtk_bitset_add(matches, i);
-                g_object_unref(info);
+                match = name != nullptr && g_pattern_match_simple(pattern, name);
             }
+            if (match && (has_min || has_max)) {
+                match = g_file_info_get_file_type(info) == G_FILE_TYPE_REGULAR &&
+                    g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_STANDARD_SIZE);
+                if (match) {
+                    const guint64 bytes = static_cast<guint64>(g_file_info_get_size(info));
+                    match = (!has_min || bytes >= min_bytes) &&
+                        (!has_max || bytes <= max_bytes);
+                }
+            }
+            if (match && (since || until)) {
+                match = g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_TIME_MODIFIED);
+                if (match) {
+                    const guint64 value = g_file_info_get_attribute_uint64(
+                        info, G_FILE_ATTRIBUTE_TIME_MODIFIED);
+                    if (since && first >= 0 && value < static_cast<guint64>(first)) match = false;
+                    if (until && last >= 0 && value >= static_cast<guint64>(last)) match = false;
+                }
+            }
+            if (match) gtk_bitset_add(matches, index);
+            g_object_unref(info);
         }
-        const guint selected = static_cast<guint>(gtk_bitset_get_size(matches));
-        gtk_selection_model_set_selection(GTK_SELECTION_MODEL(self->selection_), matches, mask);
-        gtk_bitset_unref(mask);
-        gtk_bitset_unref(matches);
-        if (self->status_label_ != nullptr) {
-            const std::string status = std::to_string(selected) + " filenames selected";
-            gtk_label_set_text(GTK_LABEL(self->status_label_), status.c_str());
+        const auto selected = gtk_bitset_get_size(matches);
+        gtk_selection_model_set_selection(
+            GTK_SELECTION_MODEL(data->controller->selection_), matches, mask);
+        gtk_bitset_unref(mask); gtk_bitset_unref(matches);
+        if (data->controller->status_label_ != nullptr) {
+            const std::string message = std::to_string(selected) + " visible items selected";
+            gtk_label_set_text(GTK_LABEL(data->controller->status_label_), message.c_str());
         }
-        gtk_window_destroy(win);
+        gtk_window_destroy(dialog);
+        g_object_unref(owner);
     }), dialog);
     gtk_window_present(GTK_WINDOW(dialog));
 }
