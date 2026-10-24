@@ -348,6 +348,20 @@ void FileManagerWindow::build_ui(GtkApplication *application)
     GtkEventController *tab_keys = gtk_event_controller_key_new();
     g_signal_connect(tab_keys, "key-pressed", G_CALLBACK(on_tab_key_pressed), this);
     gtk_widget_add_controller(window_, tab_keys);
+    // X11/Wayland mice commonly expose navigation buttons as 8/9. Consume
+    // only button-press events, never pointer motion or another control's
+    // ordinary primary/secondary action.
+    GtkEventController *mouse_navigation = gtk_event_controller_legacy_new();
+    g_signal_connect(mouse_navigation, "event", G_CALLBACK((+[](
+        GtkEventControllerLegacy *, GdkEvent *event, gpointer raw) -> gboolean {
+        if (gdk_event_get_event_type(event) != GDK_BUTTON_PRESS) return FALSE;
+        const guint button = gdk_button_event_get_button(event);
+        auto *self = static_cast<FileManagerWindow *>(raw);
+        if (button == 8U) { self->navigate_history(-1); return TRUE; }
+        if (button == 9U) { self->navigate_history(1); return TRUE; }
+        return FALSE;
+    })), this);
+    gtk_widget_add_controller(window_, mouse_navigation);
 
     GtkWidget *paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_widget_set_vexpand(paned, TRUE);
