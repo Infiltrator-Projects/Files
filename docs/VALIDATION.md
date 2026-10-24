@@ -2,7 +2,7 @@
 
 ## 0.1.67 source/release evidence
 
-The [0.1.67 implementation audit](FEATURE-AUDIT-0.1.67.md) anchors the 24 post-v0.1.66 changes to source, original requirements and tests. The prior main source \`d562d113...\` passed 20 hosted CTest executables and package/native-installer checks in [Verify run 40075635698](https://github.com/Infiltrator-Projects/Files/actions/runs/40075635698). This is evidence for the **earlier exact commit only**. The 0.1.67 versioned/audited commit requires **its own** successful Verify, GitHub asset/tag qualification and central beta APT SHA-256 match. Physical Linux Mint Day/Night, accessibility, cross-filesystem and unplug/crash tests remain explicitly unproven.
+The [0.1.67 implementation audit](FEATURE-AUDIT-0.1.67.md) anchors the 24 post-v0.1.66 changes to source, original requirements and tests. The prior main source `d562d113...` passed 20 hosted CTest executables and package/native-installer checks in [Verify run 40075635698](https://github.com/Infiltrator-Projects/Files/actions/runs/40075635698). This is evidence for the **earlier exact commit only**. The 0.1.67 versioned/audited commit requires **its own** successful Verify, GitHub asset/tag qualification and central beta APT SHA-256 match. Physical Linux Mint Day/Night, accessibility, cross-filesystem and unplug/crash tests remain explicitly unproven.
 
 
 ## Qualification
