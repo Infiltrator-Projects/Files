@@ -2,6 +2,9 @@
 
 ## Qualification
 
+Files 0.1.62's interaction-surface regression additionally opens real GTK inspection windows, waits for asynchronous GIO metadata, computes SHA-256, compares two dissimilar test files, exports the visible report through the clipboard, and verifies an empty-directory recursive scan with allocated/logical result fields. A native folder exposes terminal launch without starting a terminal in CI. The inspection worker has a cancellation contract and explicit 250,000-entry/64-level traversal limits; device and visual qualification remain separate.
+
+
 From a recursive checkout with GTK 4, GIO, CMake and Ninja installed:
 
 ```sh

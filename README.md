@@ -58,6 +58,9 @@ Product-level acceptance is defined in [`docs/PRODUCT-QUALITY.md`](docs/PRODUCT-
 
 ## Current implementation
 
+The 0.1.62 bounded inspection tranche adds terminals for native current/selected folders; asynchronous SHA-256 calculation and two-file digest comparison; a copyable inspection report with supported GIO metadata, local image dimensions, extended-attribute names and POSIX access ACL presence; and cancellable recursive folder logical/allocated size and item counts with explicit bounds. These are read-only facilities, not metadata editing, an EXIF editor or byte-for-byte verification. All file mutations retain their existing durable owners.
+
+
 The 0.1.60 selection tranche adds pattern-based selection (visible filename `*`/`?` matching), selecting matching file types, opening multiple selected folders in tabs and copying all selected native paths or URIs as text. Tab opening preflights available capacity, and textual clipboard export rejects a partial or oversized result rather than silently truncating it. These five additive interactions do not claim the still-planned split pane, recursive/content search, archive workflow or permission editor.
 
 

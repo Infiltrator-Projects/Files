@@ -1,5 +1,8 @@
 # Files — Complete Feature Catalogue
 
+The 0.1.62 tranche qualifies ten user-facing inspection/navigation interactions: current-folder and selected-folder native terminals, SHA-256, two-file hash comparison, copyable details, image dimensions, bounded xattr listing, POSIX ACL presence, recursive directory logical/allocated size and explicit cancellation. Full EXIF parsing, editing ACLs, cross-mount accounting and broad recursive/content search remain planned. Inspection never claims unknown allocated capacity is zero and does not add another mutation engine.
+
+
 The 0.1.59 safety follow-up restricts journalled native drag moves to an explicit
 Shift-drag from the same process; all other compatible drops prefer Copy.
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.62 — 2026-10-24
+
+- Add a bounded, asynchronous inspection panel with live GIO metadata, image dimensions, extended-attribute listing, POSIX ACL presence and filesystem capacity details when available.
+- Add cancellable SHA-256 computation and two-regular-file hash comparison, and allow visible evidence to be copied to the clipboard. Hash agreement is identified as digest agreement, not a byte-by-byte proof.
+- Add native-folder terminal launching for the current and selected folder, using a working directory and an argument vector without shell interpolation.
+- Add cancellable directory logical/allocated size and item counting, limited to 250,000 items and depth 64, refusing unsupported allocation values rather than inventing zero and never descending through symlinks or native mount boundaries.
+- Integrate new interactions into an opt-in Inspection and tools overflow section and context-specific short menus, leaving the journalled mutation engines untouched; qualify core flows in headless GTK tests.
+- Real Linux Mint screenshot acceptance and physical/provider stress testing remain outstanding.
+
+
 ## 0.1.61 — 2026-10-24
 
 - Replace the unbounded right-click action catalogue with a bounded, compact, selection-aware GTK context menu, retaining the complete command surface in File actions.
