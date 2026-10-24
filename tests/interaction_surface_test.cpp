@@ -197,8 +197,9 @@ void qualify_selection_actions(infiltrator::files::FileManagerWindow &w,
             "Item context menu must not include background creation controls");
     require(gtk_widget_get_visible(find_button(context, "Open With…")),
             "Regular file context menu must offer Open With");
-    require(gtk_widget_get_sensitive(find_button(context, "Copy")),
-            "Item context Copy must use the installed clipboard action");
+    require(g_object_get_data(G_OBJECT(find_button(context, "Copy")),
+                              "ifm-proxy-target") == find_button(popover, "Copy"),
+            "Item context Copy must delegate to the installed clipboard action");
     g_signal_emit_by_name(type_action, "clicked");
     require(selected_count(selection) == 2U,
             "Select same type must include both PDFs but exclude text and directories");
