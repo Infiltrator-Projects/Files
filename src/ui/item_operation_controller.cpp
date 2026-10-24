@@ -885,7 +885,11 @@ void ItemOperationController::on_operation_finished(GObject *source_object,
         return;
     }
 
-    if (operation->changed && self->current_location_is_path(operation->destination.parent_path())) {
+    // A mode change does not create or rename an entry. Re-selecting the
+    // earlier pathname after its asynchronous completion can override a newer
+    // user navigation/selection (including an explicitly revealed hidden file).
+    if (completed_kind != Kind::Permissions && operation->changed &&
+        self->current_location_is_path(operation->destination.parent_path())) {
         self->pending_selection_name_ = operation->destination.filename().string();
         self->select_pending_item();
     }
