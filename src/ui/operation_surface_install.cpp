@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "file_manager_window.hpp"
 
+#include "archive_controller.hpp"
 #include "batch_item_operation_controller.hpp"
 #include "clipboard_controller.hpp"
 #include "create_folder_controller.hpp"
@@ -27,6 +28,7 @@ void FileManagerWindow::install_operation_surface()
     new DestructiveOperationController(GTK_WINDOW(window_), directory_list_, primary_selection_, status_label_, selection_);
     new BatchItemOperationController(GTK_WINDOW(window_), directory_list_, selection_, status_label_);
     new JournalRecoveryController(GTK_WINDOW(window_), status_label_);
+    new ArchiveController(GTK_WINDOW(window_), directory_list_, primary_selection_, status_label_);
 
     // Install the shared interaction layer after the mutation controllers. It
     // consolidates their already-qualified actions rather than reimplementing them.

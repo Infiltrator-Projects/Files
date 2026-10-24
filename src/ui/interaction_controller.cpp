@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "interaction_controller.hpp"
 
+#include "archive_controller.hpp"
 #include "detail_metadata.hpp"
 #include "file_inspection.hpp"
 #include "recursive_search.hpp"
@@ -437,6 +438,8 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
             ActionScope::SingleSelection, proxies));
         add_command(tools, "Inspect file…", "inspect",
                     ActionScope::SingleSelection, proxies);
+        add_command(tools, "Extract archive safely", "extract-archive",
+                    ActionScope::SingleSelection, proxies);
         add_command(tools, "Tag selected files…", "tag-selected",
                     ActionScope::AnySelection, proxies);
         add_command(tools, "Copy tag catalogue as TSV", "export-tags",
@@ -717,6 +720,11 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
     else if (g_strcmp0(command, "folders-first") == 0) window->toggle_folders_first();
     else if (g_strcmp0(command, "single-click") == 0) window->toggle_single_click_activation();
     else if (g_strcmp0(command, "folder-default-tab") == 0) window->toggle_folder_open_mode();
+    else if (g_strcmp0(command, "extract-archive") == 0) {
+        auto *archive = static_cast<ArchiveController *>(
+            g_object_get_data(G_OBJECT(self->window_), "ifm-archive-controller"));
+        if (archive != nullptr) archive->extract_selected();
+    }
     else if (g_strcmp0(command, "remote-thumbnails") == 0) window->toggle_remote_thumbnails();
     else if (g_strcmp0(command, "icons-smaller") == 0) window->adjust_icon_density(-1);
     else if (g_strcmp0(command, "icons-larger") == 0) window->adjust_icon_density(1);

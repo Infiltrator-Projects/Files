@@ -75,7 +75,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build pkg-config libgtk-4-dev dpkg-dev xvfb xauth dbus-x11 gdb
+            build-essential cmake ninja-build pkg-config libgtk-4-dev libarchive-dev dpkg-dev xvfb xauth dbus-x11 gdb
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release

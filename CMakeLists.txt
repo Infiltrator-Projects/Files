@@ -8,6 +8,7 @@ project(Files VERSION "${FILES_VERSION}" LANGUAGES C CXX)
 include(CTest)
 include(GNUInstallDirs)
 find_package(PkgConfig REQUIRED)
+find_package(LibArchive REQUIRED)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -92,6 +93,7 @@ function(infiltrator_enable_warnings target)
 endfunction()
 
 add_library(infiltrator-files-core STATIC
+    src/core/archive_engine.cpp
     src/core/batch_removal_engine.cpp
     src/core/batch_transfer_engine.cpp
     src/core/copied_metadata.cpp
@@ -108,12 +110,14 @@ target_include_directories(infiltrator-files-core PUBLIC
 target_compile_features(infiltrator-files-core PUBLIC cxx_std_20)
 target_link_libraries(infiltrator-files-core PUBLIC
     InfiltratrCommon::Common
-    PkgConfig::GIO)
+    PkgConfig::GIO
+    LibArchive::LibArchive)
 infiltrator_enable_warnings(infiltrator-files-core)
 
 # Compile the GTK implementation once. The application and hosted UI tests
 # consume this target instead of maintaining duplicate source-file inventories.
 add_library(infiltrator-files-ui STATIC
+    src/ui/archive_controller.cpp
     src/ui/batch_item_operation_controller.cpp
     src/ui/clipboard_controller.cpp
     src/ui/dual_pane_controller.cpp
@@ -164,6 +168,7 @@ endfunction()
 if(BUILD_TESTING)
     infiltrator_add_core_test(location-model-test tests/location_model_test.cpp location-model)
     infiltrator_add_core_test(provider-import-test tests/provider_import_engine_test.cpp provider-import)
+    infiltrator_add_core_test(archive-engine-test tests/archive_engine_test.cpp archive-engine)
 
     add_library(calendar-date-test-fixture MODULE tests/calendar_date_fixture.c)
     target_link_libraries(calendar-date-test-fixture PRIVATE InfiltratrCommon::Portable)

@@ -66,3 +66,16 @@ items; a failure stops the remainder of the requested batch.
 Non-native destinations, remote moves, recursive provider directories, remote
 write/rename, selective retry/resume, full provider metadata preservation and
 hardware disconnect qualification remain outside this bounded slice.
+
+## Native archive extraction tranche
+
+The File actions → Inspection and tools → Extract archive safely action
+now invokes an isolated LibArchive-backed archive engine for a single native
+archive, extracting into a new folder named after the archive. Entry paths
+are validated against absolute paths, traversal, Windows separators and depth
+limits; links, devices and hardlinks are refused. Decompression uses private,
+journal-correlated staging with 50,000-entry, 1 GiB/file and 8 GiB aggregate
+limits, then hands final publication to the existing verified transfer engine.
+Existing destinations are not overwritten. This is a tested bounded extraction
+feature, not a claim of complete archive creation, virtual browsing,
+password-encrypted extraction or archive-format/provider parity.

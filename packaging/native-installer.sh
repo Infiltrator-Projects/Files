@@ -81,7 +81,7 @@ if ((missing)); then
     printf 'Installing Files native-build requirements...\n'
     run_root /usr/bin/apt-get -o DPkg::Lock::Timeout=300 update
     run_root /usr/bin/apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends \
-        build-essential cmake ninja-build pkg-config libgtk-4-dev dpkg-dev \
+        build-essential cmake ninja-build pkg-config libgtk-4-dev libarchive-dev dpkg-dev \
         xvfb xauth dbus-x11
 fi
 
