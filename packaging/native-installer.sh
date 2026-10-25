@@ -172,11 +172,14 @@ test ! -e "$inspect/usr/bin/files"
 test -f "$inspect/usr/share/applications/files.desktop"
 grep -Fxq 'Exec=/Programs/files %U' "$inspect/usr/share/applications/files.desktop"
 grep -Fxq 'MimeType=inode/directory;' "$inspect/usr/share/applications/files.desktop"
-test -f "$inspect/usr/share/doc/files/BUILD-INFO"
-grep -Fxq 'Profile: aggressive' "$inspect/usr/share/doc/files/BUILD-INFO"
-grep -Fxq 'PGO: trained two-pass profile' "$inspect/usr/share/doc/files/BUILD-INFO"
-grep -Fq -- '-O3' "$inspect/usr/share/doc/files/BUILD-INFO"
-grep -Fq -- '-march=native' "$inspect/usr/share/doc/files/BUILD-INFO"
+test -f "$inspect/System/Resources/Documentation/Files/BUILD-INFO"
+test -x "$inspect/System/Commands/files-ensure-fonts"
+test ! -e "$inspect/usr/lib/files"
+test ! -e "$inspect/usr/share/doc/files"
+grep -Fxq 'Profile: aggressive' "$inspect/System/Resources/Documentation/Files/BUILD-INFO"
+grep -Fxq 'PGO: trained two-pass profile' "$inspect/System/Resources/Documentation/Files/BUILD-INFO"
+grep -Fq -- '-O3' "$inspect/System/Resources/Documentation/Files/BUILD-INFO"
+grep -Fq -- '-march=native' "$inspect/System/Resources/Documentation/Files/BUILD-INFO"
 
 printf 'Installing Files %s into /Programs...\n' "$native_version"
 run_root /usr/bin/apt-get -o DPkg::Lock::Timeout=300 install -y "$deb"
@@ -186,8 +189,8 @@ test -x /Programs/files
 test ! -e /usr/bin/files
 grep -Fxq 'Exec=/Programs/files %U' /usr/share/applications/files.desktop
 grep -Fxq 'MimeType=inode/directory;' /usr/share/applications/files.desktop
-grep -Fxq 'Profile: aggressive' /usr/share/doc/files/BUILD-INFO
-grep -Fxq 'PGO: trained two-pass profile' /usr/share/doc/files/BUILD-INFO
+grep -Fxq 'Profile: aggressive' /System/Resources/Documentation/Files/BUILD-INFO
+grep -Fxq 'PGO: trained two-pass profile' /System/Resources/Documentation/Files/BUILD-INFO
 
 printf 'Files %s native installation complete: /Programs/files\n' "$native_version"
 exit 0
