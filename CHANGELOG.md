@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.70 — 2026-10-25
+
+- Install Files-owned font bootstrap in `/System/Commands/files-ensure-fonts` and package build provenance in `/System/Resources/Documentation/Files`.
+- Update Debian post-installation, aggressive native installer verification, and CI package assertions for the canonical InfiltratorOS namespace.
+- Preserve `/Programs/files`, the desktop launcher and all existing Nemo/default file-manager and MIME associations; do not remove Mint's existing file manager.
+- Introduce a new immutable package version rather than rewriting the already-published 0.1.69 release.
+
 ## 0.1.69 — 2026-10-25
 
 - Add copy-only native ZIP creation for one selected regular file, using bounded private staging, journal admission, collision refusal and the existing durable transfer publication path. Directory-tree creation, encryption and virtual archive browsing remain outstanding.
