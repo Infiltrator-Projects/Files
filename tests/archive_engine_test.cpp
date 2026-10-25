@@ -78,6 +78,19 @@ int main()
         if (restored_bytes != "tree payload")
             throw std::runtime_error("Directory ZIP round-trip bytes did not match");
 
+        // An empty folder produces a valid empty ZIP, which extracts as an
+        // empty archive-named directory rather than an error or a placeholder.
+        fs::create_directory(root / "empty-tree");
+        const auto zipped_empty = engine.create_zip(root / "empty-tree", root, "dir-empty-1");
+        if (!zipped_empty.ok())
+            throw std::runtime_error("Empty directory ZIP failed: " + zipped_empty.message);
+        const auto extracted_empty = engine.extract(root / "empty-tree.zip",
+                                                     root / "unpack", "dir-empty-2");
+        if (!extracted_empty.ok() ||
+            !fs::is_directory(root / "unpack" / "empty-tree") ||
+            !fs::is_empty(root / "unpack" / "empty-tree"))
+            throw std::runtime_error("Empty directory ZIP round-trip failed: " + extracted_empty.message);
+
         // The archiver may never follow a link into data outside the tree.
         const fs::path unsafe = root / "unsafe-tree";
         fs::create_directory(unsafe);
