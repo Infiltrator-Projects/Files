@@ -283,15 +283,15 @@ install(TARGETS files
 install(FILES data/files.desktop
     DESTINATION "/usr/share/applications")
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/BUILD-INFO"
-    DESTINATION "/usr/share/doc/files")
+    DESTINATION "/System/Resources/Documentation/Files")
 
 # Standalone Files must resolve the same verified 23-face family as a full
 # InfiltratorOS installation. Font binaries belong to the persistent machine
 # resource cache, not this package. The helper comes from pinned Common.
 install(PROGRAMS
     "${INFILTRATR_COMMON_DIR}/cmake/InfiltratrEnsureExtendedFonts.sh"
-    DESTINATION "/usr/lib/files"
-    RENAME "ensure-extended-fonts")
+    DESTINATION "/System/Commands"
+    RENAME "files-ensure-fonts")
 
 set(CPACK_PACKAGE_NAME "files")
 set(CPACK_PACKAGE_VENDOR "Infiltrator Projects")
