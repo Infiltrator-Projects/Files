@@ -247,13 +247,22 @@ OperationResult ArchiveEngine::create_zip(const fs::path &source,
     if (ec || (!directory && !fs::is_regular_file(kind)))
         return failure(OperationStatus::UnsupportedCapability, OperationPhase::Preflight,
                        destination, "ZIP creation requires a native regular file or directory.");
-    ec.clear();
-    if (directory && fs::equivalent(source, destination_parent, ec))
-        return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight,
-                       destination, "ZIP creation cannot place staging inside its own input.");
-    if (ec)
-        return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight,
-                       destination, "Could not validate ZIP source and destination.");
+    if (directory) {
+        ec.clear();
+        const fs::path source_root = fs::canonical(source, ec);
+        if (ec)
+            return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight,
+                           destination, "Could not resolve ZIP source directory.");
+        const fs::path destination_root = fs::canonical(destination_parent, ec);
+        if (ec)
+            return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight,
+                           destination, "Could not resolve ZIP destination directory.");
+        if (std::mismatch(source_root.begin(), source_root.end(),
+                          destination_root.begin(), destination_root.end()).first ==
+            source_root.end())
+            return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight,
+                           destination, "ZIP staging cannot be inside the source directory.");
+    }
     ec.clear();
     if (!fs::is_directory(destination_parent, ec) || ec)
         return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight,
