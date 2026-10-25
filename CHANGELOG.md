@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.71 — 2026-10-25
+
+- Fix the Mint InfiltratorOS native installation failure when GTK 4 build dependencies are already present but the `libarchive-dev` development headers and linker library are missing. Probe LibArchive explicitly before deciding to skip the APT build-dependency installation.
+- Keep the independently installed Files application at `/Programs/files`, preserve Nemo and the system's default file-manager associations, and retain the two-pass CPU-native PGO installation flow.
+
 ## 0.1.70 — 2026-10-25
 
 - Install Files-owned font bootstrap in `/System/Commands/files-ensure-fonts` and package build provenance in `/System/Resources/Documentation/Files`.
