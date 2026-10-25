@@ -129,8 +129,10 @@ jobs:
           dpkg-deb -x "$deb" "$tmp/root"
           dpkg-deb -e "$deb" "$tmp/control"
           test -x "$tmp/control/postinst"
-          grep -Fq '/usr/lib/files/ensure-extended-fonts' "$tmp/control/postinst"
-          test -x "$tmp/root/usr/lib/files/ensure-extended-fonts"
+          grep -Fq '/System/Commands/files-ensure-fonts' "$tmp/control/postinst"
+          test -x "$tmp/root/System/Commands/files-ensure-fonts"
+          test ! -e "$tmp/root/usr/lib/files"
+          test ! -e "$tmp/root/usr/share/doc/files"
           grep -Eq '(^|, )ca-certificates(,|$)' <<<"$dependencies"
           grep -Eq '(^|, )fontconfig(,|$)' <<<"$dependencies"
           grep -Fq 'curl | wget' <<<"$dependencies"
@@ -139,8 +141,8 @@ jobs:
           test -f "$tmp/root/usr/share/applications/files.desktop"
           grep -Fxq 'Exec=/Programs/files %U' "$tmp/root/usr/share/applications/files.desktop"
           grep -Fxq 'MimeType=inode/directory;' "$tmp/root/usr/share/applications/files.desktop"
-          test -f "$tmp/root/usr/share/doc/files/BUILD-INFO"
-          grep -Fxq 'Profile: release' "$tmp/root/usr/share/doc/files/BUILD-INFO"
+          test -f "$tmp/root/System/Resources/Documentation/Files/BUILD-INFO"
+          grep -Fxq 'Profile: release' "$tmp/root/System/Resources/Documentation/Files/BUILD-INFO"
 
           if [[ "$deb" != "$canonical" ]]; then
             mv "$deb" "$canonical"
@@ -189,10 +191,10 @@ jobs:
           test ! -e /System/Programs
           grep -Fxq 'Exec=/Programs/files %U' /usr/share/applications/files.desktop
           grep -Fxq 'MimeType=inode/directory;' /usr/share/applications/files.desktop
-          grep -Fxq 'Profile: aggressive' /usr/share/doc/files/BUILD-INFO
-          grep -Fxq 'PGO: trained two-pass profile' /usr/share/doc/files/BUILD-INFO
-          grep -Fq -- '-O3' /usr/share/doc/files/BUILD-INFO
-          grep -Fq -- '-march=native' /usr/share/doc/files/BUILD-INFO
+          grep -Fxq 'Profile: aggressive' /System/Resources/Documentation/Files/BUILD-INFO
+          grep -Fxq 'PGO: trained two-pass profile' /System/Resources/Documentation/Files/BUILD-INFO
+          grep -Fq -- '-O3' /System/Resources/Documentation/Files/BUILD-INFO
+          grep -Fq -- '-march=native' /System/Resources/Documentation/Files/BUILD-INFO
 
           (
             cd dist
