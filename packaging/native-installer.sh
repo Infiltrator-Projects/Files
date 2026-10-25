@@ -124,9 +124,19 @@ if [[ -n "$installed_version" ]] &&
     exit 1
 fi
 
+# Mirror System Monitor's proven ELF call/visibility optimisations when both
+# installed C and C++ compilers accept them. Native CPU/LTO/PGO remain mandatory.
 base_flags='-O3 -DNDEBUG -march=native -mtune=native -flto=auto'
-generate_flags="$base_flags -fprofile-generate=$profile_root"
-use_flags="$base_flags -fprofile-use=$profile_root -fprofile-correction -Wno-missing-profile -Wno-error=missing-profile"
+for flag in -fno-semantic-interposition -fno-plt; do
+    if printf 'int main(void){return 0;}\n' |
+           gcc -x c -c "$flag" -o /dev/null - >/dev/null 2>&1 &&
+       printf 'int main(){return 0;}\n' |
+           g++ -x c++ -c "$flag" -o /dev/null - >/dev/null 2>&1; then
+        base_flags+=" $flag"
+    fi
+done
+generate_flags="$base_flags -fprofile-generate=$profile_root -fprofile-update=atomic"
+use_flags="$base_flags -fprofile-use=$profile_root -fprofile-correction -fprofile-partial-training -Wno-missing-profile -Wno-error=missing-profile"
 
 printf 'Files %s: PGO training build for this CPU...\n' "$version"
 CC=gcc CXX=g++ cmake -S "$source_root" -B "$build_root" -G Ninja \

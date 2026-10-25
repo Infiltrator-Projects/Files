@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.73 — 2026-10-25
+
+- Align the native ELF call and symbol-visibility flags with System Monitor
+  when both the C and C++ compilers accept them: -fno-semantic-interposition
+  and -fno-plt.
+- Train PGO with atomic profile updates and rebuild with partial-training
+  support, retaining -O3, native CPU tuning, LTO, and mandatory tests.
+- Keep the repaired same-version native package reinstall and Nemo coexistence.
+
 ## 0.1.72 — 2026-10-25
 
 - Correct the physical Linux Mint OS-reset failure where Files has a valid
