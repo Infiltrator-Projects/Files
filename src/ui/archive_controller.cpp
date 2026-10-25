@@ -52,7 +52,9 @@ void ArchiveController::start_selected(bool create)
     auto *info = G_FILE_INFO(gtk_single_selection_get_selected_item(selection_));
     if (info == nullptr) return;
     const char *name = g_file_info_get_name(info);
-    if (name == nullptr || g_file_info_get_file_type(info) != G_FILE_TYPE_REGULAR) {
+    const GFileType type = g_file_info_get_file_type(info);
+    if (name == nullptr || (type != G_FILE_TYPE_REGULAR &&
+                            (!create || type != G_FILE_TYPE_DIRECTORY))) {
         g_object_unref(info); return;
     }
     GFile *file = g_file_get_child(parent, name);

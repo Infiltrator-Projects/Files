@@ -60,6 +60,53 @@ int main()
         const auto unzipped = engine.extract(root / "payload.txt.zip", root / "unpack", "zip-3");
         if (!unzipped.ok() || !fs::exists(root / "unpack" / "payload.txt" / "payload.txt"))
             throw std::runtime_error("ZIP round-trip failed: " + unzipped.message);
+        // Directory ZIPs preserve empty directories and nested payload bytes.
+        const fs::path tree = root / "folder-tree";
+        fs::create_directories(tree / "nested" / "empty");
+        { std::ofstream nested(tree / "nested" / "bytes.txt", std::ios::binary);
+          nested << "tree payload"; }
+        const auto directory_zip = engine.create_zip(tree, root, "dir-zip-1");
+        if (!directory_zip.ok() || !fs::exists(root / "folder-tree.zip"))
+            throw std::runtime_error("Directory ZIP not published: " + directory_zip.message);
+        const auto roundtrip = engine.extract(root / "folder-tree.zip", root / "unpack", "dir-zip-2");
+        if (!roundtrip.ok() ||
+            !fs::is_directory(root / "unpack" / "folder-tree" / "nested" / "empty"))
+            throw std::runtime_error("Nested/empty directory ZIP round-trip failed: " + roundtrip.message);
+        std::ifstream restored(root / "unpack" / "folder-tree" / "nested" / "bytes.txt", std::ios::binary);
+        std::string restored_bytes;
+        std::getline(restored, restored_bytes);
+        if (restored_bytes != "tree payload")
+            throw std::runtime_error("Directory ZIP round-trip bytes did not match");
+
+        // An empty folder produces a valid empty ZIP, which extracts as an
+        // empty archive-named directory rather than an error or a placeholder.
+        fs::create_directory(root / "empty-tree");
+        const auto zipped_empty = engine.create_zip(root / "empty-tree", root, "dir-empty-1");
+        if (!zipped_empty.ok())
+            throw std::runtime_error("Empty directory ZIP failed: " + zipped_empty.message);
+        const auto extracted_empty = engine.extract(root / "empty-tree.zip",
+                                                     root / "unpack", "dir-empty-2");
+        if (!extracted_empty.ok() ||
+            !fs::is_directory(root / "unpack" / "empty-tree") ||
+            !fs::is_empty(root / "unpack" / "empty-tree"))
+            throw std::runtime_error("Empty directory ZIP round-trip failed: " + extracted_empty.message);
+
+        // The archiver may never follow a link into data outside the tree.
+        const fs::path unsafe = root / "unsafe-tree";
+        fs::create_directory(unsafe);
+        fs::create_symlink(input, unsafe / "follow-me");
+        const auto refused_dir = engine.create_zip(unsafe, root, "dir-zip-3");
+        if (refused_dir.ok() || fs::exists(root / "unsafe-tree.zip"))
+            throw std::runtime_error("Directory ZIP followed a symlink");
+
+        GCancellable *cancel_folder = g_cancellable_new();
+        g_cancellable_cancel(cancel_folder);
+        const auto cancelled_dir = engine.create_zip(tree, root / "unpack",
+                                                      "dir-zip-4", cancel_folder);
+        g_object_unref(cancel_folder);
+        if (cancelled_dir.ok() || fs::exists(root / "unpack" / "folder-tree.zip"))
+            throw std::runtime_error("Cancelled directory ZIP was published");
+
         const fs::path evil = root / "escape.zip";
         sample_archive(evil, "../outside.txt");
         const auto refused = engine.extract(evil, root, "fixture-3");

@@ -10,6 +10,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <dirent.h>
 #include <fcntl.h>
 #include <filesystem>
 #include <memory>
@@ -97,6 +98,116 @@ bool write_exact(int fd, const char *data, std::size_t length)
     }
     return true;
 }
+
+struct ScopedDescriptor {
+    int fd;
+    explicit ScopedDescriptor(int value) : fd(value) {}
+    ~ScopedDescriptor() { if (fd >= 0) ::close(fd); }
+    ScopedDescriptor(const ScopedDescriptor &) = delete;
+    ScopedDescriptor &operator=(const ScopedDescriptor &) = delete;
+};
+
+bool zip_header(struct archive *writer, const std::string &path, bool directory,
+                std::uint64_t size)
+{
+    archive_entry *entry = archive_entry_new();
+    if (!entry) return false;
+    archive_entry_set_pathname(entry, path.c_str());
+    archive_entry_set_filetype(entry, directory ? AE_IFDIR : AE_IFREG);
+    archive_entry_set_perm(entry, directory ? 0755 : 0644);
+    archive_entry_set_size(entry, static_cast<la_int64_t>(size));
+    const bool good = archive_write_header(writer, entry) == ARCHIVE_OK;
+    archive_entry_free(entry);
+    return good;
+}
+
+// Children are always reopened relative to pinned parent descriptors. An
+// untrusted symlink, special file or concurrently retargeted child fails the
+// entire archive before publication; the source tree is never modified.
+bool zip_directory(struct archive *writer, int parent_fd,
+                   const std::string &prefix, unsigned depth,
+                   std::uint64_t &entries, std::uint64_t &total,
+                   GCancellable *cancel)
+{
+    if (cancelled(cancel) || depth > 64U || prefix.size() > 4096U)
+        return false;
+    // The extraction engine already creates the enclosing archive-named folder.
+    // Emit only its contents, avoiding an accidental duplicate root directory.
+    if (!prefix.empty() &&
+        (++entries > kMaxEntries || !zip_header(writer, prefix, true, 0U)))
+        return false;
+    int listing_fd = ::dup(parent_fd);
+    if (listing_fd < 0) return false;
+    DIR *listing = ::fdopendir(listing_fd);
+    if (!listing) { ::close(listing_fd); return false; }
+
+    bool good = true;
+    while (good) {
+        errno = 0;
+        dirent *item = ::readdir(listing);
+        if (!item) {
+            if (errno != 0) good = false;
+            break;
+        }
+        const std::string name(item->d_name);
+        if (name == "." || name == "..") continue;
+        if (cancelled(cancel) || !safe_component_name(name) ||
+            prefix.size() + name.size() > 4096U) { good = false; break; }
+        struct stat observed{};
+        if (::fstatat(parent_fd, name.c_str(), &observed, AT_SYMLINK_NOFOLLOW) != 0 ||
+            (!S_ISDIR(observed.st_mode) && !S_ISREG(observed.st_mode))) {
+            good = false; break;
+        }
+        const std::string member = prefix + name;
+        if (S_ISDIR(observed.st_mode)) {
+            ScopedDescriptor nested(::openat(parent_fd, name.c_str(),
+                O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+            struct stat opened{};
+            good = nested.fd >= 0 && ::fstat(nested.fd, &opened) == 0 &&
+                opened.st_dev == observed.st_dev && opened.st_ino == observed.st_ino &&
+                zip_directory(writer, nested.fd, member + "/", depth + 1U,
+                              entries, total, cancel);
+            continue;
+        }
+        if (++entries > kMaxEntries || observed.st_size < 0 ||
+            static_cast<std::uint64_t>(observed.st_size) > kMaxFile ||
+            total > kMaxTotal - static_cast<std::uint64_t>(observed.st_size)) {
+            good = false; break;
+        }
+        ScopedDescriptor file(::openat(parent_fd, name.c_str(),
+            O_RDONLY | O_NOFOLLOW | O_CLOEXEC));
+        struct stat opened{};
+        good = file.fd >= 0 && ::fstat(file.fd, &opened) == 0 &&
+            S_ISREG(opened.st_mode) && opened.st_dev == observed.st_dev &&
+            opened.st_ino == observed.st_ino && opened.st_size == observed.st_size &&
+            zip_header(writer, member, false,
+                       static_cast<std::uint64_t>(observed.st_size));
+        if (!good) break;
+        std::uint64_t remaining = static_cast<std::uint64_t>(observed.st_size);
+        std::array<char, 65536> buffer{};
+        while (good && remaining) {
+            if (cancelled(cancel)) { good = false; break; }
+            const ssize_t n = ::read(file.fd, buffer.data(),
+                static_cast<std::size_t>(std::min<std::uint64_t>(remaining, buffer.size())));
+            if (n < 0 && errno == EINTR) continue;
+            if (n <= 0 || archive_write_data(writer, buffer.data(),
+                static_cast<std::size_t>(n)) != n) { good = false; break; }
+            remaining -= static_cast<std::uint64_t>(n);
+        }
+        struct stat after{};
+        if (remaining != 0U || ::fstat(file.fd, &after) != 0 ||
+            after.st_size != opened.st_size ||
+            after.st_mtim.tv_sec != opened.st_mtim.tv_sec ||
+            after.st_mtim.tv_nsec != opened.st_mtim.tv_nsec ||
+            after.st_ctim.tv_sec != opened.st_ctim.tv_sec ||
+            after.st_ctim.tv_nsec != opened.st_ctim.tv_nsec)
+            good = false;
+        total += static_cast<std::uint64_t>(observed.st_size);
+    }
+    if (::closedir(listing) != 0) good = false;
+    return good && !cancelled(cancel);
+}
+
 void reflect_cleanup(OperationResult &result, const fs::path &private_directory)
 {
     std::error_code cleanup_error;
@@ -135,9 +246,27 @@ OperationResult ArchiveEngine::create_zip(const fs::path &source,
         return failure(OperationStatus::Cancelled, OperationPhase::Preflight,
                        destination, "ZIP creation cancelled.");
     std::error_code ec;
-    if (!fs::is_regular_file(fs::symlink_status(source, ec)) || ec)
+    const fs::file_status kind = fs::symlink_status(source, ec);
+    const bool directory = fs::is_directory(kind);
+    if (ec || (!directory && !fs::is_regular_file(kind)))
         return failure(OperationStatus::UnsupportedCapability, OperationPhase::Preflight,
-                       destination, "ZIP creation currently supports one native regular file.");
+                       destination, "ZIP creation requires a native regular file or directory.");
+    if (directory) {
+        ec.clear();
+        const fs::path source_root = fs::canonical(source, ec);
+        if (ec)
+            return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight,
+                           destination, "Could not resolve ZIP source directory.");
+        const fs::path destination_root = fs::canonical(destination_parent, ec);
+        if (ec)
+            return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight,
+                           destination, "Could not resolve ZIP destination directory.");
+        if (std::mismatch(source_root.begin(), source_root.end(),
+                          destination_root.begin(), destination_root.end()).first ==
+            source_root.end())
+            return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight,
+                           destination, "ZIP staging cannot be inside the source directory.");
+    }
     ec.clear();
     if (!fs::is_directory(destination_parent, ec) || ec)
         return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight,
@@ -147,8 +276,8 @@ OperationResult ArchiveEngine::create_zip(const fs::path &source,
         return failure(OperationStatus::DestinationConflict, OperationPhase::Preflight,
                        destination, "A ZIP with that name already exists.");
     ec.clear();
-    const std::uintmax_t expected = fs::file_size(source, ec);
-    if (ec || expected > kMaxFile)
+    const std::uintmax_t expected = directory ? 0U : fs::file_size(source, ec);
+    if (ec || (!directory && expected > kMaxFile))
         return failure(OperationStatus::UnsupportedCapability, OperationPhase::Preflight,
                        destination, "ZIP input exceeds the qualified 1 GiB file limit.");
 
@@ -165,7 +294,14 @@ OperationResult ArchiveEngine::create_zip(const fs::path &source,
     Writer writer(archive_write_new());
     bool good = writer && archive_write_set_format_zip(writer.get()) == ARCHIVE_OK &&
         archive_write_open_filename(writer.get(), private_zip.c_str()) == ARCHIVE_OK;
-    if (good) {
+    if (good && directory) {
+        ScopedDescriptor root(::open(source.c_str(),
+            O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+        std::uint64_t entries = 0U, total = 0U;
+        good = root.fd >= 0 && zip_directory(writer.get(), root.fd,
+                     "", 0U, entries, total, cancel);
+    }
+    if (good && !directory) {
         archive_entry *entry = archive_entry_new();
         good = entry != nullptr;
         if (good) {
@@ -177,7 +313,7 @@ OperationResult ArchiveEngine::create_zip(const fs::path &source,
         }
         if (entry) archive_entry_free(entry);
     }
-    if (good) {
+    if (good && !directory) {
         const int fd = ::open(source.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
         struct stat observed{};
         good = fd >= 0 && ::fstat(fd, &observed) == 0 && S_ISREG(observed.st_mode) &&
@@ -369,14 +505,11 @@ OperationResult ArchiveEngine::extract(const fs::path &source,
     // Close the provider reader before calling the publishing engine.
     reader.reset();
     if (success) {
-        if (count == 0U) {
-            result = failure(OperationStatus::UnsupportedCapability, OperationPhase::Verify,
-                             destination, "An empty archive has no files to extract.");
-        } else {
-            TransferOperationEngine transfer;
-            result = transfer.copy_item(staged_root, destination_parent,
-                                        ConflictPolicy::Fail);
-        }
+        // A valid empty ZIP denotes an empty directory. Its format was already
+        // verified by libarchive, and publication uses the same durable engine.
+        TransferOperationEngine transfer;
+        result = transfer.copy_item(staged_root, destination_parent,
+                                    ConflictPolicy::Fail);
     }
     reflect_cleanup(result, temporary);
     return result;
