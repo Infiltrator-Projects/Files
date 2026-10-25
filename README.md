@@ -58,6 +58,14 @@ Product-level acceptance is defined in [`docs/PRODUCT-QUALITY.md`](docs/PRODUCT-
 
 ## Current implementation
 
+Files 0.1.72 fixes native package restoration after resetting InfiltratorOS's
+`/Programs` and `/System` directories. The OS reset may remove package
+files without unregistering the installed Files version in Debian. The native
+installer now explicitly reinstalls its freshly built `+native1` package so
+the real executable and build metadata return even if APT would otherwise
+report "already the newest version". A hosted regression simulates the exact
+stale-dpkg/empty-directory case. Nemo remains the default file manager.
+
 Files 0.1.68 corrects native installer version ordering on Linux Mint: the same source release's generic APT package and locally trained two-pass PGO package have distinct Debian versions (`VERSION` and `VERSION+native1`). The hosted gate exercises the generic-to-native upgrade rather than treating a local compilation as proof of installation.
 
 
