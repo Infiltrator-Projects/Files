@@ -129,8 +129,12 @@ bool zip_directory(struct archive *writer, int parent_fd,
                    std::uint64_t &entries, std::uint64_t &total,
                    GCancellable *cancel)
 {
-    if (cancelled(cancel) || depth > 64U || prefix.size() > 4096U ||
-        ++entries > kMaxEntries || !zip_header(writer, prefix, true, 0U))
+    if (cancelled(cancel) || depth > 64U || prefix.size() > 4096U)
+        return false;
+    // The extraction engine already creates the enclosing archive-named folder.
+    // Emit only its contents, avoiding an accidental duplicate root directory.
+    if (!prefix.empty() &&
+        (++entries > kMaxEntries || !zip_header(writer, prefix, true, 0U)))
         return false;
     int listing_fd = ::dup(parent_fd);
     if (listing_fd < 0) return false;
@@ -295,7 +299,7 @@ OperationResult ArchiveEngine::create_zip(const fs::path &source,
             O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
         std::uint64_t entries = 0U, total = 0U;
         good = root.fd >= 0 && zip_directory(writer.get(), root.fd,
-                     source_name + "/", 1U, entries, total, cancel);
+                     "", 0U, entries, total, cancel);
     }
     if (good && !directory) {
         archive_entry *entry = archive_entry_new();
@@ -501,14 +505,11 @@ OperationResult ArchiveEngine::extract(const fs::path &source,
     // Close the provider reader before calling the publishing engine.
     reader.reset();
     if (success) {
-        if (count == 0U) {
-            result = failure(OperationStatus::UnsupportedCapability, OperationPhase::Verify,
-                             destination, "An empty archive has no files to extract.");
-        } else {
-            TransferOperationEngine transfer;
-            result = transfer.copy_item(staged_root, destination_parent,
-                                        ConflictPolicy::Fail);
-        }
+        // A valid empty ZIP denotes an empty directory. Its format was already
+        // verified by libarchive, and publication uses the same durable engine.
+        TransferOperationEngine transfer;
+        result = transfer.copy_item(staged_root, destination_parent,
+                                    ConflictPolicy::Fail);
     }
     reflect_cleanup(result, temporary);
     return result;
