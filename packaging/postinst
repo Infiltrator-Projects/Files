@@ -4,7 +4,7 @@ set -e
 
 case "${1:-}" in
     configure)
-        /usr/lib/files/ensure-extended-fonts
+        /System/Commands/files-ensure-fonts
         ;;
 esac
 
