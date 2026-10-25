@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.72 — 2026-10-25
+
+- Correct the physical Linux Mint OS-reset failure where Files has a valid
+  `0.1.71+native1` dpkg registration but the package-owned files under
+  `/Programs` and `/System` were removed during an InfiltratorOS reinstall.
+  APT's ordinary same-version `install` was a no-op; later file verification
+  correctly failed even though the locally compiled native package was valid.
+- Always pass `--reinstall` when installing the exact locally compiled native
+  Debian package. This restores missing package-owned files on both first
+  installation/upgrade and repeat installations without purging packages or
+  changing the machine's default file-manager associations.
+- Add CI regression reproducing the stale-dpkg/newly-empty native directory
+  state, restoring files with a same-version local DEB, and a native installer
+  contract check for forced same-version reinstall.
+- Keep two-pass CPU-native PGO, the original `/Programs/files` binary,
+  `/System/Resources/Documentation/Files/BUILD-INFO`, and Nemo untouched.
+
+
 ## 0.1.71 — 2026-10-25
 
 - Fix the Mint InfiltratorOS native installation failure when GTK 4 build dependencies are already present but the `libarchive-dev` development headers and linker library are missing. Probe LibArchive explicitly before deciding to skip the APT build-dependency installation.
