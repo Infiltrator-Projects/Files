@@ -186,7 +186,11 @@ grep -Fq -- '-O3' "$inspect/System/Resources/Documentation/Files/BUILD-INFO"
 grep -Fq -- '-march=native' "$inspect/System/Resources/Documentation/Files/BUILD-INFO"
 
 printf 'Installing Files %s into /Programs...\n' "$native_version"
-run_root /usr/bin/apt-get -o DPkg::Lock::Timeout=300 install -y "$deb"
+# OS-native directories can be reset independently of Debian's dpkg state.
+# If the same version is recorded as installed, a normal apt-get install is a
+# no-op and will NOT restore missing /Programs or /System package-owned files.
+# Always reinstall the exact locally built package, even on a same-version run.
+run_root /usr/bin/apt-get -o DPkg::Lock::Timeout=300 install -y --reinstall "$deb"
 
 [[ "$(dpkg-query -W -f='${Version}' files)" == "$native_version" ]]
 test -x /Programs/files
