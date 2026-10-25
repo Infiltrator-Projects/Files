@@ -226,6 +226,9 @@ jobs:
           grep -Fxq 'PGO: trained two-pass profile' /System/Resources/Documentation/Files/BUILD-INFO
           grep -Fq -- '-O3' /System/Resources/Documentation/Files/BUILD-INFO
           grep -Fq -- '-march=native' /System/Resources/Documentation/Files/BUILD-INFO
+          grep -Fq -- '-fno-semantic-interposition' /System/Resources/Documentation/Files/BUILD-INFO
+          grep -Fq -- '-fno-plt' /System/Resources/Documentation/Files/BUILD-INFO
+          grep -Fq -- '-fprofile-partial-training' /System/Resources/Documentation/Files/BUILD-INFO
 
           (
             cd dist
