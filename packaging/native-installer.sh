@@ -51,6 +51,10 @@ for command in gcc g++ cmake ninja pkg-config cpack ctest dpkg dpkg-deb; do
 done
 if command -v pkg-config >/dev/null 2>&1; then
     pkg-config --exists 'gtk4 >= 4.10' >/dev/null 2>&1 || missing=1
+    # FindLibArchive needs the development header and linker library, not just
+    # the runtime .so. The libarchive pkg-config file comes from libarchive-dev.
+    # Without this check Mint can skip apt provisioning and fail at CMake.
+    pkg-config --exists libarchive >/dev/null 2>&1 || missing=1
 fi
 command -v xvfb-run >/dev/null 2>&1 || missing=1
 command -v dbus-run-session >/dev/null 2>&1 || missing=1
