@@ -77,6 +77,24 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build pkg-config libgtk-4-dev libarchive-dev dpkg-dev xvfb xauth dbus-x11 gdb
 
+      - name: Regression check for missing LibArchive development files
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Installed prerequisites should be accepted on the qualified runner.
+          bash packaging/native-installer.sh --dry-run |
+            grep -Fx 'Files native installer: prerequisites are already satisfied.'
+          # Reproduce the Mint failure without uninstalling any host packages.
+          # Only hide LibArchive from pkg-config; GTK 4 remains detectable.
+          tmp=$(mktemp -d)
+          trap 'rm -rf "$tmp"' EXIT
+          printf '%s\n' '#!/bin/sh' \
+            'if [ "$1" = "--exists" ] && [ "$2" = "libarchive" ]; then exit 1; fi' \
+            'exec /usr/bin/pkg-config "$@"' > "$tmp/pkg-config"
+          chmod +x "$tmp/pkg-config"
+          PATH="$tmp:$PATH" bash packaging/native-installer.sh --dry-run |
+            grep -Fx 'Files native installer: build dependencies would be installed.'
+
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
