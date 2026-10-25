@@ -195,6 +195,19 @@ jobs:
           # without an implicit downgrade or allow-downgrades override.
           sudo apt-get -o DPkg::Lock::Timeout=300 install -y "./dist/files_${VERSION}_amd64.deb"
           test "$(dpkg-query -W -f='${Version}' files)" = "$VERSION"
+          # Regression for real Mint OS-reset bug: dpkg still records the same
+          # package while /Programs and /System were wiped. A normal install
+          # reports "already the newest version" and restores nothing.
+          sudo rm -f -- /Programs/files /System/Resources/Documentation/Files/BUILD-INFO
+          test "$(dpkg-query -W -f='${Version}' files)" = "$VERSION"
+          test ! -e /Programs/files
+          test ! -e /System/Resources/Documentation/Files/BUILD-INFO
+          sudo apt-get -o DPkg::Lock::Timeout=300 install -y --reinstall "./dist/files_${VERSION}_amd64.deb"
+          test -x /Programs/files
+          test -f /System/Resources/Documentation/Files/BUILD-INFO
+          # Native installer must likewise force dpkg to restore its own
+          # identical +native1 payload, not silently accept the APT no-op.
+          grep -Fq 'install -y --reinstall "$deb"' packaging/native-installer.sh
 
           ./ci/build-native-installer.sh dist
           native="dist/files-${VERSION}-native-installer.run"
