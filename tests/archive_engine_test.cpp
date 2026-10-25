@@ -65,6 +65,28 @@ int main()
         const auto refused = engine.extract(evil, root, "fixture-3");
         if (refused.ok() || fs::exists(root / "outside.txt"))
             throw std::runtime_error("Traversal archive escaped its private root");
+        // Malicious archive entry names must not reach publication or escape staging.
+        const fs::path absolute = root / "absolute.zip";
+        sample_archive(absolute, "/tmp/files-archive-absolute-escape.txt");
+        if (engine.extract(absolute, root, "fixture-4").ok() ||
+            fs::exists(root / "absolute"))
+            throw std::runtime_error("Absolute archive pathname was accepted");
+        const fs::path windows = root / "windows.zip";
+        sample_archive(windows, "..\\outside.txt");
+        if (engine.extract(windows, root, "fixture-5").ok() ||
+            fs::exists(root / "windows"))
+            throw std::runtime_error("Backslash traversal archive was accepted");
+
+        // A cancelled request must never publish a partial extraction or ZIP.
+        GCancellable *cancel = g_cancellable_new();
+        g_cancellable_cancel(cancel);
+        const auto cancelled_extract = engine.extract(good, root / "unpack", "fixture-6", cancel);
+        const auto cancelled_create = engine.create_zip(input, root / "unpack", "fixture-7", cancel);
+        g_object_unref(cancel);
+        if (cancelled_extract.ok() || cancelled_create.ok() ||
+            fs::exists(root / "unpack" / "safe") ||
+            fs::exists(root / "unpack" / "payload.txt.zip"))
+            throw std::runtime_error("Cancelled archive operation published output");
         cleanup();
         return 0;
     } catch (const std::exception &ex) {
