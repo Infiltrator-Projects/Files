@@ -1806,8 +1806,8 @@ void InteractionController::open_primary()
     }
 
     char *uri = g_file_get_uri(child);
-    g_object_unref(child);
     if (uri == nullptr) {
+        g_object_unref(child);
         return;
     }
 
@@ -1823,6 +1823,10 @@ void InteractionController::open_primary()
             g_error_free(error);
         }
     }
+    auto *controller = static_cast<FileManagerWindow *>(
+        g_object_get_data(G_OBJECT(window_), "ifm-window-controller"));
+    if (controller != nullptr) controller->record_recent_file(child);
+    g_object_unref(child);
     g_free(uri);
 }
 
