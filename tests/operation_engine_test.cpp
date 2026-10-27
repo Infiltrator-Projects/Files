@@ -121,6 +121,30 @@ int main()
         return 114;
     }
 
+    // Both link types must be atomic no-replace operations, independent of the
+    // displayed item name. Symlinks retain the original relative pathname;
+    // hard links retain the exact source inode.
+    const auto symbolic = engine.create_symbolic_link(permission_target, "mode-symbolic");
+    const auto hard = engine.create_hard_link(permission_target, "mode-hard");
+    struct stat source_identity{}, linked_identity{};
+    std::error_code link_error;
+    if (!symbolic.ok() || !hard.ok() ||
+        !fs::is_symlink(fs::symlink_status(root / "mode-symbolic", link_error)) ||
+        fs::read_symlink(root / "mode-symbolic", link_error) != fs::path("mode-test.txt") ||
+        ::stat(permission_target.c_str(), &source_identity) != 0 ||
+        ::stat((root / "mode-hard").c_str(), &linked_identity) != 0 ||
+        source_identity.st_dev != linked_identity.st_dev ||
+        source_identity.st_ino != linked_identity.st_ino ||
+        engine.create_symbolic_link(permission_target, "mode-symbolic").status !=
+            OperationStatus::DestinationConflict ||
+        engine.create_hard_link(permission_target, "mode-hard").status !=
+            OperationStatus::DestinationConflict ||
+        engine.create_hard_link(root, "no-directory-hardlink").ok() ||
+        engine.create_symbolic_link(permission_target, "../escape").ok()) {
+        fs::remove_all(root, cleanup_error);
+        return 115;
+    }
+
     // New File must be no-replace, empty, and never damage an existing item.
     const auto new_file = engine.create_empty_file(root, "blank.txt");
     if (!new_file.ok() || !new_file.changed ||
