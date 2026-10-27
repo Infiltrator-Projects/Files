@@ -256,3 +256,7 @@ The normal host Gregorian calendar and standard system time remain usable withou
 optional modules. Shared calendar/clock implementation source, builds and Debian
 releases belong to Common, which supplies the optional system resource package.
 This application contains no custom calendar or clock fallback implementations.
+
+## Independent calendar and clock packages
+
+Temporal implementations and their translations are owned by the 54 independent `Calendar-*` and `Clock-*` repositories. This application suggests those optional packages and consumes the public Common ABI. Common no longer builds or publishes the combined resource package; its API and preserved reference source remain available.

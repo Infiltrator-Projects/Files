@@ -1,0 +1,488 @@
+[
+  {
+    "repository": "Calendar-Armenian-Traditional",
+    "id": "armenian-traditional",
+    "kind": "calendar",
+    "name": "Traditional Armenian Calendar",
+    "package": "infiltrator-calendar-armenian-traditional",
+    "resource": "/System/Resources/Calendars/Traditional Armenian Calendar.so",
+    "minimum_version": "1.0.1"
+  },
+  {
+    "repository": "Calendar-Bahai",
+    "id": "bahai",
+    "kind": "calendar",
+    "name": "Bahai Badi Calendar",
+    "package": "infiltrator-calendar-bahai",
+    "resource": "/System/Resources/Calendars/Bahai Badi Calendar.so",
+    "minimum_version": "1.0.1"
+  },
+  {
+    "repository": "Calendar-Buddhist",
+    "id": "buddhist",
+    "kind": "calendar",
+    "name": "Buddhist Era Calendar",
+    "package": "infiltrator-calendar-buddhist",
+    "resource": "/System/Resources/Calendars/Buddhist Era Calendar.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Calendar-Byzantine",
+    "id": "byzantine",
+    "kind": "calendar",
+    "name": "Byzantine Anno Mundi Calendar",
+    "package": "infiltrator-calendar-byzantine",
+    "resource": "/System/Resources/Calendars/Byzantine Anno Mundi Calendar.so",
+    "minimum_version": "1.0.1"
+  },
+  {
+    "repository": "Calendar-Chinese",
+    "id": "chinese",
+    "kind": "calendar",
+    "name": "Traditional Chinese Lunisolar Calendar",
+    "package": "infiltrator-calendar-chinese",
+    "resource": "/System/Resources/Calendars/Traditional Chinese Lunisolar Calendar.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Calendar-Coptic",
+    "id": "coptic",
+    "kind": "calendar",
+    "name": "Coptic Calendar",
+    "package": "infiltrator-calendar-coptic",
+    "resource": "/System/Resources/Calendars/Coptic Calendar.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Calendar-Dangi",
+    "id": "dangi",
+    "kind": "calendar",
+    "name": "Korean Dangi Calendar",
+    "package": "infiltrator-calendar-dangi",
+    "resource": "/System/Resources/Calendars/Korean Dangi Calendar.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Calendar-Egyptian-Nabonassar",
+    "id": "egyptian-nabonassar",
+    "kind": "calendar",
+    "name": "Egyptian Nabonassar Era Calendar",
+    "package": "infiltrator-calendar-egyptian-nabonassar",
+    "resource": "/System/Resources/Calendars/Egyptian Nabonassar Era Calendar.so",
+    "minimum_version": "1.0.1"
+  },
+  {
+    "repository": "Calendar-Ethiopian",
+    "id": "ethiopian",
+    "kind": "calendar",
+    "name": "Ethiopian Amete Mihret Calendar",
+    "package": "infiltrator-calendar-ethiopian",
+    "resource": "/System/Resources/Calendars/Ethiopian Amete Mihret Calendar.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Calendar-Ethiopic-Amete-Alem",
+    "id": "ethiopic-amete-alem",
+    "kind": "calendar",
+    "name": "Ethiopian Amete Alem Calendar",
+    "package": "infiltrator-calendar-ethiopic-amete-alem",
+    "resource": "/System/Resources/Calendars/Ethiopian Amete Alem Calendar.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Calendar-French-Republican",
+    "id": "french-republican",
+    "kind": "calendar",
+    "name": "French Republican Calendar",
+    "package": "infiltrator-calendar-french-republican",
+    "resource": "/System/Resources/Calendars/French Republican Calendar.so",
+    "minimum_version": "1.0.1"
+  },
+  {
+    "repository": "Calendar-Gregorian",
+    "id": "gregorian",
+    "kind": "calendar",
+    "name": "Gregorian Calendar",
+    "package": "infiltrator-calendar-gregorian",
+    "resource": "/System/Resources/Calendars/Gregorian Calendar.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Calendar-Hebrew",
+    "id": "hebrew",
+    "kind": "calendar",
+    "name": "Hebrew Calendar",
+    "package": "infiltrator-calendar-hebrew",
+    "resource": "/System/Resources/Calendars/Hebrew Calendar.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Calendar-ISO-Week",
+    "id": "iso-week",
+    "kind": "calendar",
+    "name": "ISO 8601 Week Calendar",
+    "package": "infiltrator-calendar-iso-week",
+    "resource": "/System/Resources/Calendars/ISO 8601 Week Calendar.so",
+    "minimum_version": "1.0.1"
+  },
+  {
+    "repository": "Calendar-Indian",
+    "id": "indian",
+    "kind": "calendar",
+    "name": "Indian National Saka Calendar",
+    "package": "infiltrator-calendar-indian",
+    "resource": "/System/Resources/Calendars/Indian National Saka Calendar.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Calendar-International-Fixed",
+    "id": "international-fixed",
+    "kind": "calendar",
+    "name": "International Fixed Calendar",
+    "package": "infiltrator-calendar-international-fixed",
+    "resource": "/System/Resources/Calendars/International Fixed Calendar.so",
+    "minimum_version": "1.0.1"
+  },
+  {
+    "repository": "Calendar-Islamic",
+    "id": "islamic",
+    "kind": "calendar",
+    "name": "Islamic Computational Calendar",
+    "package": "infiltrator-calendar-islamic",
+    "resource": "/System/Resources/Calendars/Islamic Computational Calendar.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Calendar-Islamic-Civil",
+    "id": "islamic-civil",
+    "kind": "calendar",
+    "name": "Islamic Civil Calendar",
+    "package": "infiltrator-calendar-islamic-civil",
+    "resource": "/System/Resources/Calendars/Islamic Civil Calendar.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Calendar-Islamic-TBLA",
+    "id": "islamic-tbla",
+    "kind": "calendar",
+    "name": "Islamic Tabular Calendar Astronomical Epoch",
+    "package": "infiltrator-calendar-islamic-tbla",
+    "resource": "/System/Resources/Calendars/Islamic Tabular Calendar Astronomical Epoch.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Calendar-Islamic-Umalqura",
+    "id": "islamic-umalqura",
+    "kind": "calendar",
+    "name": "Islamic Umm al-Qura Calendar",
+    "package": "infiltrator-calendar-islamic-umalqura",
+    "resource": "/System/Resources/Calendars/Islamic Umm al-Qura Calendar.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Calendar-Japanese",
+    "id": "japanese",
+    "kind": "calendar",
+    "name": "Japanese Imperial Era Calendar",
+    "package": "infiltrator-calendar-japanese",
+    "resource": "/System/Resources/Calendars/Japanese Imperial Era Calendar.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Calendar-Julian",
+    "id": "julian",
+    "kind": "calendar",
+    "name": "Julian Calendar",
+    "package": "infiltrator-calendar-julian",
+    "resource": "/System/Resources/Calendars/Julian Calendar.so",
+    "minimum_version": "1.0.1"
+  },
+  {
+    "repository": "Calendar-Mayan",
+    "id": "mayan",
+    "kind": "calendar",
+    "name": "Maya Long Count Calendar",
+    "package": "infiltrator-calendar-mayan",
+    "resource": "/System/Resources/Calendars/Maya Long Count Calendar.so",
+    "minimum_version": "1.0.1"
+  },
+  {
+    "repository": "Calendar-Minguo",
+    "id": "minguo",
+    "kind": "calendar",
+    "name": "Republic of China Minguo Calendar",
+    "package": "infiltrator-calendar-minguo",
+    "resource": "/System/Resources/Calendars/Republic of China Minguo Calendar.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Calendar-Persian",
+    "id": "persian",
+    "kind": "calendar",
+    "name": "Persian Solar Hijri Calendar",
+    "package": "infiltrator-calendar-persian",
+    "resource": "/System/Resources/Calendars/Persian Solar Hijri Calendar.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Calendar-Positivist",
+    "id": "positivist",
+    "kind": "calendar",
+    "name": "Positivist Calendar",
+    "package": "infiltrator-calendar-positivist",
+    "resource": "/System/Resources/Calendars/Positivist Calendar.so",
+    "minimum_version": "1.0.1"
+  },
+  {
+    "repository": "Calendar-Revised-Julian",
+    "id": "revised-julian",
+    "kind": "calendar",
+    "name": "Revised Julian Calendar",
+    "package": "infiltrator-calendar-revised-julian",
+    "resource": "/System/Resources/Calendars/Revised Julian Calendar.so",
+    "minimum_version": "1.0.1"
+  },
+  {
+    "repository": "Calendar-Roman",
+    "id": "roman",
+    "kind": "calendar",
+    "name": "Ancient Roman Calendar Notation",
+    "package": "infiltrator-calendar-roman",
+    "resource": "/System/Resources/Calendars/Ancient Roman Calendar Notation.so",
+    "minimum_version": "1.0.1"
+  },
+  {
+    "repository": "Calendar-Swedish-Historical",
+    "id": "swedish-historical",
+    "kind": "calendar",
+    "name": "Swedish Historical Calendar",
+    "package": "infiltrator-calendar-swedish-historical",
+    "resource": "/System/Resources/Calendars/Swedish Historical Calendar.so",
+    "minimum_version": "1.0.1"
+  },
+  {
+    "repository": "Calendar-Thai-Buddhist-Solar",
+    "id": "thai-buddhist-solar",
+    "kind": "calendar",
+    "name": "Historical Thai Buddhist Solar Calendar",
+    "package": "infiltrator-calendar-thai-buddhist-solar",
+    "resource": "/System/Resources/Calendars/Historical Thai Buddhist Solar Calendar.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Calendar-World",
+    "id": "world",
+    "kind": "calendar",
+    "name": "World Calendar",
+    "package": "infiltrator-calendar-world",
+    "resource": "/System/Resources/Calendars/World Calendar.so",
+    "minimum_version": "1.0.1"
+  },
+  {
+    "repository": "Clock-Babylonian-Ancient",
+    "id": "babylonian-ancient",
+    "kind": "clock",
+    "name": "Ancient Babylonian Beru US Clock",
+    "package": "infiltrator-clock-babylonian-ancient",
+    "resource": "/System/Resources/Clocks/Ancient Babylonian Beru US Clock.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Clock-Babylonian-Hours",
+    "id": "babylonian-hours",
+    "kind": "clock",
+    "name": "Renaissance Babylonian Hours Clock",
+    "package": "infiltrator-clock-babylonian-hours",
+    "resource": "/System/Resources/Clocks/Renaissance Babylonian Hours Clock.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Clock-Binary",
+    "id": "binary",
+    "kind": "clock",
+    "name": "Binary Digital Clock",
+    "package": "infiltrator-clock-binary",
+    "resource": "/System/Resources/Clocks/Binary Digital Clock.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Clock-Chinese-Ke",
+    "id": "chinese-ke",
+    "kind": "clock",
+    "name": "Traditional Chinese Hundred-Ke Clock",
+    "package": "infiltrator-clock-chinese-ke",
+    "resource": "/System/Resources/Clocks/Traditional Chinese Hundred-Ke Clock.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Clock-Chinese-Time",
+    "id": "chinese-time",
+    "kind": "clock",
+    "name": "Traditional Chinese Double-Hour Clock",
+    "package": "infiltrator-clock-chinese-time",
+    "resource": "/System/Resources/Clocks/Traditional Chinese Double-Hour Clock.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Clock-Decimal",
+    "id": "decimal",
+    "kind": "clock",
+    "name": "French Revolutionary Decimal Clock",
+    "package": "infiltrator-clock-decimal",
+    "resource": "/System/Resources/Clocks/French Revolutionary Decimal Clock.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Clock-Hexadecimal",
+    "id": "hexadecimal",
+    "kind": "clock",
+    "name": "Hexadecimal Day Clock",
+    "package": "infiltrator-clock-hexadecimal",
+    "resource": "/System/Resources/Clocks/Hexadecimal Day Clock.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Clock-Indian-Ghati",
+    "id": "indian-ghati",
+    "kind": "clock",
+    "name": "Traditional Indian Ghati Clock",
+    "package": "infiltrator-clock-indian-ghati",
+    "resource": "/System/Resources/Clocks/Traditional Indian Ghati Clock.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Clock-Internet",
+    "id": "internet",
+    "kind": "clock",
+    "name": "Swatch Internet Time Clock",
+    "package": "infiltrator-clock-internet",
+    "resource": "/System/Resources/Clocks/Swatch Internet Time Clock.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Clock-Italian-Hours",
+    "id": "italian-hours",
+    "kind": "clock",
+    "name": "Historical Italian Hours Clock",
+    "package": "infiltrator-clock-italian-hours",
+    "resource": "/System/Resources/Clocks/Historical Italian Hours Clock.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Clock-Japanese-Temporal",
+    "id": "japanese-temporal",
+    "kind": "clock",
+    "name": "Late Edo Japanese Temporal Clock",
+    "package": "infiltrator-clock-japanese-temporal",
+    "resource": "/System/Resources/Clocks/Late Edo Japanese Temporal Clock.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Clock-Japanese-Temporal-Early",
+    "id": "japanese-temporal-early",
+    "kind": "clock",
+    "name": "Early Edo Japanese Temporal Clock",
+    "package": "infiltrator-clock-japanese-temporal-early",
+    "resource": "/System/Resources/Clocks/Early Edo Japanese Temporal Clock.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Clock-Julian",
+    "id": "julian",
+    "kind": "clock",
+    "name": "Astronomical Julian Date Clock",
+    "package": "infiltrator-clock-julian",
+    "resource": "/System/Resources/Clocks/Astronomical Julian Date Clock.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Clock-Mean-Solar",
+    "id": "mean-solar",
+    "kind": "clock",
+    "name": "Local Mean Solar Clock",
+    "package": "infiltrator-clock-mean-solar",
+    "resource": "/System/Resources/Clocks/Local Mean Solar Clock.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Clock-Modified-Julian",
+    "id": "modified-julian",
+    "kind": "clock",
+    "name": "Modified Julian Date Clock",
+    "package": "infiltrator-clock-modified-julian",
+    "resource": "/System/Resources/Clocks/Modified Julian Date Clock.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Clock-Nuremberg-Hours",
+    "id": "nuremberg-hours",
+    "kind": "clock",
+    "name": "Historical Nuremberg Great Clock",
+    "package": "infiltrator-clock-nuremberg-hours",
+    "resource": "/System/Resources/Clocks/Historical Nuremberg Great Clock.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Clock-Nuremberg-Solar",
+    "id": "nuremberg-solar",
+    "kind": "clock",
+    "name": "Nuremberg Style Solar Clock",
+    "package": "infiltrator-clock-nuremberg-solar",
+    "resource": "/System/Resources/Clocks/Nuremberg Style Solar Clock.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Clock-Roman-Temporal",
+    "id": "roman-temporal",
+    "kind": "clock",
+    "name": "Ancient Roman Temporal Clock",
+    "package": "infiltrator-clock-roman-temporal",
+    "resource": "/System/Resources/Clocks/Ancient Roman Temporal Clock.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Clock-Sidereal",
+    "id": "sidereal",
+    "kind": "clock",
+    "name": "Local Sidereal Clock",
+    "package": "infiltrator-clock-sidereal",
+    "resource": "/System/Resources/Clocks/Local Sidereal Clock.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Clock-Solar",
+    "id": "solar",
+    "kind": "clock",
+    "name": "Apparent Solar Clock",
+    "package": "infiltrator-clock-solar",
+    "resource": "/System/Resources/Clocks/Apparent Solar Clock.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Clock-Standard-12",
+    "id": "standard-12",
+    "kind": "clock",
+    "name": "Standard 12-Hour Clock",
+    "package": "infiltrator-clock-standard-12",
+    "resource": "/System/Resources/Clocks/Standard 12-Hour Clock.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Clock-Standard-24",
+    "id": "standard-24",
+    "kind": "clock",
+    "name": "Standard 24-Hour Clock",
+    "package": "infiltrator-clock-standard-24",
+    "resource": "/System/Resources/Clocks/Standard 24-Hour Clock.so",
+    "minimum_version": "1.0.0"
+  },
+  {
+    "repository": "Clock-Unix",
+    "id": "unix",
+    "kind": "clock",
+    "name": "Unix Epoch Clock",
+    "package": "infiltrator-clock-unix",
+    "resource": "/System/Resources/Clocks/Unix Epoch Clock.so",
+    "minimum_version": "1.0.0"
+  }
+]

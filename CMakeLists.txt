@@ -317,12 +317,17 @@ set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Infiltrator Projects")
 set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
-# One release requirement also drives native-installer CI dependency setup.
-set(INFILTRATOR_TEMPORAL_RESOURCES_VERSION "1.19.66")
-file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/temporal-resources-version"
-    CONTENT "${INFILTRATOR_TEMPORAL_RESOURCES_VERSION}\n")
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "ca-certificates, fontconfig, curl | wget")
-set(CPACK_DEBIAN_PACKAGE_SUGGESTS "infiltrator-calendar-resources (>= ${INFILTRATOR_TEMPORAL_RESOURCES_VERSION})")
+# Optional capabilities are owned by their independent provider packages.
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/ci/temporal-providers.json" FILES_TEMPORAL_PROVIDERS)
+string(JSON FILES_TEMPORAL_PROVIDER_COUNT LENGTH "${FILES_TEMPORAL_PROVIDERS}")
+math(EXPR FILES_TEMPORAL_PROVIDER_LAST "${FILES_TEMPORAL_PROVIDER_COUNT} - 1")
+set(FILES_TEMPORAL_SUGGESTS)
+foreach(index RANGE 0 ${FILES_TEMPORAL_PROVIDER_LAST})
+    string(JSON provider_package GET "${FILES_TEMPORAL_PROVIDERS}" ${index} package)
+    list(APPEND FILES_TEMPORAL_SUGGESTS "${provider_package}")
+endforeach()
+list(JOIN FILES_TEMPORAL_SUGGESTS ", " CPACK_DEBIAN_PACKAGE_SUGGESTS)
 set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
     "${CMAKE_CURRENT_SOURCE_DIR}/packaging/postinst")
 set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)

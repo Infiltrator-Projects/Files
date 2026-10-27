@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.74 — 2026-10-27
+
+- Suggest the 54 independent clock/calendar provider packages instead of Common’s retired combined package.
+- Keep provider implementation, translation and installation ownership separate from the application.
+- Qualify the native installer with checksum-verified independent resource packages.
+
 ## 0.1.73 — 2026-10-25
 
 - Align the native ELF call and symbol-visibility flags with System Monitor
