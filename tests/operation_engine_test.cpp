@@ -106,6 +106,21 @@ int main()
         return 112;
     }
 
+    // Owners must be able to recover their own mode-000 files without Files
+    // silently relying on pathname chmod or following a substituted symlink.
+    if (::chmod(permission_target.c_str(), 0000) != 0) {
+        fs::remove_all(root, cleanup_error);
+        return 113;
+    }
+    const auto restored_mode = engine.change_permissions(permission_target, 0600U);
+    if (!restored_mode.ok() || !restored_mode.changed ||
+        ::stat(permission_target.c_str(), &mode_check) != 0 ||
+        (mode_check.st_mode & 0777) != 0600) {
+        (void)::chmod(permission_target.c_str(), 0600);
+        fs::remove_all(root, cleanup_error);
+        return 114;
+    }
+
     // New File must be no-replace, empty, and never damage an existing item.
     const auto new_file = engine.create_empty_file(root, "blank.txt");
     if (!new_file.ok() || !new_file.changed ||
