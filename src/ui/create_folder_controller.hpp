@@ -71,6 +71,8 @@ private:
     GtkWidget *dialog_{nullptr};
     GtkWidget *entry_{nullptr};
     GtkWidget *dialog_message_{nullptr};
+    GtkWidget *inline_rename_checkbox_{nullptr};
+    std::string pending_inline_name_;
     gulong location_handler_{0U};
     gulong items_handler_{0U};
     bool busy_{false};
