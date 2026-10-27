@@ -946,9 +946,11 @@ void FileManagerWindow::on_recent_open(GtkButton *button, gpointer user_data)
     // Navigation refreshes the Recent popover; own the target independently
     // before the active button's menu can be rebuilt and destroyed.
     std::string target(uri);
+    const bool regular_file = GPOINTER_TO_INT(
+        g_object_get_data(G_OBJECT(button), "recent-is-file")) == 1;
     gtk_popover_popdown(GTK_POPOVER(self->recent_popover_));
     GFile *file = g_file_new_for_uri(target.c_str());
-    if (GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "recent-is-file")) == 1) {
+    if (regular_file) {
         if (self->status_label_ != nullptr)
             g_app_info_launch_default_for_uri_async(target.c_str(), nullptr, nullptr,
                 &FileManagerWindow::on_launch_finished, g_object_ref(self->status_label_));
