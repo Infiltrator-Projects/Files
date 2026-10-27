@@ -253,9 +253,8 @@ Each tranche must remain useful and testable without making later architectural 
 Current browsing foundation discovers mounted/removable places through GIO, keeps them deterministically ordered, blocks nested-mount fall-through when a supplying mount disappears, and restores an unavailable current view automatically only when the returning mount's root and provider UUID prove the same source.
 
 The normal host Gregorian calendar and standard system time remain usable without
-optional modules. Shared calendar/clock implementation source, builds and Debian
-releases belong to Common, which supplies the optional system resource package.
-This application contains no custom calendar or clock fallback implementations.
+optional modules. This application contains no custom calendar or clock fallback
+implementations.
 
 ## Independent calendar and clock packages
 
