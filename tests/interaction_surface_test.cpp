@@ -323,6 +323,32 @@ void qualify_selection_actions(infiltrator::files::FileManagerWindow &w,
     require(g_object_get_data(G_OBJECT(find_button(context, "Copy")),
                               "ifm-proxy-target") == find_button(popover, "Copy"),
             "Item context Copy must delegate to the installed clipboard action");
+    require(find_button(context, "Create Symbolic Link…") != nullptr &&
+            find_button(context, "Create Hard Link…") != nullptr,
+            "Native symbolic and hard link actions must be reachable in item context");
+    require(find_button(popover, "Create from template…") != nullptr &&
+            find_button(popover, "New Sparse File…") != nullptr &&
+            find_button(popover, "Preview archive contents…") != nullptr,
+            "Catalogue template, sparse creation and archive preview must be accessible");
+    GtkWidget *symbolic_action = find_button(popover, "Create Symbolic Link…");
+    g_signal_emit_by_name(symbolic_action, "clicked");
+    GtkWindow *link_dialog = window_named("Create Symbolic Link");
+    require(link_dialog != nullptr, "Native link-name dialog did not open");
+    GtkWidget *link_name = find_entry(GTK_WIDGET(link_dialog));
+    require(link_name != nullptr, "Link dialog lacks a filename input");
+    gtk_editable_set_text(GTK_EDITABLE(link_name), "ui-source-link");
+    GtkWidget *link_create = find_button(GTK_WIDGET(link_dialog), "Create Link");
+    require(link_create != nullptr, "Link dialog lacks confirmation");
+    g_signal_emit_by_name(link_create, "clicked");
+    bool link_done = false;
+    for (int n = 0; n < 5000 && !link_done; ++n) {
+        while (g_main_context_iteration(nullptr, FALSE)) {}
+        std::error_code ec;
+        link_done = fs::is_symlink(fs::symlink_status(root / "ui-source-link", ec));
+        if (!link_done) g_usleep(1000);
+    }
+    require(link_done && fs::read_symlink(root / "ui-source-link") == "first.pdf",
+            "Journalled link creation must preserve the exact original sibling name");
     g_signal_emit_by_name(type_action, "clicked");
     require(selected_count(selection) == 2U,
             "Select same type must include both PDFs but exclude text and directories");
