@@ -43,6 +43,8 @@ public:
     void move_active_tab_to_new_window();
     [[nodiscard]] bool move_active_tab_to(FileManagerWindow &destination);
     void toggle_show_hidden();
+    // Records actual file-open requests separately from navigation history.
+    void record_recent_file(GFile *file);
     void toggle_bookmark_for_selected();
     void toggle_extensions();
     [[nodiscard]] bool show_extensions() const noexcept { return show_extensions_; }
@@ -189,6 +191,7 @@ private:
     void load_recents();
     void save_recents() const;
     void record_recent(GFile *file);
+    void record_recent_kind(GFile *file, bool regular_file);
     void rebuild_recent_menu();
     void show_search();
     void hide_search();
@@ -235,6 +238,7 @@ private:
     guint session_checkpoint_timeout_{0U};
     bool session_checkpoint_enabled_{false};
     std::vector<std::string> recent_locations_;
+    std::vector<std::string> recent_files_;
     std::vector<TabState> tabs_;
     std::vector<TabState> recently_closed_tabs_;
     std::size_t active_tab_{0};

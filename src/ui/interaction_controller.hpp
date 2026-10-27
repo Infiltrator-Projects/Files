@@ -40,6 +40,7 @@ private:
     static void on_window_finalized(gpointer user_data, GObject *where_object_was);
     static void on_proxy_clicked(GtkButton *button, gpointer user_data);
     static void on_open_clicked(GtkButton *button, gpointer user_data);
+    static void on_template_chosen(GObject *source, GAsyncResult *result, gpointer window);
     static void on_workspace_clicked(GtkButton *button, gpointer user_data);
     static void on_properties_clicked(GtkButton *button, gpointer user_data);
     static void on_edit_location_clicked(GtkButton *button, gpointer user_data);
@@ -74,6 +75,7 @@ private:
     void select_item_at_pointer(GtkWidget *view, double x, double y);
     void open_primary();
     void show_open_with();
+    void show_template_chooser();
     void show_properties();
     void inspect_primary();
     void show_tags_dialog();
@@ -121,11 +123,14 @@ private:
 
     GtkWidget *new_folder_target_{nullptr};
     GtkWidget *new_file_target_{nullptr};
+    GtkWidget *new_sparse_target_{nullptr};
     std::vector<GtkWidget *> open_with_actions_;
     GtkWidget *rename_target_{nullptr};
     GtkWidget *copy_target_{nullptr};
     GtkWidget *move_target_{nullptr};
     GtkWidget *permissions_target_{nullptr};
+    GtkWidget *symbolic_link_target_{nullptr};
+    GtkWidget *hard_link_target_{nullptr};
     GtkWidget *batch_copy_target_{nullptr};
     GtkWidget *batch_move_target_{nullptr};
     GtkWidget *trash_target_{nullptr};

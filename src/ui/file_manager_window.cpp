@@ -823,6 +823,33 @@ void FileManagerWindow::load_recents()
     }
     g_free(content);
     g_free(path);
+    // File-open history is distinct from visited-folder history. Both share
+    // the same privacy exclusions and restricted home-namespace admission.
+    char *files_path = g_build_filename(g_get_user_state_dir(), "infiltrator", "files",
+                                        "recent-files", nullptr);
+    content = nullptr;
+    length = 0;
+    if (privacy.valid && g_file_get_contents(files_path, &content, &length, nullptr) &&
+        length <= 32U * 1024U) {
+        gchar **lines = g_strsplit(content, "\n", 0);
+        for (gchar **line = lines; *line != nullptr && recent_files_.size() < 20U; ++line) {
+            if (**line == '\0' || !privacy_allows_recent_uri(privacy, *line)) continue;
+            GFile *file = g_file_new_for_uri(*line);
+            if (g_file_is_native(file)) {
+                char *native = g_file_get_path(file);
+                const char *home = g_get_home_dir();
+                if (native != nullptr && g_str_has_prefix(native, home) &&
+                    native[strlen(home)] == '/' && native[strlen(home) + 1] != '.' &&
+                    std::string(native + strlen(home) + 1).find("/.") == std::string::npos)
+                    recent_files_.emplace_back(*line);
+                g_free(native);
+            }
+            g_object_unref(file);
+        }
+        g_strfreev(lines);
+    }
+    g_free(content);
+    g_free(files_path);
     rebuild_recent_menu();
 }
 void FileManagerWindow::save_recents() const
@@ -834,10 +861,23 @@ void FileManagerWindow::save_recents() const
         for (const auto &uri : recent_locations_) content += uri + "\n";
         g_file_set_contents(path, content.c_str(), static_cast<gssize>(content.size()), nullptr);
         g_free(path);
+        path = g_build_filename(dir, "recent-files", nullptr);
+        content.clear();
+        for (const auto &uri : recent_files_) content += uri + "\n";
+        g_file_set_contents(path, content.c_str(), static_cast<gssize>(content.size()), nullptr);
+        g_free(path);
     }
     g_free(dir);
 }
 void FileManagerWindow::record_recent(GFile *file)
+{
+    record_recent_kind(file, false);
+}
+void FileManagerWindow::record_recent_file(GFile *file)
+{
+    record_recent_kind(file, true);
+}
+void FileManagerWindow::record_recent_kind(GFile *file, const bool regular_file)
 {
     if (file == nullptr || !g_file_is_native(file)) return;
     char *path = g_file_get_path(file);
@@ -849,11 +889,10 @@ void FileManagerWindow::record_recent(GFile *file)
         path[strlen(home)] == '/' &&
         path[strlen(home) + 1] != '.' &&
         std::string(path + strlen(home) + 1).find("/.") == std::string::npos) {
-        recent_locations_.erase(
-            std::remove(recent_locations_.begin(), recent_locations_.end(), uri),
-            recent_locations_.end());
-        recent_locations_.insert(recent_locations_.begin(), uri);
-        if (recent_locations_.size() > 20U) recent_locations_.resize(20U);
+        auto &history = regular_file ? recent_files_ : recent_locations_;
+        history.erase(std::remove(history.begin(), history.end(), uri), history.end());
+        history.insert(history.begin(), uri);
+        if (history.size() > 20U) history.resize(20U);
         save_recents();
         rebuild_recent_menu();
     }
@@ -866,8 +905,15 @@ void FileManagerWindow::rebuild_recent_menu()
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
     const SearchPrivacy privacy = load_search_privacy();
     guint rendered = 0U;
-    for (const auto &uri : recent_locations_) {
+    for (int group = 0; group != 2; ++group) {
+        const auto &recent = group == 0 ? recent_files_ : recent_locations_;
+        bool group_title = false;
+    for (const auto &uri : recent) {
         if (!privacy_allows_recent_uri(privacy, uri)) continue;
+        if (!group_title) {
+            gtk_box_append(GTK_BOX(box), gtk_label_new(group == 0 ? "Recent files" : "Recent folders"));
+            group_title = true;
+        }
         ++rendered;
         GFile *file = g_file_new_for_uri(uri.c_str());
         char *name = g_file_get_parse_name(file);
@@ -875,16 +921,18 @@ void FileManagerWindow::rebuild_recent_menu()
         gtk_widget_add_css_class(button, "flat");
         gtk_widget_set_halign(button, GTK_ALIGN_FILL);
         g_object_set_data_full(G_OBJECT(button), "recent-uri", g_strdup(uri.c_str()), g_free);
+        g_object_set_data(G_OBJECT(button), "recent-is-file", GINT_TO_POINTER(group == 0 ? 1 : 0));
         g_signal_connect(button, "clicked", G_CALLBACK(on_recent_open), this);
         gtk_box_append(GTK_BOX(box), button);
         g_free(name);
         g_object_unref(file);
     }
+    }
     if (rendered == 0U)
         gtk_box_append(GTK_BOX(box), gtk_label_new(privacy.valid
-            ? "No recent folders" : "Recent locations unavailable: privacy settings are invalid"));
-    GtkWidget *clear = gtk_button_new_with_label("Clear recent locations");
-    gtk_widget_set_sensitive(clear, !recent_locations_.empty() && privacy.valid);
+            ? "No recent files or folders" : "Recent locations unavailable: privacy settings are invalid"));
+    GtkWidget *clear = gtk_button_new_with_label("Clear recent history");
+    gtk_widget_set_sensitive(clear, (!recent_locations_.empty() || !recent_files_.empty()) && privacy.valid);
     g_signal_connect(clear, "clicked", G_CALLBACK(on_recent_clear), this);
     gtk_box_append(GTK_BOX(box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
     gtk_box_append(GTK_BOX(box), clear);
@@ -898,15 +946,24 @@ void FileManagerWindow::on_recent_open(GtkButton *button, gpointer user_data)
     // Navigation refreshes the Recent popover; own the target independently
     // before the active button's menu can be rebuilt and destroyed.
     std::string target(uri);
+    const bool regular_file = GPOINTER_TO_INT(
+        g_object_get_data(G_OBJECT(button), "recent-is-file")) == 1;
     gtk_popover_popdown(GTK_POPOVER(self->recent_popover_));
     GFile *file = g_file_new_for_uri(target.c_str());
-    self->navigate_to(file, true);
+    if (regular_file) {
+        if (self->status_label_ != nullptr)
+            g_app_info_launch_default_for_uri_async(target.c_str(), nullptr, nullptr,
+                &FileManagerWindow::on_launch_finished, g_object_ref(self->status_label_));
+    } else {
+        self->navigate_to(file, true);
+    }
     g_object_unref(file);
 }
 void FileManagerWindow::on_recent_clear(GtkButton *, gpointer user_data)
 {
     auto *self = static_cast<FileManagerWindow *>(user_data);
     self->recent_locations_.clear();
+    self->recent_files_.clear();
     self->save_recents();
     self->rebuild_recent_menu();
     gtk_popover_popdown(GTK_POPOVER(self->recent_popover_));
@@ -1536,6 +1593,7 @@ void FileManagerWindow::activate_position(const guint position)
             g_app_info_launch_default_for_uri_async(uri, nullptr, nullptr,
                                                     &FileManagerWindow::on_launch_finished,
                                                     g_object_ref(status_label_));
+            record_recent_file(child);
             g_free(uri);
         }
     }

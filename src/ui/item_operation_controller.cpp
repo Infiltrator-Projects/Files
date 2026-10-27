@@ -43,6 +43,10 @@ const char *busy_text(const int kind)
         return "Replacing item by move…";
     case 7:
         return "Changing permissions…";
+    case 8:
+        return "Creating symbolic link…";
+    case 9:
+        return "Creating hard link…";
     default:
         return "Working…";
     }
@@ -83,7 +87,10 @@ ItemOperationController::ItemOperationController(GtkWindow *window,
         copy_button_ = gtk_button_new_with_label("Copy to…");
         move_button_ = gtk_button_new_with_label("Move to…");
         permissions_button_ = gtk_button_new_with_label("Edit Permissions…");
-        for (GtkWidget *button : {rename_button_, copy_button_, move_button_, permissions_button_}) {
+        symbolic_link_button_ = gtk_button_new_with_label("Create Symbolic Link…");
+        hard_link_button_ = gtk_button_new_with_label("Create Hard Link…");
+        for (GtkWidget *button : {rename_button_, copy_button_, move_button_, permissions_button_,
+                                  symbolic_link_button_, hard_link_button_}) {
             gtk_widget_add_css_class(button, "flat");
             gtk_widget_set_halign(button, GTK_ALIGN_FILL);
             gtk_box_append(GTK_BOX(box), button);
@@ -97,6 +104,12 @@ ItemOperationController::ItemOperationController(GtkWindow *window,
                          G_CALLBACK(&ItemOperationController::on_move_clicked), this);
         g_signal_connect(permissions_button_, "clicked",
                          G_CALLBACK(&ItemOperationController::on_permissions_clicked), this);
+        g_object_set_data(G_OBJECT(symbolic_link_button_), "ifm-link-kind", GINT_TO_POINTER(8));
+        g_object_set_data(G_OBJECT(hard_link_button_), "ifm-link-kind", GINT_TO_POINTER(9));
+        g_signal_connect(symbolic_link_button_, "clicked",
+                         G_CALLBACK(&ItemOperationController::on_link_clicked), this);
+        g_signal_connect(hard_link_button_, "clicked",
+                         G_CALLBACK(&ItemOperationController::on_link_clicked), this);
 
         gtk_popover_set_child(GTK_POPOVER(popover_), box);
         gtk_menu_button_set_popover(GTK_MENU_BUTTON(menu_button_), popover_);
@@ -173,6 +186,10 @@ const char *ItemOperationController::kind_name(const Kind kind) noexcept
         return "move-replace";
     case Kind::Permissions:
         return "permissions";
+    case Kind::SymbolicLink:
+        return "create-symlink";
+    case Kind::HardLink:
+        return "create-hardlink";
     }
     return "unknown";
 }
@@ -205,6 +222,14 @@ void ItemOperationController::on_permissions_clicked(GtkButton *button, gpointer
     auto *self = static_cast<ItemOperationController *>(user_data);
     self->close_menu();
     self->show_permissions_dialog();
+}
+
+void ItemOperationController::on_link_clicked(GtkButton *button, gpointer user_data)
+{
+    auto *self = static_cast<ItemOperationController *>(user_data);
+    const int kind = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "ifm-link-kind"));
+    self->close_menu();
+    if (kind == 8 || kind == 9) self->show_rename_dialog(static_cast<Kind>(kind));
 }
 
 void ItemOperationController::on_copy_clicked(GtkButton *button, gpointer user_data)
@@ -509,7 +534,7 @@ void ItemOperationController::submit_permissions()
     start_operation(Kind::Permissions, source, {}, mode);
 }
 
-void ItemOperationController::show_rename_dialog()
+void ItemOperationController::show_rename_dialog(const Kind kind)
 {
     if (busy_ || chooser_busy_) {
         return;
@@ -520,7 +545,7 @@ void ItemOperationController::show_rename_dialog()
     }
     auto *manager = static_cast<FileManagerWindow *>(
         g_object_get_data(G_OBJECT(window_), "ifm-window-controller"));
-    if (manager != nullptr && manager->begin_inline_rename()) return;
+    if (kind == Kind::Rename && manager != nullptr && manager->begin_inline_rename()) return;
 
     std::string source_path;
     std::string current_name;
@@ -528,9 +553,12 @@ void ItemOperationController::show_rename_dialog()
         return;
     }
     rename_source_path_ = source_path;
+    rename_dialog_kind_ = kind;
 
     rename_dialog_ = gtk_window_new();
-    gtk_window_set_title(GTK_WINDOW(rename_dialog_), "Rename");
+    gtk_window_set_title(GTK_WINDOW(rename_dialog_),
+        kind == Kind::Rename ? "Rename" :
+        kind == Kind::SymbolicLink ? "Create Symbolic Link" : "Create Hard Link");
     gtk_window_set_transient_for(GTK_WINDOW(rename_dialog_), window_);
     gtk_window_set_modal(GTK_WINDOW(rename_dialog_), TRUE);
     gtk_window_set_resizable(GTK_WINDOW(rename_dialog_), FALSE);
@@ -545,12 +573,14 @@ void ItemOperationController::show_rename_dialog()
     gtk_widget_set_margin_bottom(box, 18);
     gtk_window_set_child(GTK_WINDOW(rename_dialog_), box);
 
-    GtkWidget *label = gtk_label_new("New name");
+    GtkWidget *label = gtk_label_new(kind == Kind::Rename ? "New name" : "New link name");
     gtk_label_set_xalign(GTK_LABEL(label), 0.0F);
     gtk_box_append(GTK_BOX(box), label);
 
     rename_entry_ = gtk_entry_new();
-    gtk_editable_set_text(GTK_EDITABLE(rename_entry_), current_name.c_str());
+    const std::string suggested_name = kind == Kind::Rename ? current_name :
+        current_name + (kind == Kind::SymbolicLink ? " link" : " hard link");
+    gtk_editable_set_text(GTK_EDITABLE(rename_entry_), suggested_name.c_str());
     gtk_box_append(GTK_BOX(box), rename_entry_);
     g_signal_connect(rename_entry_, "activate",
                      G_CALLBACK(&ItemOperationController::on_rename_entry_activate), this);
@@ -567,7 +597,8 @@ void ItemOperationController::show_rename_dialog()
     gtk_box_append(GTK_BOX(box), actions);
 
     GtkWidget *cancel = gtk_button_new_with_label("Cancel");
-    GtkWidget *rename = gtk_button_new_with_label("Rename");
+    GtkWidget *rename = gtk_button_new_with_label(
+        kind == Kind::Rename ? "Rename" : "Create Link");
     gtk_widget_add_css_class(rename, "suggested-action");
     gtk_box_append(GTK_BOX(actions), cancel);
     gtk_box_append(GTK_BOX(actions), rename);
@@ -596,7 +627,7 @@ void ItemOperationController::submit_rename()
 
     const std::string source_path = rename_source_path_;
     gtk_window_destroy(GTK_WINDOW(rename_dialog_));
-    start_operation(Kind::Rename, source_path, {}, new_name);
+    start_operation(rename_dialog_kind_, source_path, {}, new_name);
 }
 
 void ItemOperationController::rename_selected_to(const std::string &new_name)
@@ -799,7 +830,8 @@ void ItemOperationController::start_operation(const Kind kind,
 
     OperationJournal journal;
     const std::string journal_destination =
-        kind == Kind::Rename || kind == Kind::Permissions ? new_name : destination_parent;
+        kind == Kind::Rename || kind == Kind::Permissions ||
+        kind == Kind::SymbolicLink || kind == Kind::HardLink ? new_name : destination_parent;
     const std::string journal_id = journal.begin(kind_name(kind),
                                                  source_path,
                                                  journal_destination);
@@ -851,6 +883,12 @@ void ItemOperationController::on_operation_thread(GTask *task,
     switch (kind) {
     case Kind::Rename:
         operation = ordinary.rename_item(data->source_path, data->new_name);
+        break;
+    case Kind::SymbolicLink:
+        operation = ordinary.create_symbolic_link(data->source_path, data->new_name);
+        break;
+    case Kind::HardLink:
+        operation = ordinary.create_hard_link(data->source_path, data->new_name);
         break;
     case Kind::Permissions: {
         unsigned int permissions = 0U;
@@ -1017,6 +1055,10 @@ void ItemOperationController::update_action_state()
     if (permissions_button_ != nullptr) {
         gtk_widget_set_sensitive(permissions_button_, enabled);
     }
+    if (symbolic_link_button_ != nullptr)
+        gtk_widget_set_sensitive(symbolic_link_button_, enabled);
+    if (hard_link_button_ != nullptr)
+        gtk_widget_set_sensitive(hard_link_button_, enabled);
 }
 
 void ItemOperationController::select_pending_item()

@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <sys/stat.h>
 #include <system_error>
@@ -224,6 +225,78 @@ void reflect_cleanup(OperationResult &result, const fs::path &private_directory)
 }
 } // namespace
 
+
+ArchivePreview ArchiveEngine::preview(const fs::path &source,
+                                      GCancellable *cancel) const
+{
+    constexpr std::uint64_t kMaxCompressedPreview = 64ULL * 1024ULL * 1024ULL;
+    constexpr std::uint64_t kMaxPreviewEntries = 5000U;
+    std::error_code error;
+    if (!source.is_absolute() ||
+        !fs::is_regular_file(fs::symlink_status(source, error)) || error)
+        return {false, "Only an existing native regular archive may be previewed."};
+    const auto compressed = fs::file_size(source, error);
+    if (error || compressed > kMaxCompressedPreview)
+        return {false, "Archive preview is limited to 64 MiB of source data; extraction is a separate operation."};
+    if (cancelled(cancel)) return {false, "Archive inspection was cancelled."};
+    Reader reader(archive_read_new());
+    if (!reader) return {false, "The archive inspection provider is unavailable."};
+    archive_read_support_filter_all(reader.get());
+    archive_read_support_format_all(reader.get());
+    if (archive_read_open_filename(reader.get(), source.c_str(), 65536U) != ARCHIVE_OK)
+        return {false, "Could not inspect archive headers: " + archive_error(reader.get())};
+
+    std::uint64_t entries = 0U;
+    std::uint64_t total = 0U;
+    std::uint64_t unsafe = 0U;
+    std::ostringstream names;
+    bool complete = false;
+    std::string why;
+    while (entries < kMaxPreviewEntries) {
+        if (cancelled(cancel)) { why = "Inspection cancelled."; break; }
+        archive_entry *entry = nullptr;
+        const int status = archive_read_next_header(reader.get(), &entry);
+        if (status == ARCHIVE_EOF) { complete = true; break; }
+        if (status != ARCHIVE_OK || entry == nullptr) {
+            why = "An archive header could not be read: " + archive_error(reader.get());
+            break;
+        }
+        ++entries;
+        const la_int64_t length = archive_entry_size(entry);
+        if (length < 0 || static_cast<std::uint64_t>(length) > kMaxTotal - total) {
+            why = "Archive logical size is unknown or exceeds the 8 GiB preview budget.";
+            break;
+        }
+        total += static_cast<std::uint64_t>(length);
+        fs::path relative;
+        const char *name = archive_entry_pathname(entry);
+        const bool safe = name != nullptr && valid_relative_path(name, relative) &&
+            archive_entry_hardlink(entry) == nullptr &&
+            archive_entry_symlink(entry) == nullptr &&
+            (archive_entry_filetype(entry) == AE_IFREG ||
+             archive_entry_filetype(entry) == AE_IFDIR);
+        if (!safe) ++unsafe;
+        if (entries <= 32U) {
+            std::string display = safe ? relative.generic_string() : "[unsafe entry]";
+            if (display.size() > 160U) display.resize(160U);
+            for (char &character : display)
+                if (static_cast<unsigned char>(character) < 32U || character == 127)
+                    character = '?';
+            names << "  " << display << "\n";
+        }
+    }
+    if (!complete && why.empty()) why = "Preview entry limit (5,000) reached.";
+    std::ostringstream report;
+    report << (complete ? "Archive catalogue complete" : "Archive catalogue incomplete")
+           << "\nEntries inspected: " << entries
+           << "\nLogical bytes represented: " << total
+           << "\nUnsafe or unsupported entries: " << unsafe << "\n";
+    if (!why.empty()) report << "Reason: " << why << "\n";
+    if (unsafe != 0U) report << "Unsafe entries are never extracted by Files.\n";
+    if (entries > 32U) report << "Only the first 32 entry names are shown.\n";
+    report << names.str();
+    return {complete, report.str()};
+}
 
 OperationResult ArchiveEngine::create_zip(const fs::path &source,
                                           const fs::path &destination_parent,

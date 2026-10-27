@@ -2,6 +2,7 @@
 #include "interaction_controller.hpp"
 
 #include "archive_controller.hpp"
+#include "clipboard_controller.hpp"
 #include "detail_metadata.hpp"
 #include "file_inspection.hpp"
 #include "recursive_search.hpp"
@@ -183,11 +184,14 @@ InteractionController::InteractionController(GtkWindow *window,
 
     rebuild_breadcrumbs();
     update_action_state();
+    g_object_set_data(G_OBJECT(window_), "ifm-interaction-controller", this);
     g_object_weak_ref(G_OBJECT(window_), &InteractionController::on_window_finalized, this);
 }
 
 InteractionController::~InteractionController()
 {
+    if (window_ != nullptr)
+        g_object_set_data(G_OBJECT(window_), "ifm-interaction-controller", nullptr);
     if (selection_ != nullptr) {
         if (selection_handler_ != 0U) {
             g_signal_handler_disconnect(selection_, selection_handler_);
@@ -234,6 +238,8 @@ void InteractionController::discover_existing_actions()
         find_widget_by_tooltip(titlebar, "New Folder (Ctrl+Shift+N)");
     GtkWidget *new_file_button =
         find_widget_by_tooltip(titlebar, "New Empty File (Ctrl+Alt+N)");
+    GtkWidget *new_sparse_button =
+        find_widget_by_tooltip(titlebar, "New Sparse File (Ctrl+Alt+Shift+N)");
     GtkWidget *single_menu =
         find_widget_by_tooltip(titlebar, "Selected item actions");
     GtkWidget *batch_menu =
@@ -243,17 +249,21 @@ void InteractionController::discover_existing_actions()
 
     new_folder_target_ = new_folder_button;
     new_file_target_ = new_file_button;
+    new_sparse_target_ = new_sparse_button;
     rename_target_ = menu_action(single_menu, "Rename");
     copy_target_ = menu_action(single_menu, "Copy to…");
     move_target_ = menu_action(single_menu, "Move to…");
     permissions_target_ = menu_action(single_menu, "Edit Permissions…");
+    symbolic_link_target_ = menu_action(single_menu, "Create Symbolic Link…");
+    hard_link_target_ = menu_action(single_menu, "Create Hard Link…");
     batch_copy_target_ = menu_action(batch_menu, "Copy selected to…");
     batch_move_target_ = menu_action(batch_menu, "Move selected to…");
     trash_target_ = menu_action(destructive_menu, "Move to Trash");
     restore_target_ = menu_action(destructive_menu, "Restore");
     delete_target_ = menu_action(destructive_menu, "Delete Permanently…");
 
-    for (GtkWidget *legacy : {new_folder_button, new_file_button, single_menu, batch_menu, destructive_menu}) {
+    for (GtkWidget *legacy : {new_folder_button, new_file_button, new_sparse_button,
+                              single_menu, batch_menu, destructive_menu}) {
         if (legacy != nullptr) {
             gtk_widget_set_visible(legacy, FALSE);
         }
@@ -376,6 +386,10 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
                          ActionScope::Always, proxies);
     create_action_button(box, "New Empty File", new_file_target_,
                          ActionScope::Always, proxies);
+    create_action_button(box, "New Sparse File…", new_sparse_target_,
+                         ActionScope::Always, proxies);
+    add_command(box, "Create from template…", "template-create",
+                ActionScope::Always, proxies);
     add_separator(box);
 
     create_action_button(box, "Rename", rename_target_,
@@ -385,6 +399,10 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
     create_action_button(box, "Move to…", move_target_,
                          ActionScope::SingleSelection, proxies);
     create_action_button(box, "Edit Permissions…", permissions_target_,
+                         ActionScope::SingleSelection, proxies);
+    create_action_button(box, "Create Symbolic Link…", symbolic_link_target_,
+                         ActionScope::SingleSelection, proxies);
+    create_action_button(box, "Create Hard Link…", hard_link_target_,
                          ActionScope::SingleSelection, proxies);
 
     create_action_button(box, "Copy selected to…", batch_copy_target_,
@@ -437,6 +455,8 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
             tools, "Open selected folder in terminal", "terminal-selected",
             ActionScope::SingleSelection, proxies));
         add_command(tools, "Inspect file…", "inspect",
+                    ActionScope::SingleSelection, proxies);
+        add_command(tools, "Preview archive contents…", "preview-archive",
                     ActionScope::SingleSelection, proxies);
         add_command(tools, "Extract archive safely", "extract-archive",
                     ActionScope::SingleSelection, proxies);
@@ -538,6 +558,10 @@ GtkWidget *InteractionController::build_context_action_box()
                          ActionScope::NoSelection, context_proxies_);
     create_action_button(creation, "New Empty File", new_file_target_,
                          ActionScope::NoSelection, context_proxies_);
+    create_action_button(creation, "New Sparse File…", new_sparse_target_,
+                         ActionScope::NoSelection, context_proxies_);
+    add_command(creation, "Create from template…", "template-create",
+                ActionScope::NoSelection, context_proxies_);
 
     GtkWidget *clipboard = section(true);
     for (const char *name : {"Cut", "Copy", "Paste"}) {
@@ -558,6 +582,10 @@ GtkWidget *InteractionController::build_context_action_box()
     create_action_button(transfer, "Copy to…", copy_target_,
                          ActionScope::SingleSelection, context_proxies_);
     create_action_button(transfer, "Move to…", move_target_,
+                         ActionScope::SingleSelection, context_proxies_);
+    create_action_button(transfer, "Create Symbolic Link…", symbolic_link_target_,
+                         ActionScope::SingleSelection, context_proxies_);
+    create_action_button(transfer, "Create Hard Link…", hard_link_target_,
                          ActionScope::SingleSelection, context_proxies_);
     create_action_button(transfer, "Copy selected to…", batch_copy_target_,
                          ActionScope::MultiSelection, context_proxies_);
@@ -705,6 +733,7 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
         g_object_get_data(G_OBJECT(self->window_), "ifm-window-controller"));
     if (window == nullptr) return;
     if (g_strcmp0(command, "open-with") == 0) self->show_open_with();
+    else if (g_strcmp0(command, "template-create") == 0) self->show_template_chooser();
     else if (g_strcmp0(command, "new-window") == 0) window->open_new_window();
     else if (g_strcmp0(command, "dual-pane") == 0) {
         auto *pane = static_cast<DualPaneController *>(
@@ -722,6 +751,11 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
     else if (g_strcmp0(command, "folders-first") == 0) window->toggle_folders_first();
     else if (g_strcmp0(command, "single-click") == 0) window->toggle_single_click_activation();
     else if (g_strcmp0(command, "folder-default-tab") == 0) window->toggle_folder_open_mode();
+    else if (g_strcmp0(command, "preview-archive") == 0) {
+        auto *archive = static_cast<ArchiveController *>(
+            g_object_get_data(G_OBJECT(self->window_), "ifm-archive-controller"));
+        if (archive != nullptr) archive->preview_selected();
+    }
     else if (g_strcmp0(command, "extract-archive") == 0) {
         auto *archive = static_cast<ArchiveController *>(
             g_object_get_data(G_OBJECT(self->window_), "ifm-archive-controller"));
@@ -1172,6 +1206,79 @@ void InteractionController::copy_selected_text(const bool uris)
         uris ? "Selected URIs copied as text" : "Selected native paths copied as text");
 }
 
+
+void InteractionController::show_template_chooser()
+{
+    if (window_ == nullptr || directory_list_ == nullptr ||
+        gtk_directory_list_get_file(directory_list_) == nullptr ||
+        !g_file_is_native(gtk_directory_list_get_file(directory_list_))) {
+        if (status_label_ != nullptr)
+            gtk_label_set_text(GTK_LABEL(status_label_),
+                "Template creation requires a native destination folder.");
+        return;
+    }
+    const char *location = g_get_user_special_dir(G_USER_DIRECTORY_TEMPLATES);
+    std::string fallback;
+    if (location == nullptr || *location == '\0') {
+        fallback = std::string(g_get_home_dir()) + "/Templates";
+        location = fallback.c_str();
+    }
+    GFile *root = g_file_new_for_path(location);
+    GtkFileDialog *dialog = gtk_file_dialog_new();
+    gtk_file_dialog_set_title(dialog, "Create from a template");
+    gtk_file_dialog_set_initial_folder(dialog, root);
+    // The held GTK window keeps callback user data valid. Window destruction
+    // still revokes mutation authority in ClipboardController before dispatch.
+    gtk_file_dialog_open(dialog, window_, nullptr,
+                         &InteractionController::on_template_chosen,
+                         g_object_ref(window_));
+    g_object_unref(dialog);
+    g_object_unref(root);
+}
+
+void InteractionController::on_template_chosen(GObject *source, GAsyncResult *result,
+                                                gpointer raw_window)
+{
+    auto *window = GTK_WINDOW(raw_window);
+    GError *error = nullptr;
+    GFile *file = gtk_file_dialog_open_finish(GTK_FILE_DIALOG(source), result, &error);
+    if (file == nullptr) {
+        // Cancellation is not an operation failure and never mutates files.
+        g_clear_error(&error);
+        g_object_unref(window);
+        return;
+    }
+    const char *templates = g_get_user_special_dir(G_USER_DIRECTORY_TEMPLATES);
+    std::string fallback;
+    if (templates == nullptr || *templates == '\0') {
+        fallback = std::string(g_get_home_dir()) + "/Templates";
+        templates = fallback.c_str();
+    }
+    GFile *root = g_file_new_for_path(templates);
+    auto *controller = static_cast<ClipboardController *>(
+        g_object_get_data(G_OBJECT(window), "ifm-clipboard-controller"));
+    auto *interaction = static_cast<InteractionController *>(
+        g_object_get_data(G_OBJECT(window), "ifm-interaction-controller"));
+    GFile *destination = interaction != nullptr && interaction->directory_list_ != nullptr
+        ? gtk_directory_list_get_file(interaction->directory_list_) : nullptr;
+    // The template folder is the only admitted source namespace. Do not
+    // interpret a file chooser's arbitrary selection as template authority.
+    const bool admitted = g_file_is_native(file) && g_file_has_prefix(file, root) &&
+        destination != nullptr && g_file_is_native(destination) && controller != nullptr;
+    char *source_path = admitted ? g_file_get_path(file) : nullptr;
+    char *destination_path = admitted ? g_file_get_path(destination) : nullptr;
+    const bool started = source_path != nullptr && destination_path != nullptr &&
+        controller->transfer_from_drop({source_path}, destination_path, false);
+    if (!started && interaction != nullptr && interaction->status_label_ != nullptr)
+        gtk_label_set_text(GTK_LABEL(interaction->status_label_), admitted
+            ? "The selected template could not be copied now; finish the current operation first."
+            : "Choose a native file inside your Templates folder.");
+    g_free(source_path);
+    g_free(destination_path);
+    g_object_unref(root);
+    g_object_unref(file);
+    g_object_unref(window);
+}
 
 void InteractionController::show_open_with()
 {
@@ -1796,8 +1903,8 @@ void InteractionController::open_primary()
     }
 
     char *uri = g_file_get_uri(child);
-    g_object_unref(child);
     if (uri == nullptr) {
+        g_object_unref(child);
         return;
     }
 
@@ -1813,6 +1920,10 @@ void InteractionController::open_primary()
             g_error_free(error);
         }
     }
+    auto *controller = static_cast<FileManagerWindow *>(
+        g_object_get_data(G_OBJECT(window_), "ifm-window-controller"));
+    if (controller != nullptr) controller->record_recent_file(child);
+    g_object_unref(child);
     g_free(uri);
 }
 

@@ -106,6 +106,45 @@ int main()
         return 112;
     }
 
+    // Owners must be able to recover their own mode-000 files without Files
+    // silently relying on pathname chmod or following a substituted symlink.
+    if (::chmod(permission_target.c_str(), 0000) != 0) {
+        fs::remove_all(root, cleanup_error);
+        return 113;
+    }
+    const auto restored_mode = engine.change_permissions(permission_target, 0600U);
+    if (!restored_mode.ok() || !restored_mode.changed ||
+        ::stat(permission_target.c_str(), &mode_check) != 0 ||
+        (mode_check.st_mode & 0777) != 0600) {
+        (void)::chmod(permission_target.c_str(), 0600);
+        fs::remove_all(root, cleanup_error);
+        return 114;
+    }
+
+    // Both link types must be atomic no-replace operations, independent of the
+    // displayed item name. Symlinks retain the original relative pathname;
+    // hard links retain the exact source inode.
+    const auto symbolic = engine.create_symbolic_link(permission_target, "mode-symbolic");
+    const auto hard = engine.create_hard_link(permission_target, "mode-hard");
+    struct stat source_identity{}, linked_identity{};
+    std::error_code link_error;
+    if (!symbolic.ok() || !hard.ok() ||
+        !fs::is_symlink(fs::symlink_status(root / "mode-symbolic", link_error)) ||
+        fs::read_symlink(root / "mode-symbolic", link_error) != fs::path("mode-test.txt") ||
+        ::stat(permission_target.c_str(), &source_identity) != 0 ||
+        ::stat((root / "mode-hard").c_str(), &linked_identity) != 0 ||
+        source_identity.st_dev != linked_identity.st_dev ||
+        source_identity.st_ino != linked_identity.st_ino ||
+        engine.create_symbolic_link(permission_target, "mode-symbolic").status !=
+            OperationStatus::DestinationConflict ||
+        engine.create_hard_link(permission_target, "mode-hard").status !=
+            OperationStatus::DestinationConflict ||
+        engine.create_hard_link(root, "no-directory-hardlink").ok() ||
+        engine.create_symbolic_link(permission_target, "../escape").ok()) {
+        fs::remove_all(root, cleanup_error);
+        return 115;
+    }
+
     // New File must be no-replace, empty, and never damage an existing item.
     const auto new_file = engine.create_empty_file(root, "blank.txt");
     if (!new_file.ok() || !new_file.changed ||
@@ -123,6 +162,20 @@ int main()
     if (bad_file.status != OperationStatus::InvalidRequest || bad_file.changed) {
         fs::remove_all(root, cleanup_error);
         return 95;
+    }
+
+    // Sparse files occupy a large logical range without a streamed zero-fill.
+    const auto sparse = engine.create_sparse_file(root, "hole.bin", 8ULL * 1024U * 1024U * 1024U);
+    struct stat sparse_status {};
+    if (!sparse.ok() || !sparse.changed ||
+        ::stat((root / "hole.bin").c_str(), &sparse_status) != 0 ||
+        static_cast<std::uint64_t>(sparse_status.st_size) != 8ULL * 1024U * 1024U * 1024U ||
+        engine.create_sparse_file(root, "hole.bin", 4096U).status !=
+            OperationStatus::DestinationConflict ||
+        engine.create_sparse_file(root, "../escape", 4096U).ok() ||
+        engine.create_sparse_file(root, "too-large", (1ULL << 40U) + 1U).ok()) {
+        fs::remove_all(root, cleanup_error);
+        return 116;
     }
 
     const fs::path original = root / "original.txt";

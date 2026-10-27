@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -45,10 +46,20 @@ public:
                                                    std::string_view name) const;
     [[nodiscard]] OperationResult create_empty_file(const std::filesystem::path &parent,
                                                     std::string_view name) const;
+    // Explicit sparse creation never writes the requested logical length.
+    [[nodiscard]] OperationResult create_sparse_file(const std::filesystem::path &parent,
+                                                      std::string_view name,
+                                                      std::uint64_t length) const;
     // Linux-native mode changes are descriptor-bound and never follow the final
     // component through a symlink. The UI/journal owns operation admission.
     [[nodiscard]] OperationResult change_permissions(const std::filesystem::path &source,
                                                       unsigned int permissions) const;
+    // Create a named native link beside the selected object. Both forms use
+    // atomic no-replace namespace insertion and report durability failures.
+    [[nodiscard]] OperationResult create_symbolic_link(const std::filesystem::path &source,
+                                                        std::string_view name) const;
+    [[nodiscard]] OperationResult create_hard_link(const std::filesystem::path &source,
+                                                    std::string_view name) const;
     [[nodiscard]] OperationResult rename_item(const std::filesystem::path &source,
                                               std::string_view new_name) const;
     [[nodiscard]] OperationResult copy_item(const std::filesystem::path &source,

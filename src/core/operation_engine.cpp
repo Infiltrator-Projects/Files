@@ -3,10 +3,12 @@
 #include "destination_ownership.hpp"
 #include "transfer_operation_engine.hpp"
 
+#include <array>
 #include <cerrno>
 #include <cstdint>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/xattr.h>
 #include <unistd.h>
 #include <string>
@@ -74,10 +76,15 @@ OperationResult OperationEngine::change_permissions(
                        source, "Permissions require an absolute native path and a mode from 0000 to 0777.");
     }
 
-    // A pathname-only chmod can modify a different inode after the preflight
-    // lookup. Keep the selected inode open for both the mutation and its
-    // durability/verification barrier; never follow the final symlink.
-    const int fd = ::open(source.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    // A held descriptor, rather than a repeated pathname lookup, owns the inode.
+    // O_RDONLY cannot open a legitimate mode-000 file even for its owner. Use
+    // O_PATH only on EACCES and never follow the selected symlink.
+    int fd = ::open(source.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    bool path_only = false;
+    if (fd < 0 && errno == EACCES) {
+        fd = ::open(source.c_str(), O_PATH | O_CLOEXEC | O_NOFOLLOW);
+        path_only = fd >= 0;
+    }
     if (fd < 0) {
         const std::error_code error(errno, std::generic_category());
         return failure(status_for_error(error), OperationPhase::Preflight, source,
@@ -105,8 +112,14 @@ OperationResult OperationEngine::change_permissions(
     // chmod may rewrite the effective POSIX ACL mask on ACL-bearing files.
     // Refuse rather than silently modifying access rights beyond the user's
     // three ordinary mode fields. Unknown ACL readability also fails closed.
+    // Linux O_PATH descriptors cannot be passed to fgetxattr. The /proc fd
+    // reference binds the ACL query to precisely the inode held above; it
+    // must not fall back to the mutable original pathname on failure.
+    const std::string proc_reference = "/proc/self/fd/" + std::to_string(fd);
     errno = 0;
-    const ssize_t acl_bytes = ::fgetxattr(fd, "system.posix_acl_access", nullptr, 0);
+    const ssize_t acl_bytes = path_only
+        ? ::getxattr(proc_reference.c_str(), "system.posix_acl_access", nullptr, 0)
+        : ::fgetxattr(fd, "system.posix_acl_access", nullptr, 0);
     if (acl_bytes >= 0) {
         (void)close_fd();
         return failure(OperationStatus::UnsupportedCapability, OperationPhase::Preflight, source,
@@ -124,7 +137,21 @@ OperationResult OperationEngine::change_permissions(
                                source, "Permissions were already set to the requested mode.", false, {}};
     }
 
-    if (::fchmod(fd, static_cast<mode_t>(permissions)) != 0) {
+    // fchmodat2(AT_EMPTY_PATH) operates on the held inode, including when
+    // mode-000 prevents opening it for reading. Never use an unsafe pathname
+    // fallback on older kernels: the operation remains explicitly unsupported.
+    int chmod_result = -1;
+    if (path_only) {
+#ifdef SYS_fchmodat2
+        chmod_result = static_cast<int>(::syscall(SYS_fchmodat2, fd, "",
+                                                  static_cast<mode_t>(permissions), AT_EMPTY_PATH));
+#else
+        errno = ENOSYS;
+#endif
+    } else {
+        chmod_result = ::fchmod(fd, static_cast<mode_t>(permissions));
+    }
+    if (chmod_result != 0) {
         const std::error_code error(errno, std::generic_category());
         (void)close_fd();
         return failure(status_for_error(error), OperationPhase::Execute, source,
@@ -132,7 +159,26 @@ OperationResult OperationEngine::change_permissions(
     }
     // After fchmod the object may have changed. A failed barrier is never
     // reported as success or rolled back against an independently changed inode.
-    if (::fsync(fd) != 0) {
+    // An O_PATH descriptor cannot be synced. Reopen through the *held* fd,
+    // never the source pathname, then prove that this is still the same inode
+    // before claiming durable completion.
+    int sync_fd = fd;
+    if (path_only) {
+        sync_fd = ::open(proc_reference.c_str(), O_RDONLY | O_CLOEXEC);
+        struct stat held{};
+        if (sync_fd < 0 || ::fstat(sync_fd, &held) != 0 ||
+            held.st_dev != before.st_dev || held.st_ino != before.st_ino) {
+            if (sync_fd >= 0) ::close(sync_fd);
+            (void)close_fd();
+            return failure(OperationStatus::VerificationFailure, OperationPhase::Verify, source,
+                           "Permissions changed, but the selected inode could not be reopened for durability verification.", true);
+        }
+    }
+    const int sync_result = ::fsync(sync_fd);
+    const int sync_errno = errno;
+    if (path_only) ::close(sync_fd);
+    if (sync_result != 0) {
+        errno = sync_errno;
         const std::error_code error(errno, std::generic_category());
         (void)close_fd();
         return failure(OperationStatus::VerificationFailure, OperationPhase::Verify, source,
@@ -160,6 +206,17 @@ OperationResult OperationEngine::change_permissions(
 OperationResult OperationEngine::create_empty_file(const std::filesystem::path &parent,
                                                     const std::string_view name) const
 {
+    return create_sparse_file(parent, name, 0U);
+}
+
+OperationResult OperationEngine::create_sparse_file(const std::filesystem::path &parent,
+                                                     const std::string_view name,
+                                                     const std::uint64_t length) const
+{
+    constexpr std::uint64_t kMaxSparseBytes = 1ULL << 40U; // 1 TiB logical cap.
+    if (length > kMaxSparseBytes)
+        return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight, {},
+                       "Requested sparse file exceeds the 1 TiB logical-size limit.");
     std::string reason;
     if (!validate_item_name(name, &reason))
         return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight, {},
@@ -202,7 +259,13 @@ OperationResult OperationEngine::create_empty_file(const std::filesystem::path &
     // or close. Every exit then has the same cleanup/retained-evidence contract.
     const bool recorded = destination_ownership::record_fd(private_path, fd, owned, error);
     int flushed = -1;
-    if (recorded) {
+    // ftruncate changes logical length without allocating/writing the range.
+    // Ownership was recorded before this fallible step, so no partial output
+    // can be published or cleaned up under an unrelated identity.
+    const bool resized = recorded && length <= static_cast<std::uint64_t>(INT64_MAX) &&
+        (length == 0U || ::ftruncate(fd, static_cast<off_t>(length)) == 0);
+    if (!resized && recorded) error = std::error_code(errno, std::generic_category());
+    if (resized) {
         do { flushed = ::fsync(fd); } while (flushed != 0 && errno == EINTR);
         if (flushed != 0) error = std::error_code(errno, std::generic_category());
     }
@@ -235,8 +298,14 @@ OperationResult OperationEngine::create_empty_file(const std::filesystem::path &
     if (!destination_ownership::verify_all(owned, error))
         return failure(OperationStatus::VerificationFailure, OperationPhase::Verify,
                        destination, "The published file could not be verified.", true);
+    std::error_code verify_error;
+    const std::uintmax_t actual_length = std::filesystem::file_size(destination, verify_error);
+    if (verify_error || actual_length != length)
+        return failure(OperationStatus::VerificationFailure, OperationPhase::Verify, destination,
+                       "The created file's logical length could not be verified.", true);
     return OperationResult{OperationStatus::Success, OperationPhase::Verify, destination,
-                           "Created empty file “" + destination.filename().string() + "”.", true, {}};
+                           std::string(length == 0U ? "Created empty file “" : "Created sparse file “") +
+                               destination.filename().string() + "”.", true, {}};
 }
 
 bool OperationEngine::validate_item_name(const std::string_view name, std::string *reason)
@@ -440,6 +509,105 @@ OperationResult OperationEngine::create_directory(const std::filesystem::path &p
                            "Created " + quoted_name(plan.destination) + ".",
                            true,
                            {}};
+}
+
+OperationResult OperationEngine::create_symbolic_link(
+    const std::filesystem::path &source, const std::string_view name) const
+{
+    std::string reason;
+    if (!source.is_absolute() || !validate_item_name(name, &reason))
+        return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight, source,
+                       reason.empty() ? "Link source must be an absolute native path." : reason);
+    const auto parent = source.parent_path();
+    const auto destination = parent / std::string(name);
+    const int directory = ::open(parent.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (directory < 0) {
+        const std::error_code error(errno, std::generic_category());
+        return failure(status_for_error(error), OperationPhase::Preflight, destination,
+                       "Cannot open the link destination folder: " + error.message());
+    }
+    struct stat original{};
+    if (::fstatat(directory, source.filename().c_str(), &original, AT_SYMLINK_NOFOLLOW) != 0) {
+        const std::error_code error(errno, std::generic_category());
+        ::close(directory);
+        return failure(status_for_error(error), OperationPhase::Preflight, destination,
+                       "The selected link target is unavailable: " + error.message());
+    }
+    // A relative target preserves the selected name without inventing a new
+    // absolute dependency. A later rename can intentionally leave a dangling
+    // symlink; the link is not represented as a stable object reference.
+    const std::string target = source.filename().string();
+    if (::symlinkat(target.c_str(), directory, std::string(name).c_str()) != 0) {
+        const std::error_code error(errno, std::generic_category());
+        ::close(directory);
+        return failure(status_for_error(error), OperationPhase::Execute, destination,
+                       error == std::errc::file_exists ? "The link name already exists." :
+                       "The symbolic link could not be created: " + error.message());
+    }
+    std::array<char, 4096> bytes{};
+    const ssize_t count = ::readlinkat(directory, std::string(name).c_str(),
+                                       bytes.data(), bytes.size());
+    const bool verified = count == static_cast<ssize_t>(target.size()) &&
+        std::string_view(bytes.data(), count > 0 ? static_cast<std::size_t>(count) : 0U) == target;
+    const bool durable = verified && ::fsync(directory) == 0;
+    const int closed = ::close(directory);
+    if (!durable || closed != 0)
+        return failure(OperationStatus::VerificationFailure, OperationPhase::Verify, destination,
+                       "Symbolic link was created, but its publication could not be durably verified.", true);
+    return {OperationStatus::Success, OperationPhase::Complete, destination,
+            "Created symbolic link “" + destination.filename().string() + "”.", true, {}};
+}
+
+OperationResult OperationEngine::create_hard_link(
+    const std::filesystem::path &source, const std::string_view name) const
+{
+    std::string reason;
+    if (!source.is_absolute() || !validate_item_name(name, &reason))
+        return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight, source,
+                       reason.empty() ? "Hard-link source must be an absolute native path." : reason);
+    const auto destination = source.parent_path() / std::string(name);
+    // Linux AT_EMPTY_PATH links the held inode, not a pathname re-resolved
+    // after preflight. Never follow source symlinks or hard-link directories.
+    const int original = ::open(source.c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC);
+    if (original < 0) {
+        const std::error_code error(errno, std::generic_category());
+        return failure(status_for_error(error), OperationPhase::Preflight, destination,
+                       "Could not open the selected hard-link source: " + error.message());
+    }
+    struct stat identity{};
+    if (::fstat(original, &identity) != 0 || !S_ISREG(identity.st_mode)) {
+        ::close(original);
+        return failure(OperationStatus::UnsupportedCapability, OperationPhase::Preflight, destination,
+                       "Hard links are supported only for selected native regular files.");
+    }
+    const int directory = ::open(source.parent_path().c_str(),
+                                 O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (directory < 0) {
+        const std::error_code error(errno, std::generic_category());
+        ::close(original);
+        return failure(status_for_error(error), OperationPhase::Preflight, destination,
+                       "Could not open the hard-link destination folder: " + error.message());
+    }
+    if (::linkat(original, "", directory, std::string(name).c_str(), AT_EMPTY_PATH) != 0) {
+        const std::error_code error(errno, std::generic_category());
+        ::close(directory);
+        ::close(original);
+        return failure(status_for_error(error), OperationPhase::Execute, destination,
+                       error == std::errc::file_exists ? "The hard-link name already exists." :
+                       "Hard-link publication was refused: " + error.message());
+    }
+    struct stat actual{};
+    const bool verified = ::fstatat(directory, std::string(name).c_str(),
+                                     &actual, AT_SYMLINK_NOFOLLOW) == 0 &&
+        actual.st_dev == identity.st_dev && actual.st_ino == identity.st_ino;
+    const bool durable = verified && ::fsync(directory) == 0;
+    const int closed = ::close(directory);
+    ::close(original);
+    if (!durable || closed != 0)
+        return failure(OperationStatus::VerificationFailure, OperationPhase::Verify, destination,
+                       "Hard link was created, but its original inode or durability could not be verified.", true);
+    return {OperationStatus::Success, OperationPhase::Complete, destination,
+            "Created hard link “" + destination.filename().string() + "”.", true, {}};
 }
 
 OperationResult OperationEngine::rename_item(const std::filesystem::path &source,

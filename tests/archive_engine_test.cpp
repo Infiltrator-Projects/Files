@@ -42,6 +42,11 @@ int main()
     try {
         const fs::path good = root / "safe.zip";
         sample_archive(good, "docs/note.txt");
+        const auto catalogue = ArchiveEngine{}.preview(good);
+        if (!catalogue.complete ||
+            catalogue.report.find("docs/note.txt") == std::string::npos ||
+            catalogue.report.find("Logical bytes represented: 5") == std::string::npos)
+            throw std::runtime_error("Bounded archive preview did not identify the source entry");
         ArchiveEngine engine;
         const auto imported = engine.extract(good, root, "fixture-1");
         if (!imported.ok() || !fs::exists(root / "safe" / "docs" / "note.txt"))
@@ -109,6 +114,10 @@ int main()
 
         const fs::path evil = root / "escape.zip";
         sample_archive(evil, "../outside.txt");
+        const auto unsafe_preview = engine.preview(evil);
+        if (!unsafe_preview.complete ||
+            unsafe_preview.report.find("Unsafe or unsupported entries: 1") == std::string::npos)
+            throw std::runtime_error("Archive preview must disclose unsafe entries");
         const auto refused = engine.extract(evil, root, "fixture-3");
         if (refused.ok() || fs::exists(root / "outside.txt"))
             throw std::runtime_error("Traversal archive escaped its private root");

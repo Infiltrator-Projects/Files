@@ -329,6 +329,11 @@ void qualify_selection_actions(infiltrator::files::FileManagerWindow &w,
 
     g_signal_emit_by_name(paths_action, "clicked");
     const std::string paths = clipboard_text(w.native_window());
+    if (paths.find((root / "first.pdf").string()) == std::string::npos ||
+        paths.find((root / "second.pdf").string()) == std::string::npos ||
+        paths.find((root / "notes.txt").string()) != std::string::npos)
+        std::cerr << "Path export regression: selected=" << selected_count(selection)
+                  << " clipboard=" << paths << " fixture=" << root << '\n';
     require(paths.find((root / "first.pdf").string()) != std::string::npos &&
             paths.find((root / "second.pdf").string()) != std::string::npos &&
             paths.find((root / "notes.txt").string()) == std::string::npos,
@@ -341,6 +346,52 @@ void qualify_selection_actions(infiltrator::files::FileManagerWindow &w,
             uris.find("second.pdf") != std::string::npos,
             "URI export must enumerate selected files");
 
+
+    require(find_button(context, "Create Symbolic Link…") != nullptr &&
+            find_button(context, "Create Hard Link…") != nullptr,
+            "Native symbolic and hard link actions must be reachable in item context");
+    require(find_button(popover, "Create from template…") != nullptr &&
+            find_button(popover, "New Sparse File…") != nullptr &&
+            find_button(popover, "Preview archive contents…") != nullptr,
+            "Catalogue template, sparse creation and archive preview must be accessible");
+    // A link is a single-object operation. Earlier clipboard-export assertions
+    // intentionally leave two PDF files selected; establish one authoritative
+    // source before invoking the real selected-item command.
+    gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection));
+    gtk_selection_model_select_item(GTK_SELECTION_MODEL(selection),
+                                    position_for(selection, "first.pdf"), TRUE);
+    require(selected_count(selection) == 1U,
+            "Link creation must start from exactly one selected source");
+    GtkWidget *symbolic_action = find_button(popover, "Create Symbolic Link…");
+    g_signal_emit_by_name(symbolic_action, "clicked");
+    GtkWindow *link_dialog = window_named("Create Symbolic Link");
+    require(link_dialog != nullptr, "Native link-name dialog did not open");
+    GtkWidget *link_name = find_entry(GTK_WIDGET(link_dialog));
+    require(link_name != nullptr, "Link dialog lacks a filename input");
+    gtk_editable_set_text(GTK_EDITABLE(link_name), "ui-source-link");
+    GtkWidget *link_create = find_button(GTK_WIDGET(link_dialog), "Create Link");
+    require(link_create != nullptr, "Link dialog lacks confirmation");
+    g_signal_emit_by_name(link_create, "clicked");
+    bool link_done = false;
+    for (int n = 0; n < 5000 && !link_done; ++n) {
+        while (g_main_context_iteration(nullptr, FALSE)) {}
+        std::error_code ec;
+        link_done = fs::is_symlink(fs::symlink_status(root / "ui-source-link", ec));
+        if (!link_done) g_usleep(1000);
+    }
+    require(link_done && fs::read_symlink(root / "ui-source-link") == "first.pdf",
+            "Journalled link creation must preserve the exact original sibling name");
+    // A filesystem mutation invalidates directory enumeration. Wait for the
+    // new directory snapshot before using its rows for subsequent tests.
+    bool refreshed = false;
+    for (int attempt = 0; attempt < 5000 && !refreshed; ++attempt) {
+        while (g_main_context_iteration(nullptr, FALSE)) {}
+        GListModel *items = gtk_multi_selection_get_model(selection);
+        refreshed = !gtk_directory_list_is_loading(listing) &&
+                    g_list_model_get_n_items(items) == 7U;
+        if (!refreshed) g_usleep(1000);
+    }
+    require(refreshed, "Native link creation did not refresh GTK directory contents");
 
     // Read-only inspection actions must retain the exact source selection.
     gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection));
