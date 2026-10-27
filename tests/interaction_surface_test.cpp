@@ -354,6 +354,14 @@ void qualify_selection_actions(infiltrator::files::FileManagerWindow &w,
             find_button(popover, "New Sparse File…") != nullptr &&
             find_button(popover, "Preview archive contents…") != nullptr,
             "Catalogue template, sparse creation and archive preview must be accessible");
+    // A link is a single-object operation. Earlier clipboard-export assertions
+    // intentionally leave two PDF files selected; establish one authoritative
+    // source before invoking the real selected-item command.
+    gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection));
+    gtk_selection_model_select_item(GTK_SELECTION_MODEL(selection),
+                                    position_for(selection, "first.pdf"), TRUE);
+    require(selected_count(selection) == 1U,
+            "Link creation must start from exactly one selected source");
     GtkWidget *symbolic_action = find_button(popover, "Create Symbolic Link…");
     g_signal_emit_by_name(symbolic_action, "clicked");
     GtkWindow *link_dialog = window_named("Create Symbolic Link");
