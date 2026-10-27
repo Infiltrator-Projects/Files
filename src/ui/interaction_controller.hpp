@@ -123,6 +123,7 @@ private:
 
     GtkWidget *new_folder_target_{nullptr};
     GtkWidget *new_file_target_{nullptr};
+    GtkWidget *new_sparse_target_{nullptr};
     std::vector<GtkWidget *> open_with_actions_;
     GtkWidget *rename_target_{nullptr};
     GtkWidget *copy_target_{nullptr};
