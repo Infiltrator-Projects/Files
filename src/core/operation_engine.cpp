@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/xattr.h>
 #include <unistd.h>
 #include <string>
@@ -74,10 +75,15 @@ OperationResult OperationEngine::change_permissions(
                        source, "Permissions require an absolute native path and a mode from 0000 to 0777.");
     }
 
-    // A pathname-only chmod can modify a different inode after the preflight
-    // lookup. Keep the selected inode open for both the mutation and its
-    // durability/verification barrier; never follow the final symlink.
-    const int fd = ::open(source.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    // A held descriptor, rather than a repeated pathname lookup, owns the inode.
+    // O_RDONLY cannot open a legitimate mode-000 file even for its owner. Use
+    // O_PATH only on EACCES and never follow the selected symlink.
+    int fd = ::open(source.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    bool path_only = false;
+    if (fd < 0 && errno == EACCES) {
+        fd = ::open(source.c_str(), O_PATH | O_CLOEXEC | O_NOFOLLOW);
+        path_only = fd >= 0;
+    }
     if (fd < 0) {
         const std::error_code error(errno, std::generic_category());
         return failure(status_for_error(error), OperationPhase::Preflight, source,
@@ -105,8 +111,14 @@ OperationResult OperationEngine::change_permissions(
     // chmod may rewrite the effective POSIX ACL mask on ACL-bearing files.
     // Refuse rather than silently modifying access rights beyond the user's
     // three ordinary mode fields. Unknown ACL readability also fails closed.
+    // Linux O_PATH descriptors cannot be passed to fgetxattr. The /proc fd
+    // reference binds the ACL query to precisely the inode held above; it
+    // must not fall back to the mutable original pathname on failure.
+    const std::string proc_reference = "/proc/self/fd/" + std::to_string(fd);
     errno = 0;
-    const ssize_t acl_bytes = ::fgetxattr(fd, "system.posix_acl_access", nullptr, 0);
+    const ssize_t acl_bytes = path_only
+        ? ::getxattr(proc_reference.c_str(), "system.posix_acl_access", nullptr, 0)
+        : ::fgetxattr(fd, "system.posix_acl_access", nullptr, 0);
     if (acl_bytes >= 0) {
         (void)close_fd();
         return failure(OperationStatus::UnsupportedCapability, OperationPhase::Preflight, source,
@@ -124,7 +136,21 @@ OperationResult OperationEngine::change_permissions(
                                source, "Permissions were already set to the requested mode.", false, {}};
     }
 
-    if (::fchmod(fd, static_cast<mode_t>(permissions)) != 0) {
+    // fchmodat2(AT_EMPTY_PATH) operates on the held inode, including when
+    // mode-000 prevents opening it for reading. Never use an unsafe pathname
+    // fallback on older kernels: the operation remains explicitly unsupported.
+    int chmod_result = -1;
+    if (path_only) {
+#ifdef SYS_fchmodat2
+        chmod_result = static_cast<int>(::syscall(SYS_fchmodat2, fd, "",
+                                                  static_cast<mode_t>(permissions), AT_EMPTY_PATH));
+#else
+        errno = ENOSYS;
+#endif
+    } else {
+        chmod_result = ::fchmod(fd, static_cast<mode_t>(permissions));
+    }
+    if (chmod_result != 0) {
         const std::error_code error(errno, std::generic_category());
         (void)close_fd();
         return failure(status_for_error(error), OperationPhase::Execute, source,
@@ -132,7 +158,26 @@ OperationResult OperationEngine::change_permissions(
     }
     // After fchmod the object may have changed. A failed barrier is never
     // reported as success or rolled back against an independently changed inode.
-    if (::fsync(fd) != 0) {
+    // An O_PATH descriptor cannot be synced. Reopen through the *held* fd,
+    // never the source pathname, then prove that this is still the same inode
+    // before claiming durable completion.
+    int sync_fd = fd;
+    if (path_only) {
+        sync_fd = ::open(proc_reference.c_str(), O_RDONLY | O_CLOEXEC);
+        struct stat held{};
+        if (sync_fd < 0 || ::fstat(sync_fd, &held) != 0 ||
+            held.st_dev != before.st_dev || held.st_ino != before.st_ino) {
+            if (sync_fd >= 0) ::close(sync_fd);
+            (void)close_fd();
+            return failure(OperationStatus::VerificationFailure, OperationPhase::Verify, source,
+                           "Permissions changed, but the selected inode could not be reopened for durability verification.", true);
+        }
+    }
+    const int sync_result = ::fsync(sync_fd);
+    const int sync_errno = errno;
+    if (path_only) ::close(sync_fd);
+    if (sync_result != 0) {
+        errno = sync_errno;
         const std::error_code error(errno, std::generic_category());
         (void)close_fd();
         return failure(OperationStatus::VerificationFailure, OperationPhase::Verify, source,
