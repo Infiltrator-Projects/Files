@@ -219,6 +219,22 @@ std::string file_metadata(GFile *file, GCancellable *cancel, GError **error)
             append_line(report, "Image dimensions",
                         std::to_string(width) + " × " + std::to_string(height));
 #ifdef __linux__
+        // A selected file may expose its received/download origin via ordinary
+        // Linux user attributes. Keep it read-only, bounded, and clearly
+        // optional: absence is not evidence that a file was not downloaded.
+        for (const auto &[key, caption] : {
+                 std::pair{"user.xdg.origin.url", "Download origin"},
+                 std::pair{"user.xdg.referrer.url", "Download referrer"}}) {
+            const ssize_t needed = lgetxattr(path, key, nullptr, 0);
+            if (needed <= 0 || needed > 2048) continue;
+            std::string value(static_cast<std::size_t>(needed), '\\0');
+            const ssize_t got = lgetxattr(path, key, value.data(), value.size());
+            if (got != needed || !g_utf8_validate(value.c_str(), got, nullptr)) continue;
+            bool safe = true;
+            for (const unsigned char ch : value)
+                if (ch < 32U || ch == 127U) { safe = false; break; }
+            if (safe) append_line(report, caption, value);
+        }
         // llistxattr never follows the selected final symlink. Bound both the
         // kernel-returned byte count and rendered list; attributes are data,
         // not commands or promises of filesystem integrity.
