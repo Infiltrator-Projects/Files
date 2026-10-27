@@ -238,6 +238,8 @@ void InteractionController::discover_existing_actions()
         find_widget_by_tooltip(titlebar, "New Folder (Ctrl+Shift+N)");
     GtkWidget *new_file_button =
         find_widget_by_tooltip(titlebar, "New Empty File (Ctrl+Alt+N)");
+    GtkWidget *new_sparse_button =
+        find_widget_by_tooltip(titlebar, "New Sparse File (Ctrl+Alt+Shift+N)");
     GtkWidget *single_menu =
         find_widget_by_tooltip(titlebar, "Selected item actions");
     GtkWidget *batch_menu =
@@ -247,6 +249,7 @@ void InteractionController::discover_existing_actions()
 
     new_folder_target_ = new_folder_button;
     new_file_target_ = new_file_button;
+    new_sparse_target_ = new_sparse_button;
     rename_target_ = menu_action(single_menu, "Rename");
     copy_target_ = menu_action(single_menu, "Copy to…");
     move_target_ = menu_action(single_menu, "Move to…");
@@ -259,7 +262,8 @@ void InteractionController::discover_existing_actions()
     restore_target_ = menu_action(destructive_menu, "Restore");
     delete_target_ = menu_action(destructive_menu, "Delete Permanently…");
 
-    for (GtkWidget *legacy : {new_folder_button, new_file_button, single_menu, batch_menu, destructive_menu}) {
+    for (GtkWidget *legacy : {new_folder_button, new_file_button, new_sparse_button,
+                              single_menu, batch_menu, destructive_menu}) {
         if (legacy != nullptr) {
             gtk_widget_set_visible(legacy, FALSE);
         }
@@ -381,6 +385,8 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
     create_action_button(box, "New Folder", new_folder_target_,
                          ActionScope::Always, proxies);
     create_action_button(box, "New Empty File", new_file_target_,
+                         ActionScope::Always, proxies);
+    create_action_button(box, "New Sparse File…", new_sparse_target_,
                          ActionScope::Always, proxies);
     add_command(box, "Create from template…", "template-create",
                 ActionScope::Always, proxies);
@@ -549,6 +555,8 @@ GtkWidget *InteractionController::build_context_action_box()
     create_action_button(creation, "New Folder", new_folder_target_,
                          ActionScope::NoSelection, context_proxies_);
     create_action_button(creation, "New Empty File", new_file_target_,
+                         ActionScope::NoSelection, context_proxies_);
+    create_action_button(creation, "New Sparse File…", new_sparse_target_,
                          ActionScope::NoSelection, context_proxies_);
     add_command(creation, "Create from template…", "template-create",
                 ActionScope::NoSelection, context_proxies_);
