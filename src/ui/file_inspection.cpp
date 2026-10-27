@@ -227,7 +227,7 @@ std::string file_metadata(GFile *file, GCancellable *cancel, GError **error)
                  std::pair{"user.xdg.referrer.url", "Download referrer"}}) {
             const ssize_t needed = lgetxattr(path, key, nullptr, 0);
             if (needed <= 0 || needed > 2048) continue;
-            std::string value(static_cast<std::size_t>(needed), '\\0');
+            std::string value(static_cast<std::size_t>(needed), '\0');
             const ssize_t got = lgetxattr(path, key, value.data(), value.size());
             if (got != needed || !g_utf8_validate(value.c_str(), got, nullptr)) continue;
             bool safe = true;
