@@ -58,6 +58,8 @@ Product-level acceptance is defined in [`docs/PRODUCT-QUALITY.md`](docs/PRODUCT-
 
 ## Current implementation
 
+Files 0.1.75 integrates ten original catalogue requirement slices (some deliberately bounded or partial): Templates-based creation, optional post-create inline naming, native symbolic/hard links, sparse file creation, recent-file history, origin metadata inspection, archive header previews, and secure mode-000 permission recovery. The implementation was integrated via PR #22 with 22/22 hosted tests and native installer qualification. Full catalogue parity and physical Mint acceptance remain separate requirements; see [the scoped ten-feature audit](docs/FEATURE-AUDIT-NEXT-TEN-2026-10-27.md).
+
 Files 0.1.72 fixes native package restoration after resetting InfiltratorOS's
 `/Programs` and `/System` directories. The OS reset may remove package
 files without unregistering the installed Files version in Debian. The native

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.75 — 2026-10-28
+
+- Integrate ten traceable original Files catalogue slices from reviewed PR #22: create from Templates, optional inline rename after creation, native link actions, explicit bounded sparse-file creation, relative symbolic links and descriptor-bound hard links, private recent-file history, downloaded-origin metadata inspection, and bounded archive header/size previews.
+- Harden the existing native permission editor to restore owner permissions on mode-000 files through descriptor-held Linux fchmodat2 without switching back to a race-prone pathname.
+- Keep file mutations journal-admitted and routed through existing operation controllers, preserve private search exclusions and truthful unsupported-capability behaviour; expand engine and GTK interaction regressions.
+- Scope is deliberately bounded. Origin metadata is not a received-file timeline; archive inspection is not virtual archive browsing; non-native moves, ACL editing, and physical Mint/device/interruption acceptance remain outstanding. See docs/FEATURE-AUDIT-NEXT-TEN-2026-10-27.md.
+
 ## 0.1.74 — 2026-10-27
 
 - Suggest the 54 independent clock/calendar provider packages instead of Common’s retired combined package.
