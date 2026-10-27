@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "create_folder_controller.hpp"
+#include "file_manager_window.hpp"
 
 #include "../core/operation_engine.hpp"
 #include "../core/operation_journal.hpp"
@@ -19,6 +20,7 @@ struct CreateFolderTaskData {
     std::string journal_id;
     bool file{false};
     std::uint64_t sparse_bytes{0};
+    bool edit_inline{false};
 };
 
 } // namespace
@@ -36,6 +38,7 @@ CreateFolderController::CreateFolderController(GtkWindow *window,
 
     g_object_ref(directory_list_);
     g_object_ref(selection_);
+    g_object_set_data(G_OBJECT(window_), "ifm-create-controller", this);
 
     GtkWidget *titlebar = gtk_window_get_titlebar(window_);
     if (GTK_IS_HEADER_BAR(titlebar)) {
@@ -70,6 +73,8 @@ CreateFolderController::CreateFolderController(GtkWindow *window,
 
 CreateFolderController::~CreateFolderController()
 {
+    if (window_ != nullptr)
+        g_object_set_data(G_OBJECT(window_), "ifm-create-controller", nullptr);
     if (dialog_ != nullptr) {
         g_signal_handlers_disconnect_by_data(dialog_, this);
         gtk_window_destroy(GTK_WINDOW(dialog_));
@@ -77,6 +82,7 @@ CreateFolderController::~CreateFolderController()
         entry_ = nullptr;
         dialog_message_ = nullptr;
         sparse_size_ = nullptr;
+        inline_rename_checkbox_ = nullptr;
     }
     if (directory_list_ != nullptr) {
         if (location_handler_ != 0U) {
@@ -153,6 +159,7 @@ void CreateFolderController::on_location_changed(GObject *object,
     (void)pspec;
     auto *self = static_cast<CreateFolderController *>(user_data);
     self->pending_selection_name_.clear();
+    self->pending_inline_name_.clear();
     self->update_action_state();
 }
 
@@ -179,6 +186,7 @@ void CreateFolderController::on_dialog_destroy(GtkWidget *widget, gpointer user_
     self->entry_ = nullptr;
     self->dialog_message_ = nullptr;
     self->sparse_size_ = nullptr;
+    self->inline_rename_checkbox_ = nullptr;
 }
 
 void CreateFolderController::on_dialog_cancel(GtkButton *button, gpointer user_data)
@@ -239,6 +247,9 @@ void CreateFolderController::show_dialog(const bool file, const bool sparse)
     gtk_entry_set_placeholder_text(GTK_ENTRY(entry_), sparse ? "New Sparse File.bin" :
                                             file ? "New File.txt" : "New Folder");
     gtk_box_append(GTK_BOX(box), entry_);
+    inline_rename_checkbox_ = GTK_WIDGET(gtk_check_button_new_with_label(
+        "Edit filename inline immediately after creation"));
+    gtk_box_append(GTK_BOX(box), inline_rename_checkbox_);
     g_signal_connect(entry_, "activate",
                      G_CALLBACK(&CreateFolderController::on_dialog_entry_activate), this);
 
@@ -325,7 +336,10 @@ void CreateFolderController::submit_dialog()
     const std::uint64_t bytes = creating_sparse_ && sparse_size_ != nullptr
         ? static_cast<std::uint64_t>(gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(sparse_size_)))
             * 1024ULL * 1024ULL : 0U;
-    auto *data = new CreateFolderTaskData{path, uri, name, journal_id, creating_file_, bytes};
+    const bool edit_inline = inline_rename_checkbox_ != nullptr &&
+        gtk_check_button_get_active(GTK_CHECK_BUTTON(inline_rename_checkbox_));
+    auto *data = new CreateFolderTaskData{path, uri, name, journal_id, creating_file_, bytes,
+                                          edit_inline};
     g_free(path);
     g_free(uri);
 
@@ -414,6 +428,7 @@ void CreateFolderController::on_create_folder_finished(GObject *source_object,
 
     if (operation->changed && data != nullptr && self->current_location_is(data->parent_uri)) {
         self->pending_selection_name_ = operation->destination.filename().string();
+        self->pending_inline_name_ = data->edit_inline ? self->pending_selection_name_ : "";
         self->select_pending_item();
     }
 
@@ -470,6 +485,37 @@ void CreateFolderController::select_pending_item()
         if (match) {
             gtk_single_selection_set_selected(selection_, index);
             pending_selection_name_.clear();
+            if (pending_inline_name_ == name && window_ != nullptr) {
+                struct DeferredRename {
+                    GtkWindow *window;
+                    std::string target;
+                    unsigned int tries{0};
+                };
+                auto *state = new DeferredRename{GTK_WINDOW(g_object_ref(window_)),
+                                                  pending_inline_name_, 0U};
+                g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, +[](gpointer raw) -> gboolean {
+                    auto *state = static_cast<DeferredRename *>(raw);
+                    auto *controller = static_cast<CreateFolderController *>(
+                        g_object_get_data(G_OBJECT(state->window), "ifm-create-controller"));
+                    if (controller == nullptr || !controller->mutation_guard_.alive() ||
+                        controller->selection_ == nullptr) return G_SOURCE_REMOVE;
+                    auto *info = G_FILE_INFO(gtk_single_selection_get_selected_item(
+                        controller->selection_));
+                    if (info == nullptr ||
+                        g_strcmp0(g_file_info_get_name(info), state->target.c_str()) != 0)
+                        return G_SOURCE_REMOVE;
+                    auto *manager = static_cast<FileManagerWindow *>(
+                        g_object_get_data(G_OBJECT(state->window), "ifm-window-controller"));
+                    if (manager != nullptr && manager->begin_inline_rename())
+                        return G_SOURCE_REMOVE;
+                    return ++state->tries < 8U ? G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
+                }, state, +[](gpointer raw) {
+                    auto *state = static_cast<DeferredRename *>(raw);
+                    g_object_unref(state->window);
+                    delete state;
+                });
+            }
+            pending_inline_name_.clear();
             return;
         }
     }
