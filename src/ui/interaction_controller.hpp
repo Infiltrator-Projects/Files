@@ -126,6 +126,8 @@ private:
     GtkWidget *copy_target_{nullptr};
     GtkWidget *move_target_{nullptr};
     GtkWidget *permissions_target_{nullptr};
+    GtkWidget *symbolic_link_target_{nullptr};
+    GtkWidget *hard_link_target_{nullptr};
     GtkWidget *batch_copy_target_{nullptr};
     GtkWidget *batch_move_target_{nullptr};
     GtkWidget *trash_target_{nullptr};
