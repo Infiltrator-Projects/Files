@@ -206,6 +206,17 @@ OperationResult OperationEngine::change_permissions(
 OperationResult OperationEngine::create_empty_file(const std::filesystem::path &parent,
                                                     const std::string_view name) const
 {
+    return create_sparse_file(parent, name, 0U);
+}
+
+OperationResult OperationEngine::create_sparse_file(const std::filesystem::path &parent,
+                                                     const std::string_view name,
+                                                     const std::uint64_t length) const
+{
+    constexpr std::uint64_t kMaxSparseBytes = 1ULL << 40U; // 1 TiB logical cap.
+    if (length > kMaxSparseBytes)
+        return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight, {},
+                       "Requested sparse file exceeds the 1 TiB logical-size limit.");
     std::string reason;
     if (!validate_item_name(name, &reason))
         return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight, {},
@@ -248,7 +259,13 @@ OperationResult OperationEngine::create_empty_file(const std::filesystem::path &
     // or close. Every exit then has the same cleanup/retained-evidence contract.
     const bool recorded = destination_ownership::record_fd(private_path, fd, owned, error);
     int flushed = -1;
-    if (recorded) {
+    // ftruncate changes logical length without allocating/writing the range.
+    // Ownership was recorded before this fallible step, so no partial output
+    // can be published or cleaned up under an unrelated identity.
+    const bool resized = recorded && length <= static_cast<std::uint64_t>(INT64_MAX) &&
+        (length == 0U || ::ftruncate(fd, static_cast<off_t>(length)) == 0);
+    if (!resized && recorded) error = std::error_code(errno, std::generic_category());
+    if (resized) {
         do { flushed = ::fsync(fd); } while (flushed != 0 && errno == EINTR);
         if (flushed != 0) error = std::error_code(errno, std::generic_category());
     }
@@ -281,8 +298,14 @@ OperationResult OperationEngine::create_empty_file(const std::filesystem::path &
     if (!destination_ownership::verify_all(owned, error))
         return failure(OperationStatus::VerificationFailure, OperationPhase::Verify,
                        destination, "The published file could not be verified.", true);
+    std::error_code verify_error;
+    const std::uintmax_t actual_length = std::filesystem::file_size(destination, verify_error);
+    if (verify_error || actual_length != length)
+        return failure(OperationStatus::VerificationFailure, OperationPhase::Verify, destination,
+                       "The created file's logical length could not be verified.", true);
     return OperationResult{OperationStatus::Success, OperationPhase::Verify, destination,
-                           "Created empty file “" + destination.filename().string() + "”.", true, {}};
+                           std::string(length == 0U ? "Created empty file “" : "Created sparse file “") +
+                               destination.filename().string() + "”.", true, {}};
 }
 
 bool OperationEngine::validate_item_name(const std::string_view name, std::string *reason)
