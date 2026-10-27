@@ -164,6 +164,20 @@ int main()
         return 95;
     }
 
+    // Sparse files occupy a large logical range without a streamed zero-fill.
+    const auto sparse = engine.create_sparse_file(root, "hole.bin", 8ULL * 1024U * 1024U * 1024U);
+    struct stat sparse_status {};
+    if (!sparse.ok() || !sparse.changed ||
+        ::stat((root / "hole.bin").c_str(), &sparse_status) != 0 ||
+        static_cast<std::uint64_t>(sparse_status.st_size) != 8ULL * 1024U * 1024U * 1024U ||
+        engine.create_sparse_file(root, "hole.bin", 4096U).status !=
+            OperationStatus::DestinationConflict ||
+        engine.create_sparse_file(root, "../escape", 4096U).ok() ||
+        engine.create_sparse_file(root, "too-large", (1ULL << 40U) + 1U).ok()) {
+        fs::remove_all(root, cleanup_error);
+        return 116;
+    }
+
     const fs::path original = root / "original.txt";
     if (!write_text(original, "rename-copy-move\n")) {
         fs::remove_all(root, cleanup_error);
