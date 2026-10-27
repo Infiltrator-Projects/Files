@@ -3,6 +3,7 @@
 #include "destination_ownership.hpp"
 #include "transfer_operation_engine.hpp"
 
+#include <array>
 #include <cerrno>
 #include <cstdint>
 #include <fcntl.h>
@@ -485,6 +486,105 @@ OperationResult OperationEngine::create_directory(const std::filesystem::path &p
                            "Created " + quoted_name(plan.destination) + ".",
                            true,
                            {}};
+}
+
+OperationResult OperationEngine::create_symbolic_link(
+    const std::filesystem::path &source, const std::string_view name) const
+{
+    std::string reason;
+    if (!source.is_absolute() || !validate_item_name(name, &reason))
+        return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight, source,
+                       reason.empty() ? "Link source must be an absolute native path." : reason);
+    const auto parent = source.parent_path();
+    const auto destination = parent / std::string(name);
+    const int directory = ::open(parent.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (directory < 0) {
+        const std::error_code error(errno, std::generic_category());
+        return failure(status_for_error(error), OperationPhase::Preflight, destination,
+                       "Cannot open the link destination folder: " + error.message());
+    }
+    struct stat original{};
+    if (::fstatat(directory, source.filename().c_str(), &original, AT_SYMLINK_NOFOLLOW) != 0) {
+        const std::error_code error(errno, std::generic_category());
+        ::close(directory);
+        return failure(status_for_error(error), OperationPhase::Preflight, destination,
+                       "The selected link target is unavailable: " + error.message());
+    }
+    // A relative target preserves the selected name without inventing a new
+    // absolute dependency. A later rename can intentionally leave a dangling
+    // symlink; the link is not represented as a stable object reference.
+    const std::string target = source.filename().string();
+    if (::symlinkat(target.c_str(), directory, std::string(name).c_str()) != 0) {
+        const std::error_code error(errno, std::generic_category());
+        ::close(directory);
+        return failure(status_for_error(error), OperationPhase::Execute, destination,
+                       error == std::errc::file_exists ? "The link name already exists." :
+                       "The symbolic link could not be created: " + error.message());
+    }
+    std::array<char, 4096> bytes{};
+    const ssize_t count = ::readlinkat(directory, std::string(name).c_str(),
+                                       bytes.data(), bytes.size());
+    const bool verified = count == static_cast<ssize_t>(target.size()) &&
+        std::string_view(bytes.data(), count > 0 ? static_cast<std::size_t>(count) : 0U) == target;
+    const bool durable = verified && ::fsync(directory) == 0;
+    const int closed = ::close(directory);
+    if (!durable || closed != 0)
+        return failure(OperationStatus::VerificationFailure, OperationPhase::Verify, destination,
+                       "Symbolic link was created, but its publication could not be durably verified.", true);
+    return {OperationStatus::Success, OperationPhase::Complete, destination,
+            "Created symbolic link “" + destination.filename().string() + "”.", true, {}};
+}
+
+OperationResult OperationEngine::create_hard_link(
+    const std::filesystem::path &source, const std::string_view name) const
+{
+    std::string reason;
+    if (!source.is_absolute() || !validate_item_name(name, &reason))
+        return failure(OperationStatus::InvalidRequest, OperationPhase::Preflight, source,
+                       reason.empty() ? "Hard-link source must be an absolute native path." : reason);
+    const auto destination = source.parent_path() / std::string(name);
+    // Linux AT_EMPTY_PATH links the held inode, not a pathname re-resolved
+    // after preflight. Never follow source symlinks or hard-link directories.
+    const int original = ::open(source.c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC);
+    if (original < 0) {
+        const std::error_code error(errno, std::generic_category());
+        return failure(status_for_error(error), OperationPhase::Preflight, destination,
+                       "Could not open the selected hard-link source: " + error.message());
+    }
+    struct stat identity{};
+    if (::fstat(original, &identity) != 0 || !S_ISREG(identity.st_mode)) {
+        ::close(original);
+        return failure(OperationStatus::UnsupportedCapability, OperationPhase::Preflight, destination,
+                       "Hard links are supported only for selected native regular files.");
+    }
+    const int directory = ::open(source.parent_path().c_str(),
+                                 O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (directory < 0) {
+        const std::error_code error(errno, std::generic_category());
+        ::close(original);
+        return failure(status_for_error(error), OperationPhase::Preflight, destination,
+                       "Could not open the hard-link destination folder: " + error.message());
+    }
+    if (::linkat(original, "", directory, std::string(name).c_str(), AT_EMPTY_PATH) != 0) {
+        const std::error_code error(errno, std::generic_category());
+        ::close(directory);
+        ::close(original);
+        return failure(status_for_error(error), OperationPhase::Execute, destination,
+                       error == std::errc::file_exists ? "The hard-link name already exists." :
+                       "Hard-link publication was refused: " + error.message());
+    }
+    struct stat actual{};
+    const bool verified = ::fstatat(directory, std::string(name).c_str(),
+                                     &actual, AT_SYMLINK_NOFOLLOW) == 0 &&
+        actual.st_dev == identity.st_dev && actual.st_ino == identity.st_ino;
+    const bool durable = verified && ::fsync(directory) == 0;
+    const int closed = ::close(directory);
+    ::close(original);
+    if (!durable || closed != 0)
+        return failure(OperationStatus::VerificationFailure, OperationPhase::Verify, destination,
+                       "Hard link was created, but its original inode or durability could not be verified.", true);
+    return {OperationStatus::Success, OperationPhase::Complete, destination,
+            "Created hard link “" + destination.filename().string() + "”.", true, {}};
 }
 
 OperationResult OperationEngine::rename_item(const std::filesystem::path &source,
