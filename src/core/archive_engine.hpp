@@ -10,8 +10,16 @@ namespace infiltrator::files {
 
 // Native archive extraction into a fresh output folder. The archive is
 // untrusted; no entry may create a link, device or path outside private staging.
+struct ArchivePreview {
+    bool complete{false};
+    std::string report;
+};
+
 class ArchiveEngine final {
 public:
+    // Bounded, read-only catalogue; it never claims virtual archive browsing.
+    [[nodiscard]] ArchivePreview preview(const std::filesystem::path &source,
+                                         GCancellable *cancel = nullptr) const;
     [[nodiscard]] OperationResult create_zip(const std::filesystem::path &source,
                                              const std::filesystem::path &destination_parent,
                                              const std::string &journal_id,
