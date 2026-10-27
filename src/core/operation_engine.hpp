@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -45,6 +46,10 @@ public:
                                                    std::string_view name) const;
     [[nodiscard]] OperationResult create_empty_file(const std::filesystem::path &parent,
                                                     std::string_view name) const;
+    // Explicit sparse creation never writes the requested logical length.
+    [[nodiscard]] OperationResult create_sparse_file(const std::filesystem::path &parent,
+                                                      std::string_view name,
+                                                      std::uint64_t length) const;
     // Linux-native mode changes are descriptor-bound and never follow the final
     // component through a symlink. The UI/journal owns operation admission.
     [[nodiscard]] OperationResult change_permissions(const std::filesystem::path &source,
