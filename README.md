@@ -258,4 +258,4 @@ implementations.
 
 ## Independent calendar and clock packages
 
-Temporal implementations and their translations are owned by the 54 independent `Calendar-*` and `Clock-*` repositories. This application suggests those optional packages and consumes the public Common ABI. Common no longer builds or publishes the combined resource package; its API and preserved reference source remain available.
+Temporal implementation source, private helpers, model tests and translations live exclusively in the 54 independent `Calendar-*` and `Clock-*` repositories. This application suggests those optional packages and consumes the public Common ABI. Common contains no provider implementation copies or combined resource package build.
