@@ -247,6 +247,8 @@ void InteractionController::discover_existing_actions()
     copy_target_ = menu_action(single_menu, "Copy to…");
     move_target_ = menu_action(single_menu, "Move to…");
     permissions_target_ = menu_action(single_menu, "Edit Permissions…");
+    symbolic_link_target_ = menu_action(single_menu, "Create Symbolic Link…");
+    hard_link_target_ = menu_action(single_menu, "Create Hard Link…");
     batch_copy_target_ = menu_action(batch_menu, "Copy selected to…");
     batch_move_target_ = menu_action(batch_menu, "Move selected to…");
     trash_target_ = menu_action(destructive_menu, "Move to Trash");
@@ -385,6 +387,10 @@ GtkWidget *InteractionController::build_action_box(std::vector<ProxyAction> &pro
     create_action_button(box, "Move to…", move_target_,
                          ActionScope::SingleSelection, proxies);
     create_action_button(box, "Edit Permissions…", permissions_target_,
+                         ActionScope::SingleSelection, proxies);
+    create_action_button(box, "Create Symbolic Link…", symbolic_link_target_,
+                         ActionScope::SingleSelection, proxies);
+    create_action_button(box, "Create Hard Link…", hard_link_target_,
                          ActionScope::SingleSelection, proxies);
 
     create_action_button(box, "Copy selected to…", batch_copy_target_,
@@ -558,6 +564,10 @@ GtkWidget *InteractionController::build_context_action_box()
     create_action_button(transfer, "Copy to…", copy_target_,
                          ActionScope::SingleSelection, context_proxies_);
     create_action_button(transfer, "Move to…", move_target_,
+                         ActionScope::SingleSelection, context_proxies_);
+    create_action_button(transfer, "Create Symbolic Link…", symbolic_link_target_,
+                         ActionScope::SingleSelection, context_proxies_);
+    create_action_button(transfer, "Create Hard Link…", hard_link_target_,
                          ActionScope::SingleSelection, context_proxies_);
     create_action_button(transfer, "Copy selected to…", batch_copy_target_,
                          ActionScope::MultiSelection, context_proxies_);
