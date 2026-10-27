@@ -355,6 +355,11 @@ void qualify_selection_actions(infiltrator::files::FileManagerWindow &w,
 
     g_signal_emit_by_name(paths_action, "clicked");
     const std::string paths = clipboard_text(w.native_window());
+    if (paths.find((root / "first.pdf").string()) == std::string::npos ||
+        paths.find((root / "second.pdf").string()) == std::string::npos ||
+        paths.find((root / "notes.txt").string()) != std::string::npos)
+        std::cerr << "Path export regression: selected=" << selected_count(selection)
+                  << " clipboard=" << paths << " fixture=" << root << '\n';
     require(paths.find((root / "first.pdf").string()) != std::string::npos &&
             paths.find((root / "second.pdf").string()) != std::string::npos &&
             paths.find((root / "notes.txt").string()) == std::string::npos,
