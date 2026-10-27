@@ -323,6 +323,30 @@ void qualify_selection_actions(infiltrator::files::FileManagerWindow &w,
     require(g_object_get_data(G_OBJECT(find_button(context, "Copy")),
                               "ifm-proxy-target") == find_button(popover, "Copy"),
             "Item context Copy must delegate to the installed clipboard action");
+    g_signal_emit_by_name(type_action, "clicked");
+    require(selected_count(selection) == 2U,
+            "Select same type must include both PDFs but exclude text and directories");
+
+    g_signal_emit_by_name(paths_action, "clicked");
+    const std::string paths = clipboard_text(w.native_window());
+    if (paths.find((root / "first.pdf").string()) == std::string::npos ||
+        paths.find((root / "second.pdf").string()) == std::string::npos ||
+        paths.find((root / "notes.txt").string()) != std::string::npos)
+        std::cerr << "Path export regression: selected=" << selected_count(selection)
+                  << " clipboard=" << paths << " fixture=" << root << '\n';
+    require(paths.find((root / "first.pdf").string()) != std::string::npos &&
+            paths.find((root / "second.pdf").string()) != std::string::npos &&
+            paths.find((root / "notes.txt").string()) == std::string::npos,
+            "Native path export must include exactly the selected files");
+
+    g_signal_emit_by_name(uris_action, "clicked");
+    const std::string uris = clipboard_text(w.native_window());
+    require(uris.find("file://") != std::string::npos &&
+            uris.find("first.pdf") != std::string::npos &&
+            uris.find("second.pdf") != std::string::npos,
+            "URI export must enumerate selected files");
+
+
     require(find_button(context, "Create Symbolic Link…") != nullptr &&
             find_button(context, "Create Hard Link…") != nullptr,
             "Native symbolic and hard link actions must be reachable in item context");
@@ -349,36 +373,17 @@ void qualify_selection_actions(infiltrator::files::FileManagerWindow &w,
     }
     require(link_done && fs::read_symlink(root / "ui-source-link") == "first.pdf",
             "Journalled link creation must preserve the exact original sibling name");
-    // Creating a link is expected to select the newly published object.
-    // Restore the original PDF before exercising the unrelated type-selection
-    // and clipboard contract, rather than assuming operation UI preserves it.
-    while (g_main_context_iteration(nullptr, FALSE)) {}
-    gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection));
-    gtk_selection_model_select_item(GTK_SELECTION_MODEL(selection),
-                                    position_for(selection, "first.pdf"), TRUE);
-    g_signal_emit_by_name(type_action, "clicked");
-    require(selected_count(selection) == 2U,
-            "Select same type must include both PDFs but exclude text and directories");
-
-    g_signal_emit_by_name(paths_action, "clicked");
-    const std::string paths = clipboard_text(w.native_window());
-    if (paths.find((root / "first.pdf").string()) == std::string::npos ||
-        paths.find((root / "second.pdf").string()) == std::string::npos ||
-        paths.find((root / "notes.txt").string()) != std::string::npos)
-        std::cerr << "Path export regression: selected=" << selected_count(selection)
-                  << " clipboard=" << paths << " fixture=" << root << '\n';
-    require(paths.find((root / "first.pdf").string()) != std::string::npos &&
-            paths.find((root / "second.pdf").string()) != std::string::npos &&
-            paths.find((root / "notes.txt").string()) == std::string::npos,
-            "Native path export must include exactly the selected files");
-
-    g_signal_emit_by_name(uris_action, "clicked");
-    const std::string uris = clipboard_text(w.native_window());
-    require(uris.find("file://") != std::string::npos &&
-            uris.find("first.pdf") != std::string::npos &&
-            uris.find("second.pdf") != std::string::npos,
-            "URI export must enumerate selected files");
-
+    // A filesystem mutation invalidates directory enumeration. Wait for the
+    // new directory snapshot before using its rows for subsequent tests.
+    bool refreshed = false;
+    for (int attempt = 0; attempt < 5000 && !refreshed; ++attempt) {
+        while (g_main_context_iteration(nullptr, FALSE)) {}
+        GListModel *items = gtk_multi_selection_get_model(selection);
+        refreshed = !gtk_directory_list_is_loading(listing) &&
+                    g_list_model_get_n_items(items) == 7U;
+        if (!refreshed) g_usleep(1000);
+    }
+    require(refreshed, "Native link creation did not refresh GTK directory contents");
 
     // Read-only inspection actions must retain the exact source selection.
     gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection));
