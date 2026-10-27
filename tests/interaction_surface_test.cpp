@@ -349,6 +349,13 @@ void qualify_selection_actions(infiltrator::files::FileManagerWindow &w,
     }
     require(link_done && fs::read_symlink(root / "ui-source-link") == "first.pdf",
             "Journalled link creation must preserve the exact original sibling name");
+    // Creating a link is expected to select the newly published object.
+    // Restore the original PDF before exercising the unrelated type-selection
+    // and clipboard contract, rather than assuming operation UI preserves it.
+    while (g_main_context_iteration(nullptr, FALSE)) {}
+    gtk_selection_model_unselect_all(GTK_SELECTION_MODEL(selection));
+    gtk_selection_model_select_item(GTK_SELECTION_MODEL(selection),
+                                    position_for(selection, "first.pdf"), TRUE);
     g_signal_emit_by_name(type_action, "clicked");
     require(selected_count(selection) == 2U,
             "Select same type must include both PDFs but exclude text and directories");
