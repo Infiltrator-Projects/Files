@@ -4,6 +4,7 @@
 #include "../core/operation_engine.hpp"
 #include "../core/operation_journal.hpp"
 
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -17,6 +18,7 @@ struct CreateFolderTaskData {
     std::string name;
     std::string journal_id;
     bool file{false};
+    std::uint64_t sparse_bytes{0};
 };
 
 } // namespace
@@ -46,6 +48,11 @@ CreateFolderController::CreateFolderController(GtkWindow *window,
         gtk_header_bar_pack_end(GTK_HEADER_BAR(titlebar), new_file_button_);
         g_signal_connect(new_file_button_, "clicked",
                          G_CALLBACK(&CreateFolderController::on_new_file_clicked), this);
+        sparse_button_ = gtk_button_new_from_icon_name("document-new-symbolic");
+        gtk_widget_set_tooltip_text(sparse_button_, "New Sparse File (Ctrl+Alt+Shift+N)");
+        gtk_header_bar_pack_end(GTK_HEADER_BAR(titlebar), sparse_button_);
+        g_signal_connect(sparse_button_, "clicked",
+                         G_CALLBACK(&CreateFolderController::on_new_sparse_clicked), this);
     }
 
     GtkEventController *keys = gtk_event_controller_key_new();
@@ -69,6 +76,7 @@ CreateFolderController::~CreateFolderController()
         dialog_ = nullptr;
         entry_ = nullptr;
         dialog_message_ = nullptr;
+        sparse_size_ = nullptr;
     }
     if (directory_list_ != nullptr) {
         if (location_handler_ != 0U) {
@@ -104,6 +112,11 @@ void CreateFolderController::on_new_file_clicked(GtkButton *button, gpointer use
     (void)button;
     static_cast<CreateFolderController *>(user_data)->show_dialog(true);
 }
+void CreateFolderController::on_new_sparse_clicked(GtkButton *button, gpointer user_data)
+{
+    (void)button;
+    static_cast<CreateFolderController *>(user_data)->show_dialog(true, true);
+}
 
 gboolean CreateFolderController::on_key_pressed(GtkEventControllerKey *controller,
                                                  const guint keyval,
@@ -115,6 +128,11 @@ gboolean CreateFolderController::on_key_pressed(GtkEventControllerKey *controlle
     (void)keycode;
     const bool control = (state & GDK_CONTROL_MASK) != 0;
     const bool shift = (state & GDK_SHIFT_MASK) != 0;
+    if (control && (state & GDK_ALT_MASK) && shift &&
+        (keyval == GDK_KEY_n || keyval == GDK_KEY_N)) {
+        static_cast<CreateFolderController *>(user_data)->show_dialog(true, true);
+        return TRUE;
+    }
     if (control && (state & GDK_ALT_MASK) && !shift &&
         (keyval == GDK_KEY_n || keyval == GDK_KEY_N)) {
         static_cast<CreateFolderController *>(user_data)->show_dialog(true);
@@ -160,6 +178,7 @@ void CreateFolderController::on_dialog_destroy(GtkWidget *widget, gpointer user_
     self->dialog_ = nullptr;
     self->entry_ = nullptr;
     self->dialog_message_ = nullptr;
+    self->sparse_size_ = nullptr;
 }
 
 void CreateFolderController::on_dialog_cancel(GtkButton *button, gpointer user_data)
@@ -183,9 +202,9 @@ void CreateFolderController::on_dialog_entry_activate(GtkEntry *entry, gpointer 
     static_cast<CreateFolderController *>(user_data)->submit_dialog();
 }
 
-void CreateFolderController::show_dialog(const bool file)
+void CreateFolderController::show_dialog(const bool file, const bool sparse)
 {
-    GtkWidget *target = file ? new_file_button_ : button_;
+    GtkWidget *target = sparse ? sparse_button_ : file ? new_file_button_ : button_;
     if (busy_ || target == nullptr || !gtk_widget_get_sensitive(target)) {
         return;
     }
@@ -195,8 +214,10 @@ void CreateFolderController::show_dialog(const bool file)
     }
 
     creating_file_ = file;
+    creating_sparse_ = sparse;
     dialog_ = gtk_window_new();
-    gtk_window_set_title(GTK_WINDOW(dialog_), file ? "New Empty File" : "New Folder");
+    gtk_window_set_title(GTK_WINDOW(dialog_), sparse ? "New Sparse File" :
+                             file ? "New Empty File" : "New Folder");
     gtk_window_set_transient_for(GTK_WINDOW(dialog_), window_);
     gtk_window_set_modal(GTK_WINDOW(dialog_), TRUE);
     gtk_window_set_resizable(GTK_WINDOW(dialog_), FALSE);
@@ -215,10 +236,20 @@ void CreateFolderController::show_dialog(const bool file)
     gtk_box_append(GTK_BOX(box), label);
 
     entry_ = gtk_entry_new();
-    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_), file ? "New File.txt" : "New Folder");
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_), sparse ? "New Sparse File.bin" :
+                                            file ? "New File.txt" : "New Folder");
     gtk_box_append(GTK_BOX(box), entry_);
     g_signal_connect(entry_, "activate",
                      G_CALLBACK(&CreateFolderController::on_dialog_entry_activate), this);
+
+    if (sparse) {
+        GtkWidget *size_label = gtk_label_new("Logical size (MiB, initially unallocated)");
+        gtk_label_set_xalign(GTK_LABEL(size_label), 0.0F);
+        gtk_box_append(GTK_BOX(box), size_label);
+        sparse_size_ = gtk_spin_button_new_with_range(1, 1048576, 1);
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(sparse_size_), 16);
+        gtk_box_append(GTK_BOX(box), sparse_size_);
+    }
 
     dialog_message_ = gtk_label_new("");
     gtk_label_set_xalign(GTK_LABEL(dialog_message_), 0.0F);
@@ -279,7 +310,8 @@ void CreateFolderController::submit_dialog()
         return;
     }
     OperationJournal journal;
-    const std::string kind = creating_file_ ? "create-empty-file" : "create-folder";
+    const std::string kind = creating_sparse_ ? "create-sparse-file" :
+                             creating_file_ ? "create-empty-file" : "create-folder";
     const std::string journal_id = journal.begin(kind, path, name);
     if (journal_id.empty()) {
         (void)mutation_guard_.finish();
@@ -290,14 +322,18 @@ void CreateFolderController::submit_dialog()
         return;
     }
 
-    auto *data = new CreateFolderTaskData{path, uri, name, journal_id, creating_file_};
+    const std::uint64_t bytes = creating_sparse_ && sparse_size_ != nullptr
+        ? static_cast<std::uint64_t>(gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(sparse_size_)))
+            * 1024ULL * 1024ULL : 0U;
+    auto *data = new CreateFolderTaskData{path, uri, name, journal_id, creating_file_, bytes};
     g_free(path);
     g_free(uri);
 
     gtk_window_destroy(GTK_WINDOW(dialog_));
     set_busy(true);
     if (status_label_ != nullptr) {
-        gtk_label_set_text(GTK_LABEL(status_label_), data->file ? "Creating file…" : "Creating folder…");
+        gtk_label_set_text(GTK_LABEL(status_label_), data->sparse_bytes > 0U
+            ? "Creating sparse file…" : data->file ? "Creating file…" : "Creating folder…");
     }
 
     GTask *task = g_task_new(G_OBJECT(window_), nullptr,
@@ -318,12 +354,14 @@ void CreateFolderController::on_create_folder_thread(GTask *task,
     (void)cancellable;
     const auto *data = static_cast<const CreateFolderTaskData *>(task_data);
     OperationEngine engine;
-    auto *result = new OperationResult(data->file
-        ? engine.create_empty_file(data->parent_path, data->name)
-        : engine.create_directory(data->parent_path, data->name));
+    auto *result = new OperationResult(data->sparse_bytes > 0U
+        ? engine.create_sparse_file(data->parent_path, data->name, data->sparse_bytes)
+        : data->file ? engine.create_empty_file(data->parent_path, data->name)
+                     : engine.create_directory(data->parent_path, data->name));
 
     OperationJournal journal;
     if (!journal.finish(data->journal_id,
+                        data->sparse_bytes > 0U ? "create-sparse-file" :
                         data->file ? "create-empty-file" : "create-folder", *result)) {
         if (result->ok()) {
             result->status = OperationStatus::VerificationFailure;
@@ -410,6 +448,7 @@ void CreateFolderController::update_action_state()
     const bool can_create = !busy_ && current != nullptr && g_file_is_native(current);
     gtk_widget_set_sensitive(button_, can_create);
     if (new_file_button_ != nullptr) gtk_widget_set_sensitive(new_file_button_, can_create);
+    if (sparse_button_ != nullptr) gtk_widget_set_sensitive(sparse_button_, can_create);
 }
 
 void CreateFolderController::select_pending_item()
