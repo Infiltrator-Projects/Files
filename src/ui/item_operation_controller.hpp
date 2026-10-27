@@ -37,6 +37,8 @@ private:
         ReplaceCopy,
         ReplaceMove,
         Permissions,
+        SymbolicLink,
+        HardLink,
     };
 
     static void on_window_finalized(gpointer user_data, GObject *where_object_was);
@@ -44,6 +46,7 @@ private:
     static void on_copy_clicked(GtkButton *button, gpointer user_data);
     static void on_move_clicked(GtkButton *button, gpointer user_data);
     static void on_permissions_clicked(GtkButton *button, gpointer user_data);
+    static void on_link_clicked(GtkButton *button, gpointer user_data);
     static gboolean on_key_pressed(GtkEventControllerKey *controller,
                                    guint keyval,
                                    guint keycode,
@@ -80,7 +83,7 @@ private:
                                       GAsyncResult *result,
                                       gpointer user_data);
 
-    void show_rename_dialog();
+    void show_rename_dialog(Kind kind = Kind::Rename);
     void show_permissions_dialog();
     void submit_permissions();
     void submit_rename();
@@ -115,6 +118,8 @@ private:
     GtkWidget *copy_button_{nullptr};
     GtkWidget *move_button_{nullptr};
     GtkWidget *permissions_button_{nullptr};
+    GtkWidget *symbolic_link_button_{nullptr};
+    GtkWidget *hard_link_button_{nullptr};
     GtkWidget *permissions_dialog_{nullptr};
     GtkWidget *permissions_entry_{nullptr};
     GtkWidget *permissions_grid_{nullptr};
@@ -134,6 +139,7 @@ private:
     std::shared_ptr<TransferControl> current_control_;
     std::string chooser_source_path_;
     std::string rename_source_path_;
+    Kind rename_dialog_kind_{Kind::Rename};
     std::string pending_selection_name_;
     std::string pending_conflict_source_path_;
     std::string pending_conflict_destination_parent_;
