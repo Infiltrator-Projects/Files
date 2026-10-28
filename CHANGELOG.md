@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.76 — 2026-10-28
+
+- Fix the physical Mint/InfiltratorOS native Files installation failing on the GTK `interaction-surface` test (symbolic-link fixture `first.pdf`) despite successful compilation. The user-machine PGO workload is now an explicit, 12-test deterministic core allowlist rather than an exclusion list that inadvertently ran session-dependent GUI tests.
+- Keep the complete, unfiltered CTest suite, including GTK symbolic-link interactions, as a release CI gate. Refuse to package a supposedly trained native executable if GCC produced no `.gcda` profiles.
+- Add CI regression checking the PGO allowlist, ensuring native installation does not become dependent on real desktop sessions, display servers or D-Bus portals. No Files feature or mutation safety check is disabled in CI.
+
+
 ## 0.1.75 — 2026-10-28
 
 - Integrate ten traceable original Files catalogue slices from reviewed PR #22: create from Templates, optional inline rename after creation, native link actions, explicit bounded sparse-file creation, relative symbolic links and descriptor-bound hard links, private recent-file history, downloaded-origin metadata inspection, and bounded archive header/size previews.
