@@ -101,6 +101,20 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
+      - name: Verify isolated native PGO workload
+        shell: bash
+        run: |
+          set -euo pipefail
+          profile_tests=$(ctest --test-dir build -N -L '^native-pgo$')
+          printf '%s\n' "$profile_tests"
+          grep -Fxq 'Total Tests: 12' <<< "$profile_tests"
+          # The full UI suite runs in the next step, never on customer machines.
+          if grep -Eq 'interaction-surface|workspace-|window-state|theme-presentation|operation-lifetime|detail-metadata|search-persistence|tag-catalogue' <<< "$profile_tests"; then
+            echo 'Native PGO selection includes a UI/session test.' >&2
+            exit 1
+          fi
+          grep -Fq -- "-L '^native-pgo$'" packaging/native-installer.sh
+
       - name: Test
         shell: bash
         run: |

@@ -148,12 +148,18 @@ CC=gcc CXX=g++ cmake -S "$source_root" -B "$build_root" -G Ninja \
     -DBUILD_TESTING=ON
 cmake --build "$build_root" --parallel
 
-# Release CI already runs the complete Files test suite. The native installer
-# uses a deterministic subset only as its PGO workload: installation must not
-# fail because a target machine has a different live mount or desktop-session
-# topology than the release runner.
-ctest --test-dir "$build_root" --output-on-failure \
-    -E '^(mounted-places|window-state)$'
+# Native PGO trains only explicitly labelled, deterministic core workloads.
+# Never run UI, desktop-portal, session-bus, display, or mounted-device tests
+# during a user's installation. The complete unfiltered test suite remains
+# a mandatory CI gate; an allowlist prevents future GTK tests from entering PGO.
+printf 'Training Files native PGO with isolated core workloads...\n'
+ctest --test-dir "$build_root" --output-on-failure -L '^native-pgo$'
+
+# Never claim a trained native build if no GCC profile was generated.
+if [[ -z "$(find "$profile_root" -type f -name '*.gcda' -print -quit)" ]]; then
+    printf 'Files PGO training produced no GCC profile data; refusing an untrained build.\n' >&2
+    exit 1
+fi
 
 printf 'Files %s: final aggressive native PGO build...\n' "$version"
 rm -rf -- "$build_root"

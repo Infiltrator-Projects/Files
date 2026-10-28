@@ -266,6 +266,16 @@ if(BUILD_TESTING)
     infiltrator_add_core_test(operation-journal-test tests/operation_journal_test.cpp operation-journal)
     infiltrator_add_core_test(transfer-safety-test tests/transfer_safety_test.cpp transfer-safety)
     target_link_options(transfer-safety-test PRIVATE "-Wl,--wrap=fsync" "-Wl,--wrap=fsetxattr")
+
+    # PGO on user machines must never run GTK/session/portal integration tests.
+    # The complete suite (including interaction-surface) remains mandatory in
+    # release CI. Only explicit deterministic core workloads train native PGO.
+    set_tests_properties(
+        location-model provider-import archive-engine search-engine
+        operation-engine destination-ownership recovery-operation-engine
+        transfer-operation-engine batch-transfer-engine batch-removal-engine
+        operation-journal transfer-safety
+        PROPERTIES LABELS native-pgo)
 endif()
 
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/BUILD-INFO"
