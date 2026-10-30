@@ -1,0 +1,28 @@
+name: Remove verified merged feature branch
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Remove ancestor branch only if no open PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch='feature/permission-mode-zero-recovery'
+          git fetch --no-tags origin '+refs/heads/*:refs/remotes/origin/*'
+          git merge-base --is-ancestor "refs/remotes/origin/$branch" refs/remotes/origin/main
+          if gh pr list --state open --json headRefName --jq '.[].headRefName' | grep -Fxq "$branch"; then
+            echo 'Open PR uses this branch; keeping it.'
+            exit 1
+          fi
+          gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch"
+          echo "Removed $branch"
