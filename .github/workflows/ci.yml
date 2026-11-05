@@ -173,8 +173,10 @@ jobs:
           test -f "$tmp/root/usr/share/applications/files.desktop"
           grep -Fxq 'Exec=/Programs/files %U' "$tmp/root/usr/share/applications/files.desktop"
           grep -Fxq 'MimeType=inode/directory;' "$tmp/root/usr/share/applications/files.desktop"
-          test -f "$tmp/root/System/Resources/Documentation/Files/BUILD-INFO"
-          grep -Fxq 'Profile: release' "$tmp/root/System/Resources/Documentation/Files/BUILD-INFO"
+          test -f "$tmp/root/System/Resources/Documentation/Files-BUILD-INFO"
+          grep -Fxq 'Profile: release' "$tmp/root/System/Resources/Documentation/Files-BUILD-INFO"
+          test ! -d "$tmp/root/System/Resources/Documentation/Files"
+          sudo sh ci/test_documentation_upgrade.sh "$deb"
 
           if [[ "$deb" != "$canonical" ]]; then
             mv "$deb" "$canonical"
@@ -200,13 +202,13 @@ jobs:
           # Regression for real Mint OS-reset bug: dpkg still records the same
           # package while /Programs and /System were wiped. A normal install
           # reports "already the newest version" and restores nothing.
-          sudo rm -f -- /Programs/files /System/Resources/Documentation/Files/BUILD-INFO
+          sudo rm -f -- /Programs/files /System/Resources/Documentation/Files-BUILD-INFO
           test "$(dpkg-query -W -f='${Version}' files)" = "$VERSION"
           test ! -e /Programs/files
-          test ! -e /System/Resources/Documentation/Files/BUILD-INFO
+          test ! -e /System/Resources/Documentation/Files-BUILD-INFO
           sudo apt-get -o DPkg::Lock::Timeout=300 install -y --reinstall "./dist/files_${VERSION}_amd64.deb"
           test -x /Programs/files
-          test -f /System/Resources/Documentation/Files/BUILD-INFO
+          test -f /System/Resources/Documentation/Files-BUILD-INFO
           # Native installer must likewise force dpkg to restore its own
           # identical +native1 payload, not silently accept the APT no-op.
           grep -Fq 'install -y --reinstall "$deb"' packaging/native-installer.sh
@@ -224,13 +226,13 @@ jobs:
           test ! -e /System/Programs
           grep -Fxq 'Exec=/Programs/files %U' /usr/share/applications/files.desktop
           grep -Fxq 'MimeType=inode/directory;' /usr/share/applications/files.desktop
-          grep -Fxq 'Profile: aggressive' /System/Resources/Documentation/Files/BUILD-INFO
-          grep -Fxq 'PGO: trained two-pass profile' /System/Resources/Documentation/Files/BUILD-INFO
-          grep -Fq -- '-O3' /System/Resources/Documentation/Files/BUILD-INFO
-          grep -Fq -- '-march=native' /System/Resources/Documentation/Files/BUILD-INFO
-          grep -Fq -- '-fno-semantic-interposition' /System/Resources/Documentation/Files/BUILD-INFO
-          grep -Fq -- '-fno-plt' /System/Resources/Documentation/Files/BUILD-INFO
-          grep -Fq -- '-fprofile-partial-training' /System/Resources/Documentation/Files/BUILD-INFO
+          grep -Fxq 'Profile: aggressive' /System/Resources/Documentation/Files-BUILD-INFO
+          grep -Fxq 'PGO: trained two-pass profile' /System/Resources/Documentation/Files-BUILD-INFO
+          grep -Fq -- '-O3' /System/Resources/Documentation/Files-BUILD-INFO
+          grep -Fq -- '-march=native' /System/Resources/Documentation/Files-BUILD-INFO
+          grep -Fq -- '-fno-semantic-interposition' /System/Resources/Documentation/Files-BUILD-INFO
+          grep -Fq -- '-fno-plt' /System/Resources/Documentation/Files-BUILD-INFO
+          grep -Fq -- '-fprofile-partial-training' /System/Resources/Documentation/Files-BUILD-INFO
 
           (
             cd dist

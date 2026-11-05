@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.77 — 2026-11-05
+
+- Install the native build record directly as `/System/Resources/Documentation/Files-BUILD-INFO`.
+- Verify that upgrading removes the old empty Files documentation folder while preserving other documents.
+
 ## 0.1.76 — 2026-10-28
 
 - Fix the physical Mint/InfiltratorOS native Files installation failing on the GTK `interaction-surface` test (symbolic-link fixture `first.pdf`) despite successful compilation. The user-machine PGO workload is now an explicit, 12-test deterministic core allowlist rather than an exclusion list that inadvertently ran session-dependent GUI tests.

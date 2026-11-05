@@ -293,7 +293,7 @@ install(TARGETS files
 install(FILES data/files.desktop
     DESTINATION "/usr/share/applications")
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/BUILD-INFO"
-    DESTINATION "/System/Resources/Documentation/Files")
+    DESTINATION "/System/Resources/Documentation" RENAME "Files-BUILD-INFO")
 
 # Standalone Files must resolve the same verified 23-face family as a full
 # InfiltratorOS installation. Font binaries belong to the persistent machine
