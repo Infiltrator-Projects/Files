@@ -217,6 +217,12 @@ jobs:
           native="dist/files-${VERSION}-native-installer.run"
           test -x "$native"
 
+          mkdir -p "$RUNNER_TEMP/files-build-only"
+          sudo "$native" --system-package-mode --build-only --output "$RUNNER_TEMP/files-build-only"
+          built="$RUNNER_TEMP/files-build-only/files_${VERSION}+native1_amd64.deb"
+          test "$(dpkg-deb -f "$built" Package)" = files
+          test "$(dpkg-deb -f "$built" Version)" = "${VERSION}+native1"
+          test "$(dpkg-query -W -f='${Version}' files)" = "$VERSION"
           sudo "$native" --system-package-mode
 
           test "$(dpkg-query -W -f='${Version}' files)" = "${VERSION}+native1"

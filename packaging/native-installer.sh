@@ -4,22 +4,36 @@ set -Eeuo pipefail
 
 system_package_mode=0
 dry_run=0
-for argument in "$@"; do
-    case "$argument" in
+build_only=0
+output_dir=''
+while (($#)); do
+    case "$1" in
         --system-package-mode) system_package_mode=1 ;;
         --dry-run) dry_run=1 ;;
+        --build-only) build_only=1 ;;
+        --output)
+            shift
+            (($#)) || { echo '--output requires DIRECTORY' >&2; exit 2; }
+            output_dir=$1 ;;
         -h|--help)
-            printf 'Files hardware-native installer\n\n'
-            printf '  --system-package-mode  run as root for InfiltratorOS provisioning\n'
-            printf '  --dry-run              validate prerequisites without changing the system\n'
-            exit 0
-            ;;
-        *)
-            printf 'Unknown argument: %s\n' "$argument" >&2
-            exit 2
-            ;;
+            printf 'Files native installer: --system-package-mode --build-only --output DIRECTORY --dry-run\n'
+            exit 0 ;;
+        *) printf 'Unknown option: %s\n' "$1" >&2; exit 2 ;;
     esac
+    shift
 done
+if ((build_only)) && [[ -z "$output_dir" ]]; then
+    echo '--build-only requires --output DIRECTORY' >&2
+    exit 2
+fi
+if (( !build_only )) && [[ -n "$output_dir" ]]; then
+    echo '--output requires --build-only' >&2
+    exit 2
+fi
+if ((build_only && dry_run)); then
+    echo '--dry-run and --build-only cannot be combined' >&2
+    exit 2
+fi
 
 if ((EUID == 0 && system_package_mode == 0)); then
     printf 'Error: root requires --system-package-mode\n' >&2
@@ -81,6 +95,10 @@ if [[ "$(dpkg --print-architecture)" != amd64 ]]; then
     exit 1
 fi
 
+if ((missing && build_only)); then
+    echo 'Build-only requires existing build prerequisites' >&2
+    exit 1
+fi
 if ((missing)); then
     printf 'Installing Files native-build requirements...\n'
     run_root /usr/bin/apt-get -o DPkg::Lock::Timeout=300 update
@@ -200,6 +218,13 @@ grep -Fxq 'Profile: aggressive' "$inspect/System/Resources/Documentation/Files-B
 grep -Fxq 'PGO: trained two-pass profile' "$inspect/System/Resources/Documentation/Files-BUILD-INFO"
 grep -Fq -- '-O3' "$inspect/System/Resources/Documentation/Files-BUILD-INFO"
 grep -Fq -- '-march=native' "$inspect/System/Resources/Documentation/Files-BUILD-INFO"
+
+if ((build_only)); then
+    mkdir -p -- "$output_dir"
+    install -m 0644 -- "$deb" "$output_dir/$(basename "$deb")"
+    printf 'Native Files DEB built: %s\n' "$output_dir/$(basename "$deb")"
+    exit 0
+fi
 
 printf 'Installing Files %s into /Programs...\n' "$native_version"
 # OS-native directories can be reset independently of Debian's dpkg state.
