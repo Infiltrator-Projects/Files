@@ -180,8 +180,8 @@ int main(int argc,char **argv)
     io.host.write_at=write_at;
     io.host.flush=flush_at;
     io.logical_sector_bytes=(uint32_t)sector;
-    /* V4 inside FAT12.so dry-runs the width and refuses ambiguous/foreign
-     * geometry BEFORE writing. This executable never falls back to mkfs. */
+    /* The canonical FAT12.so Common format engine validates media geometry
+     * before committing writes. This host never invokes a fallback mkfs. */
     if(api->format(&io.host,12u,NULL)!=IFS_FS_OK ||
        flush_at(&block)!=0 ||
        api->probe(&io.host,&variant)!=IFS_FS_OK || variant!=12u) {
