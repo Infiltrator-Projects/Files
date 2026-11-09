@@ -154,7 +154,7 @@ int main(int argc,char **argv)
         goto done;
     }
     if(!physically_removable(actual_major,actual_minor)) {
-        fputs("Refusing FAT12 formatting: target is not verified removable media\\n",stderr);
+        fputs("Refusing FAT12 formatting: target is not verified removable media\n",stderr);
         goto done;
     }
     if(ioctl(fd,BLKROGET,&read_only)!=0 || read_only ||
