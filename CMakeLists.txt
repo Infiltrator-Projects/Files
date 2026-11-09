@@ -20,7 +20,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(INFILTRATOR_BUILD_PROFILE "release" CACHE STRING "Files build profile recorded in BUILD-INFO")
 set(INFILTRATOR_PGO_STATUS "not trained" CACHE STRING "Files PGO status recorded in BUILD-INFO")
 
-set(INFILTRATR_COMMON_MINIMUM_VERSION "1.19.66")
+set(INFILTRATR_COMMON_MINIMUM_VERSION "1.19.82")
 set(INFILTRATR_COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/infiltratr-common")
 
 if(NOT EXISTS "${INFILTRATR_COMMON_DIR}/VERSION")
@@ -123,6 +123,7 @@ add_library(infiltrator-files-ui STATIC
     src/ui/dual_pane_controller.cpp
     src/ui/create_folder_controller.cpp
     src/ui/destructive_operation_controller.cpp
+    src/ui/fat12_format_controller.cpp
     src/ui/detail_metadata.cpp
     src/ui/directory_mutation_guard.cpp
     src/ui/drag_drop_controller.cpp
@@ -157,6 +158,18 @@ infiltrator_enable_warnings(infiltrator-files-ui)
 add_executable(files src/main.cpp)
 target_link_libraries(files PRIVATE infiltrator-files-ui)
 infiltrator_enable_warnings(files)
+
+# Privileged, filesystem-neutral block-I/O host. It delegates all FAT12
+# semantics and format operations to the installed FAT12.so via Common V1.
+add_executable(files-fat12-format src/core/files_fat12_format.c)
+target_include_directories(files-fat12-format PRIVATE
+    "${INFILTRATR_COMMON_DIR}/include")
+target_link_libraries(files-fat12-format PRIVATE ${CMAKE_DL_LIBS})
+install(TARGETS files-fat12-format RUNTIME DESTINATION "/System/Commands")
+if(BUILD_TESTING)
+    add_test(NAME files-fat12-format-help
+             COMMAND $<TARGET_FILE:files-fat12-format> --help)
+endif()
 
 function(infiltrator_add_core_test target source test_name)
     add_executable(${target} ${source})
