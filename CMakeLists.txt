@@ -169,6 +169,10 @@ install(TARGETS files-fat12-format RUNTIME DESTINATION "/System/Commands")
 if(BUILD_TESTING)
     add_test(NAME files-fat12-format-help
              COMMAND $<TARGET_FILE:files-fat12-format> --help)
+    add_executable(files-physical-media-test tests/physical_media_test.c)
+    target_compile_options(files-physical-media-test PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME files-physical-media-safety
+             COMMAND $<TARGET_FILE:files-physical-media-test>)
 endif()
 
 function(infiltrator_add_core_test target source test_name)

@@ -9,6 +9,7 @@
 #define _GNU_SOURCE
 #define _FILE_OFFSET_BITS 64
 #include <infiltratr/filesystem_module.h>
+#include "physical_media.h"
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -52,25 +53,6 @@ static int trusted(int fd,int directory)
     return fstat(fd,&st)==0 && st.st_uid==0u && !(st.st_mode&0022u) &&
            (directory ? S_ISDIR(st.st_mode) : S_ISREG(st.st_mode));
 }
-/* Repeat the GUI's removable-device restriction in the privileged host.
- * Never treat a request from pkexec as proof that Files selected a safe disk.
- * The sysfs partition node resolves beneath its parent physical block disk;
- * missing/ambiguous removable metadata fails closed. */
-static int physically_removable(unsigned device_major, unsigned device_minor)
-{
-    char path[160];
-    char marker=0;
-    int fd;
-    ssize_t count;
-    if(snprintf(path,sizeof path,"/sys/dev/block/%u:%u/../removable",
-                device_major,device_minor)>=(int)sizeof path) return 0;
-    fd=open(path,O_RDONLY|O_CLOEXEC|O_NOFOLLOW);
-    if(fd<0) return 0;
-    count=read(fd,&marker,1);
-    close(fd);
-    return count==1 && marker=='1';
-}
-
 static int parse_uint(const char *text, unsigned *value)
 {
     char *end=NULL;
@@ -153,7 +135,7 @@ int main(int argc,char **argv)
         fputs("Device identity changed or whole-disk target refused\n",stderr);
         goto done;
     }
-    if(!physically_removable(actual_major,actual_minor)) {
+    if(!ifm_partition_is_physical_removable(actual_major,actual_minor)) {
         fputs("Refusing FAT12 formatting: target is not verified removable media\n",stderr);
         goto done;
     }

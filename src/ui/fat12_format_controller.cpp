@@ -5,6 +5,7 @@
  * root-owned helper supplies verified partition-relative block I/O.
  */
 #include "fat12_format_controller.hpp"
+#include "../core/physical_media.h"
 #include <gio/gio.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
@@ -52,16 +53,16 @@ bool find_target(GFile *folder, Target &out)
             GVolume *volume = g_mount_get_volume(mount);
             if (volume != nullptr) {
                 GDrive *drive = g_volume_get_drive(volume);
-                const bool removable = drive != nullptr &&
-                    (g_drive_is_removable(drive) ||
-                     g_drive_is_media_removable(drive));
                 char *device = g_volume_get_identifier(
                     volume, G_VOLUME_IDENTIFIER_KIND_UNIX_DEVICE);
                 struct stat st{};
-                if (removable && device != nullptr &&
+                if (device != nullptr &&
                     std::strncmp(device, "/dev/", 5) == 0 &&
                     std::strchr(device + 5, '/') == nullptr &&
-                    lstat(device, &st) == 0 && S_ISBLK(st.st_mode)) {
+                    lstat(device, &st) == 0 && S_ISBLK(st.st_mode) &&
+                    ifm_partition_is_physical_removable(
+                        static_cast<unsigned>(major(st.st_rdev)),
+                        static_cast<unsigned>(minor(st.st_rdev)))) {
                     out.device = device;
                     out.major_number = static_cast<unsigned>(major(st.st_rdev));
                     out.minor_number = static_cast<unsigned>(minor(st.st_rdev));
