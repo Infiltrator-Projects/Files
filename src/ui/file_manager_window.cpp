@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "file_manager_window.hpp"
+#include "fat12_format_controller.hpp"
 #include "search_persistence.hpp"
 #include "detail_metadata.hpp"
 #include "item_operation_controller.hpp"
@@ -1395,6 +1396,7 @@ void FileManagerWindow::reconcile_mounted_place_rows(const std::vector<MountedPl
         gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row),
                                    make_sidebar_content(place.name.c_str(), icon_name));
         g_object_set_data_full(G_OBJECT(row), "ifm-target", g_strdup(place.uri.c_str()), g_free);
+        install_mounted_place_context_menu(row);
         gtk_list_box_append(GTK_LIST_BOX(sidebar_), row);
         mounted_place_rows_.push_back(MountedPlaceRow{place, row});
     }
@@ -1430,6 +1432,96 @@ void FileManagerWindow::reconcile_mounted_place_rows(const std::vector<MountedPl
         }
         g_object_unref(row);
     }
+}
+
+/* Mounted volumes are GtkListBoxRows, not children of the three file
+ * views. The InteractionController's right-click gestures never reach these
+ * rows. Keep a separate sidebar gesture that resolves the exact clicked row,
+ * not the currently navigated folder or the primary file selection. */
+void FileManagerWindow::install_mounted_place_context_menu(GtkWidget *row)
+{
+    if (!GTK_IS_LIST_BOX_ROW(row)) return;
+    GtkGesture *gesture = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), GDK_BUTTON_SECONDARY);
+    g_signal_connect(gesture, "pressed", G_CALLBACK((+[](
+        GtkGestureClick *click, gint count, double x, double y, gpointer user_data) {
+        if (count != 1) return;
+        auto *self = static_cast<FileManagerWindow *>(user_data);
+        GtkWidget *row = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(click));
+        if (self == nullptr || !GTK_IS_LIST_BOX_ROW(row)) return;
+
+        /* A row may have been reordered or a mount removed. Resolve the
+         * clicked instance against the current mounted-place snapshot. */
+        const auto it = std::find_if(
+            self->mounted_place_rows_.begin(), self->mounted_place_rows_.end(),
+            [row](const MountedPlaceRow &candidate) { return candidate.row == row; });
+        if (it == self->mounted_place_rows_.end()) return;
+
+        GFile *folder = g_file_new_for_uri(it->place.uri.c_str());
+        if (folder == nullptr) return;
+
+        if (GtkWidget *previous = static_cast<GtkWidget *>(
+                g_object_get_data(G_OBJECT(row), "ifm-mounted-popover"));
+            previous != nullptr) {
+            gtk_popover_popdown(GTK_POPOVER(previous));
+            gtk_widget_unparent(previous);
+            g_object_set_data(G_OBJECT(row), "ifm-mounted-popover", nullptr);
+        }
+
+        GtkWidget *popover = gtk_popover_new();
+        gtk_popover_set_has_arrow(GTK_POPOVER(popover), TRUE);
+        gtk_popover_set_position(GTK_POPOVER(popover), GTK_POS_RIGHT);
+        gtk_widget_add_css_class(popover, "ifm-context-popover");
+        GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+        gtk_widget_set_margin_top(actions, 8);
+        gtk_widget_set_margin_bottom(actions, 8);
+        gtk_widget_set_margin_start(actions, 8);
+        gtk_widget_set_margin_end(actions, 8);
+
+        GtkWidget *open = gtk_button_new_with_label("Open volume");
+        gtk_widget_add_css_class(open, "flat");
+        gtk_widget_set_halign(open, GTK_ALIGN_FILL);
+        g_object_set_data_full(G_OBJECT(open), "ifm-mounted-folder",
+                               g_object_ref(folder), g_object_unref);
+        g_signal_connect(open, "clicked", G_CALLBACK(+[](GtkButton *button, gpointer raw) {
+            auto *self = static_cast<FileManagerWindow *>(raw);
+            GFile *target = G_FILE(g_object_get_data(G_OBJECT(button), "ifm-mounted-folder"));
+            if (target != nullptr) self->open_location(target);
+            if (GtkWidget *popover = gtk_widget_get_ancestor(GTK_WIDGET(button), GTK_TYPE_POPOVER))
+                gtk_popover_popdown(GTK_POPOVER(popover));
+        }), self);
+        gtk_box_append(GTK_BOX(actions), open);
+
+        GtkWidget *format = gtk_button_new_with_label("Format containing volume as FAT12…");
+        gtk_widget_add_css_class(format, "flat");
+        gtk_widget_set_halign(format, GTK_ALIGN_FILL);
+        const bool allowed = fat12_format_available(folder);
+        gtk_widget_set_sensitive(format, allowed);
+        if (!allowed)
+            gtk_widget_set_tooltip_text(format,
+                "Requires a mounted, physical removable partition and the installed FAT12 formatter");
+        g_object_set_data_full(G_OBJECT(format), "ifm-mounted-folder",
+                               g_object_ref(folder), g_object_unref);
+        g_signal_connect(format, "clicked", G_CALLBACK(+[](GtkButton *button, gpointer raw) {
+            auto *self = static_cast<FileManagerWindow *>(raw);
+            GFile *target = G_FILE(g_object_get_data(G_OBJECT(button), "ifm-mounted-folder"));
+            if (GtkWidget *popover = gtk_widget_get_ancestor(GTK_WIDGET(button), GTK_TYPE_POPOVER))
+                gtk_popover_popdown(GTK_POPOVER(popover));
+            if (target != nullptr)
+                show_fat12_format_dialog(GTK_WINDOW(self->window_), target);
+        }), self);
+        gtk_box_append(GTK_BOX(actions), format);
+
+        gtk_popover_set_child(GTK_POPOVER(popover), actions);
+        gtk_widget_set_parent(popover, row);
+        g_object_set_data(G_OBJECT(row), "ifm-mounted-popover", popover);
+        GdkRectangle rectangle = {static_cast<int>(x), static_cast<int>(y), 1, 1};
+        gtk_popover_set_pointing_to(GTK_POPOVER(popover), &rectangle);
+        gtk_popover_popup(GTK_POPOVER(popover));
+        gtk_gesture_set_state(GTK_GESTURE(click), GTK_EVENT_SEQUENCE_CLAIMED);
+        g_object_unref(folder);
+    })), this);
+    gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(gesture));
 }
 
 void FileManagerWindow::mark_current_location_unavailable(const MountedPlace &source)
