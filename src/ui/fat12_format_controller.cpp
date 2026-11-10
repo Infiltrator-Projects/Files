@@ -18,11 +18,15 @@ namespace {
 constexpr const char *kWorker = "/System/Commands/files-fat12-format";
 struct Target {
     GMount *mount{nullptr};
+    GVolume *volume{nullptr};
     std::string device;
     std::string mount_name;
     unsigned major_number{0};
     unsigned minor_number{0};
-    ~Target() { if (mount != nullptr) g_object_unref(mount); }
+    ~Target() {
+        if (mount != nullptr) g_object_unref(mount);
+        if (volume != nullptr) g_object_unref(volume);
+    }
     Target() = default;
     Target(const Target &) = delete;
     Target &operator=(const Target &) = delete;
@@ -32,6 +36,7 @@ struct Request {
     GtkWidget *entry{nullptr};
     GtkWidget *status{nullptr};
     GtkWidget *confirm{nullptr};
+    std::string pending_error;
 };
 bool find_target(GFile *folder, Target &out)
 {
@@ -64,6 +69,9 @@ bool find_target(GFile *folder, Target &out)
                         static_cast<unsigned>(major(st.st_rdev)),
                         static_cast<unsigned>(minor(st.st_rdev)))) {
                     out.device = device;
+                    // Retain the volume across unmount so an abort before
+                    // formatting starts can safely restore its mount.
+                    out.volume = G_VOLUME(g_object_ref(volume));
                     out.major_number = static_cast<unsigned>(major(st.st_rdev));
                     out.minor_number = static_cast<unsigned>(minor(st.st_rdev));
                     out.mount_name = "the selected removable volume";
@@ -99,6 +107,47 @@ void complete(GtkWindow *dialog, bool success, const char *message)
         gtk_widget_set_sensitive(req->entry, TRUE);
     }
 }
+/* Remount only when the formatter definitely did not execute. A failed
+ * formatter may have modified on-disk metadata and must remain unmounted. */
+void on_safe_remount(GObject *object, GAsyncResult *result, gpointer data)
+{
+    GtkWindow *dialog = GTK_WINDOW(data);
+    Request *req = static_cast<Request *>(
+        g_object_get_data(G_OBJECT(dialog), "ifm-format-request"));
+    GError *error = nullptr;
+    const bool restored = g_volume_mount_finish(G_VOLUME(object), result, &error) ||
+        (error != nullptr &&
+         g_error_matches(error, G_IO_ERROR, G_IO_ERROR_ALREADY_MOUNTED));
+    std::string message = req != nullptr ? req->pending_error :
+        "The formatter did not start.";
+    if (restored) {
+        message += "\nThe original volume was remounted.";
+    } else {
+        message += "\nThe volume remains unmounted: ";
+        message += error != nullptr ? error->message : "remount failed";
+    }
+    complete(dialog, false, message.c_str());
+    g_clear_error(&error);
+    g_object_unref(dialog);
+}
+
+void restore_after_preformat_failure(GtkWindow *dialog,
+                                     const std::string& reason)
+{
+    Request *req = static_cast<Request *>(
+        g_object_get_data(G_OBJECT(dialog), "ifm-format-request"));
+    if (req == nullptr || req->target.volume == nullptr) {
+        const std::string message = reason +
+            "\nThe volume remains unmounted; the formatter did not start.";
+        complete(dialog, false, message.c_str());
+        return;
+    }
+    req->pending_error = reason;
+    set_status(req, "The formatter did not start. Restoring the original mount.");
+    g_volume_mount(req->target.volume, G_MOUNT_MOUNT_NONE, nullptr, nullptr,
+                   on_safe_remount, g_object_ref(dialog));
+}
+
 void on_process_done(GObject *object, GAsyncResult *result, gpointer data)
 {
     GtkWindow *dialog = GTK_WINDOW(data);
@@ -115,8 +164,22 @@ void on_process_done(GObject *object, GAsyncResult *result, gpointer data)
     } else {
         const char *reason = error != nullptr ? error->message :
             err != nullptr && *err ? err : "FAT12 format host failed.";
-        std::string message = std::string("Formatting failed: ") + reason;
-        complete(dialog, false, message.c_str());
+        const std::string message = std::string("Formatting failed: ") + reason;
+        GSubprocess *process = G_SUBPROCESS(object);
+        // pkexec uses 126/127 if authorisation or execution was refused.
+        // Our host returns only 0, 1 or 2, so no format writes occurred.
+        const bool never_started = completed &&
+            g_subprocess_get_if_exited(process) &&
+            (g_subprocess_get_exit_status(process) == 126 ||
+             g_subprocess_get_exit_status(process) == 127);
+        if (never_started) {
+            restore_after_preformat_failure(dialog, message);
+        } else {
+            const std::string warning = message +
+                "\nThe volume remains unmounted because formatting may have "
+                "modified filesystem metadata.";
+            complete(dialog, false, warning.c_str());
+        }
     }
     g_free(out);
     g_free(err);
@@ -150,7 +213,7 @@ void on_unmounted(GObject *object, GAsyncResult *result, gpointer data)
     if (process == nullptr) {
         std::string message = std::string("Could not start privileged host: ") +
             (error != nullptr ? error->message : "Unknown error");
-        complete(dialog, false, message.c_str());
+        restore_after_preformat_failure(dialog, message);
         g_clear_error(&error);
         g_object_unref(dialog);
         return;
