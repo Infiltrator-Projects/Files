@@ -1443,7 +1443,7 @@ void FileManagerWindow::install_mounted_place_context_menu(GtkWidget *row)
     if (!GTK_IS_LIST_BOX_ROW(row)) return;
     GtkGesture *gesture = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), GDK_BUTTON_SECONDARY);
-    g_signal_connect(gesture, "pressed", G_CALLBACK(+[](
+    g_signal_connect(gesture, "pressed", G_CALLBACK((+[](
         GtkGestureClick *click, gint count, double x, double y, gpointer user_data) {
         if (count != 1) return;
         auto *self = static_cast<FileManagerWindow *>(user_data);
@@ -1520,7 +1520,7 @@ void FileManagerWindow::install_mounted_place_context_menu(GtkWidget *row)
         gtk_popover_popup(GTK_POPOVER(popover));
         gtk_gesture_set_state(GTK_GESTURE(click), GTK_EVENT_SEQUENCE_CLAIMED);
         g_object_unref(folder);
-    }), this);
+    })), this);
     gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(gesture));
 }
 
