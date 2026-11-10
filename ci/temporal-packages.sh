@@ -44,7 +44,7 @@ verify() {
         package=$(jq -r '.package' <<<"$record")
         expected=$(jq -c --arg p "$package" '.[] | select(.package == $p)' "$catalogue")
         [[ -n "$expected" ]] || { echo "Unknown provider $package" >&2; return 1; }
-        jq -e --argjson e "$expected" --argjson r "$record" \
+        jq -n -e --argjson e "$expected" --argjson r "$record" \
             '$e | to_entries | all(.[]; $r[.key] == .value)' >/dev/null ||
             { echo "Provider catalogue mismatch: $package" >&2; return 1; }
         version=$(jq -r '.version' <<<"$record")
@@ -153,6 +153,11 @@ if [[ "$command" == fetch ]]; then
         fi
     done
     wait
+    mapfile -t complete < <(find "$temp" -maxdepth 1 -name '*.json' -type f)
+    (("${#complete[@]}" == "${#chosen[@]}")) || {
+        echo 'Incomplete native provider snapshot; refusing partial catalogue' >&2
+        exit 1
+    }
     jq -s '.' "$temp"/*.json > "$destination/providers.json"
 fi
 if [[ "$command" != fetch ]]; then
