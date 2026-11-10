@@ -192,6 +192,10 @@ int main(int argc,char **argv)
     io.host.read_at=read_at;
     io.host.write_at=write_at;
     io.host.flush=flush_at;
+    /* Keep V1 format hosts complete for older installed FAT12 providers.
+     * The new V2 host has the same allocator, not a separate disk engine. */
+    io.host.allocate=host_alloc;
+    io.host.release=host_free;
     io.logical_sector_bytes=(uint32_t)sector;
     /* The canonical FAT12.so Common format engine validates media geometry
      * before committing writes. This host never invokes a fallback mkfs. */
@@ -201,7 +205,7 @@ int main(int argc,char **argv)
         if(ioctl(fd,BLKPBSZGET,&physical_sector)!=0 ||
            physical_sector<sector || physical_sector>65536 ||
            (physical_sector&(physical_sector-1))) {
-            fputs("Cannot verify physical sector geometry for Common V2\\n",stderr);
+            fputs("Cannot verify physical sector geometry for Common V2\n",stderr);
             goto done;
         }
         io_v2.abi_version=IFS_FS_HOST_ABI_V2;
@@ -215,7 +219,7 @@ int main(int argc,char **argv)
         io_v2.read_at=read_at;io_v2.write_at=write_at;
         io_v2.flush=flush_at;io_v2.allocate=host_alloc;io_v2.release=host_free;
         if(!ifs_fs_host_v2_valid(&io_v2)) {
-            fputs("Invalid Common V2 host descriptor\\n",stderr);
+            fputs("Invalid Common V2 host descriptor\n",stderr);
             goto done;
         }
     }
