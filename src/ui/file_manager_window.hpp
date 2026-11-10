@@ -211,6 +211,7 @@ private:
     void refresh_mounted_places();
     void apply_mounted_places(const std::vector<MountedPlace> &places);
     void reconcile_mounted_place_rows(const std::vector<MountedPlace> &places);
+    void install_mounted_place_context_menu(GtkWidget *row);
     void mark_current_location_unavailable(const MountedPlace &source);
     void restore_current_location_if_proven(const MountedPlace *source);
     void navigate_to(GFile *file, bool record_history);
