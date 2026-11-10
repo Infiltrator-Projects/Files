@@ -160,7 +160,7 @@ target_link_libraries(files PRIVATE infiltrator-files-ui)
 infiltrator_enable_warnings(files)
 
 # Privileged, filesystem-neutral block-I/O host. It delegates all FAT12
-# semantics and format operations to the installed FAT12.so via Common V1.
+# semantics and formatting to the installed FAT12.so using Common V2 only.
 add_executable(files-fat12-format src/core/files_fat12_format.c)
 target_include_directories(files-fat12-format PRIVATE
     "${INFILTRATR_COMMON_DIR}/include")
