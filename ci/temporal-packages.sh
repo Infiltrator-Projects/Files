@@ -33,7 +33,7 @@ token=${GITHUB_TOKEN:-${GH_TOKEN:-}}
 request() {
     curl --fail --location --silent --show-error --retry 4 --retry-delay 1 \
          --retry-all-errors --max-time 120 -H 'User-Agent: Infiltrator-native-provider-test' \
-         "${auth[@]}" "$@"
+         "$@"
 }
 verify() {
     local records="$destination/providers.json" record expected package file version checksum size field value actual
@@ -81,7 +81,7 @@ fetch_one() {
     repository=$(jq -r '.repository' <<<"$entry")
     package=$(jq -r '.package' <<<"$entry")
     minimum_version=$(jq -r '.minimum_version // "1.0.0"' <<<"$entry")
-    release=$(request -H 'Accept: application/vnd.github+json' \
+    release=$(request -H 'Accept: application/vnd.github+json' "${auth[@]}" \
         "https://api.github.com/repos/Infiltrator-Projects/$repository/releases/latest") ||
         { echo "Cannot retrieve release: $repository" >&2; return 1; }
     tag=$(jq -r '.tag_name // ""' <<<"$release")
