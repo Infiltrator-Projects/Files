@@ -65,6 +65,7 @@ jobs:
 
       - name: Validate release and native-installer syntax
         run: |
+          bash -n ci/temporal-packages.sh
           bash -n ci/release.sh
           bash -n ci/build-native-installer.sh
           bash -n packaging/native-installer.sh
