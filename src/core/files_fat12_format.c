@@ -75,52 +75,43 @@ static int parse_uint(const char *text, unsigned *value)
     return 0;
 }
 static int load_module(int *module_fd,void **handle,
-                       const IfsFsModuleApiV1 **api,
-                       const IfsFsVolumeOpsV1 **volume_ops)
+                       const IfsFsCoreOpsV2 **core_ops,
+                       const IfsFsVolumeOpsV2 **volume_ops)
 {
     int system=-1,dir=-1,fd=-1,ok=-1;
     char path[64];
     void *symbol=NULL;
-    IfsFsModuleApiEntryV1 entry=NULL;
-    IfsFsModuleApiEntryV2 entry_v2=NULL;
-    const IfsFsModuleApiV2 *v2=NULL;
-    const IfsFsGroupHeaderV2 *group=NULL;
+    IfsFsModuleApiEntryV2 entry=NULL;
+    const IfsFsModuleApiV2 *api=NULL;
+    const IfsFsGroupHeaderV2 *core=NULL,*volume=NULL;
+    *module_fd=-1;*handle=NULL;*core_ops=NULL;*volume_ops=NULL;
     system=open("/System",O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);
     if(system<0 || !trusted(system,1)) goto done;
     dir=openat(system,"Filesystems",O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);
     if(dir<0 || !trusted(dir,1)) goto done;
     fd=openat(dir,"FAT12.so",O_RDONLY|O_NOFOLLOW|O_CLOEXEC);
     if(fd<0 || !trusted(fd,0)) goto done;
-    if(snprintf(path,sizeof path,"/proc/self/fd/%d",fd)>=(int)sizeof path)
+    if(snprintf(path,sizeof(path),"/proc/self/fd/%d",fd)>=(int)sizeof(path))
         goto done;
     *handle=dlopen(path,RTLD_NOW|RTLD_LOCAL);
     if(!*handle) goto done;
-    symbol=dlsym(*handle,IFS_FS_COMMON_EXPORT_V1);
-    if(!symbol || sizeof(symbol)!=sizeof(entry)) goto done;
-    memcpy(&entry,&symbol,sizeof entry);
-    *api=entry ? entry():NULL;
-    if(!ifs_fs_common_api_valid(*api,"fat12") ||
-       !((*api)->capabilities&IFS_FS_CAP_PROBE) || !(*api)->probe)
-        goto done;
-    /* A present but invalid V2 descriptor is fatal: never downgrade. */
     symbol=dlsym(*handle,IFS_FS_COMMON_EXPORT_V2);
-    if(symbol){
-        if(sizeof(symbol)!=sizeof(entry_v2))goto done;
-        memcpy(&entry_v2,&symbol,sizeof(entry_v2));
-        v2=entry_v2 ? entry_v2():NULL;
-        if(!ifs_fs_api_v2_valid(v2,"fat12") ||
-           v2->base_v1!=*api)goto done;
-        group=ifs_fs_group_v2(v2,IFS_FS_GROUP_VOLUME);
-        if(!group || !(group->capabilities&IFS_FS_VOLUME_FORMAT))
-            goto done;
-        *volume_ops=(const IfsFsVolumeOpsV1 *)group;
-    }else if(!((*api)->capabilities&IFS_FS_CAP_FORMAT) || !(*api)->format)
+    if(!symbol || sizeof(symbol)!=sizeof(entry))goto done;
+    memcpy(&entry,&symbol,sizeof(entry));
+    api=entry?entry():NULL;
+    if(!ifs_fs_api_v2_valid(api,"fat12"))goto done;
+    core=ifs_fs_group_v2(api,IFS_FS_GROUP_CORE);
+    volume=ifs_fs_group_v2(api,IFS_FS_GROUP_VOLUME);
+    if(!core || !(core->capabilities&IFS_FS_CORE_PROBE) ||
+       !volume || !(volume->capabilities&IFS_FS_VOLUME_FORMAT))
         goto done;
+    *core_ops=(const IfsFsCoreOpsV2 *)core;
+    *volume_ops=(const IfsFsVolumeOpsV2 *)volume;
     *module_fd=fd;fd=-1;ok=0;
 done:
-    if(fd>=0) close(fd);
-    if(dir>=0) close(dir);
-    if(system>=0) close(system);
+    if(fd>=0)close(fd);
+    if(dir>=0)close(dir);
+    if(system>=0)close(system);
     if(ok && *handle) {dlclose(*handle);*handle=NULL;}
     return ok;
 }
@@ -132,11 +123,10 @@ int main(int argc,char **argv)
     struct stat st;
     char partition[120];
     BlockHost block={-1,0};
-    IfsFsHostFormatIoV1 io={0};
-    IfsFsHostRuntimeV2 io_v2={0};
-    const IfsFsVolumeOpsV1 *v2_volume=NULL;
+    IfsFsHostRuntimeV2 io={0};
+    const IfsFsCoreOpsV2 *core=NULL;
+    const IfsFsVolumeOpsV2 *volume=NULL;
     int physical_sector=0;
-    const IfsFsModuleApiV1 *api=NULL;
     void *module=NULL;
     uint32_t variant=0u;
 
@@ -181,54 +171,39 @@ int main(int argc,char **argv)
     }
     block.fd=fd;
     block.size=(uint64_t)capacity;
-    if(load_module(&mod_fd,&module,&api,&v2_volume)!=0) {
+    if(load_module(&mod_fd,&module,&core,&volume)!=0) {
         fputs("Installed FAT12.so failed the trusted Common ABI check\n",stderr);
         goto done;
     }
-    io.host.structure_bytes=sizeof io;
-    io.host.flags=IFS_FS_IO_EXCLUSIVE;
-    io.host.context=&block;
-    io.host.volume_bytes=block.size;
-    io.host.read_at=read_at;
-    io.host.write_at=write_at;
-    io.host.flush=flush_at;
-    /* Keep V1 format hosts complete for older installed FAT12 providers.
-     * The new V2 host has the same allocator, not a separate disk engine. */
-    io.host.allocate=host_alloc;
-    io.host.release=host_free;
-    io.logical_sector_bytes=(uint32_t)sector;
-    /* The canonical FAT12.so Common format engine validates media geometry
-     * before committing writes. This host never invokes a fallback mkfs. */
-    /* V2: strict physical/logical geometry from the open block device.
-     * Do not substitute a guessed sector size for a failed ioctl. */
-    if(v2_volume) {
-        if(ioctl(fd,BLKPBSZGET,&physical_sector)!=0 ||
-           physical_sector<sector || physical_sector>65536 ||
-           (physical_sector&(physical_sector-1))) {
-            fputs("Cannot verify physical sector geometry for Common V2\n",stderr);
-            goto done;
-        }
-        io_v2.abi_version=IFS_FS_HOST_ABI_V2;
-        io_v2.structure_bytes=sizeof(io_v2);
-        io_v2.capabilities=IFS_FS_HOST_EXCLUSIVE|IFS_FS_HOST_DURABLE;
-        io_v2.volume_bytes=block.size;
-        io_v2.logical_sector_bytes=(uint32_t)sector;
-        io_v2.physical_sector_bytes=(uint32_t)physical_sector;
-        io_v2.maximum_transfer_bytes=65536u;
-        io_v2.context=&block;
-        io_v2.read_at=read_at;io_v2.write_at=write_at;
-        io_v2.flush=flush_at;io_v2.allocate=host_alloc;io_v2.release=host_free;
-        if(!ifs_fs_host_v2_valid(&io_v2)) {
-            fputs("Invalid Common V2 host descriptor\n",stderr);
-            goto done;
-        }
+    if(ioctl(fd,BLKPBSZGET,&physical_sector)!=0 ||
+       physical_sector<sector || physical_sector>65536 ||
+       (physical_sector&(physical_sector-1))) {
+        fputs("Cannot verify physical sector geometry for Common V2\n",stderr);
+        goto done;
     }
-    if((v2_volume ?
-          v2_volume->format(&io_v2,12u,NULL,0u) :
-          api->format(&io.host,12u,NULL))!=IFS_FS_OK ||
+    io.abi_version=IFS_FS_HOST_ABI_V2;
+    io.structure_bytes=sizeof(io);
+    io.capabilities=IFS_FS_HOST_EXCLUSIVE|IFS_FS_HOST_DURABLE;
+    io.volume_bytes=block.size;
+    io.logical_sector_bytes=(uint32_t)sector;
+    io.physical_sector_bytes=(uint32_t)physical_sector;
+    io.maximum_transfer_bytes=65536u;
+    io.context=&block;
+    io.read_at=read_at;
+    io.write_at=write_at;
+    io.flush=flush_at;
+    io.allocate=host_alloc;
+    io.release=host_free;
+    if(!ifs_fs_host_v2_valid(&io)) {
+        fputs("Invalid Common V2 host descriptor\n",stderr);
+        goto done;
+    }
+    /* Both mutation and independent verification use the same native
+     * provider's V2 callbacks. There is no alternative API. */
+    if(volume->format(&io,12u,NULL,0u)!=IFS_FS_OK ||
        flush_at(&block)!=0 ||
-       api->probe(&io.host,&variant)!=IFS_FS_OK || variant!=12u) {
-        fputs("FAT12 module reported format or independent probe failure\n",stderr);
+       core->probe(&io,&variant)!=IFS_FS_OK || variant!=12u) {
+        fputs("FAT12.so V2 format or independent probe failed\n",stderr);
         goto done;
     }
     puts("FAT12 partition formatted and verified by FAT12.so");
