@@ -65,6 +65,7 @@ jobs:
 
       - name: Validate release and native-installer syntax
         run: |
+          bash -n ci/temporal-packages.sh
           bash -n ci/release.sh
           bash -n ci/build-native-installer.sh
           bash -n packaging/native-installer.sh
@@ -75,7 +76,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build pkg-config libgtk-4-dev libarchive-dev dpkg-dev xvfb xauth dbus-x11 gdb
+            build-essential cmake ninja-build pkg-config libgtk-4-dev libarchive-dev dpkg-dev xvfb xauth dbus-x11 gdb curl jq
 
       - name: Regression check for missing LibArchive development files
         shell: bash
@@ -191,8 +192,8 @@ jobs:
           set -euo pipefail
 
           # Qualify with independent provider packages, without Common's retired bundle.
-          python3 ci/temporal-packages.py fetch "$RUNNER_TEMP/independent-providers"
-          python3 ci/temporal-packages.py install "$RUNNER_TEMP/independent-providers"
+          bash ci/temporal-packages.sh fetch "$RUNNER_TEMP/independent-providers"
+          bash ci/temporal-packages.sh install "$RUNNER_TEMP/independent-providers"
 
           # Reproduce the field failure: provisioning starts with the generic
           # APT package already installed. Native +native1 must upgrade it
