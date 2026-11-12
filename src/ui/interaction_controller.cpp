@@ -9,7 +9,7 @@
 #include "quick_preview.hpp"
 #include "tag_catalogue.hpp"
 #include "file_manager_window.hpp"
-#include "fat12_format_controller.hpp"
+#include "volume_format_controller.hpp"
 #include "dual_pane_controller.hpp"
 
 #include <algorithm>
@@ -620,8 +620,8 @@ GtkWidget *InteractionController::build_context_action_box()
         ActionScope::MultiSelection, context_proxies_));
     add_command(details, "Open terminal here", "terminal-current",
                 ActionScope::NoSelection, context_proxies_);
-    fat12_format_actions_.push_back(add_command(
-        details, "Format containing volume as FAT12…", "format-fat12",
+    volume_format_actions_.push_back(add_command(
+        details, "Format containing volume…", "format-volume",
         ActionScope::Always, context_proxies_));
     return box;
 }
@@ -736,7 +736,7 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
     auto *window = static_cast<FileManagerWindow *>(
         g_object_get_data(G_OBJECT(self->window_), "ifm-window-controller"));
     if (window == nullptr) return;
-    if (g_strcmp0(command, "format-fat12") == 0) {
+    if (g_strcmp0(command, "format-volume") == 0) {
         GFile *parent = gtk_directory_list_get_file(self->directory_list_);
         GFile *target = parent;
         bool owned = false;
@@ -750,7 +750,7 @@ void InteractionController::on_workspace_clicked(GtkButton *button, gpointer use
                 owned = true;
             }
         }
-        if (target != nullptr) show_fat12_format_dialog(self->window_, target);
+        if (target != nullptr) show_volume_format_dialog(self->window_, target);
         if (owned) g_object_unref(target);
     }
     else if (g_strcmp0(command, "open-with") == 0) self->show_open_with();
@@ -1725,8 +1725,8 @@ void InteractionController::update_action_state()
         format_target_owned = true;
     }
     const bool format_available = format_target != nullptr &&
-        fat12_format_available(format_target);
-    for (GtkWidget *button : fat12_format_actions_) {
+        volume_format_available(format_target);
+    for (GtkWidget *button : volume_format_actions_) {
         gtk_widget_set_visible(button, format_available);
         gtk_widget_set_sensitive(button, format_available);
     }

@@ -149,7 +149,7 @@ private:
     std::vector<GtkWidget *> zoom_larger_actions_;
     std::vector<GtkWidget *> sidebar_actions_;
     std::vector<GtkWidget *> folder_terminal_actions_;
-    std::vector<GtkWidget *> fat12_format_actions_;
+    std::vector<GtkWidget *> volume_format_actions_;
     std::vector<GtkWidget *> compare_actions_;
     std::vector<GtkWidget *> preview_actions_;
     std::vector<GtkWidget *> pin_file_actions_;

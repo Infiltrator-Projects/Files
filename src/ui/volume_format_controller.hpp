@@ -5,6 +5,6 @@
 namespace infiltrator::files {
 // A native folder resolves to its enclosing removable partition, never to
 // its own directory bytes. No formatting occurs during discovery.
-[[nodiscard]] bool fat12_format_available(GFile *folder);
-void show_fat12_format_dialog(GtkWindow *parent, GFile *folder);
+[[nodiscard]] bool volume_format_available(GFile *folder);
+void show_volume_format_dialog(GtkWindow *parent, GFile *folder);
 } // namespace infiltrator::files

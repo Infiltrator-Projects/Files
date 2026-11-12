@@ -44,8 +44,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          grep -Fq 'IFS_FS_COMMON_EXPORT_V2' src/core/files_fat12_format.c
-          if grep -En 'IfsFs[A-Za-z0-9_]*V1|IFS_FS_[A-Z0-9_]*V1|base_v1|IFS_FS_COMMON_EXPORT_V1|infiltrator_filesystem_api_v1' src/core/files_fat12_format.c; then
+          grep -Fq 'IFS_FS_COMMON_EXPORT_V2' src/core/files_volume_format.c
+          if grep -En 'IfsFs[A-Za-z0-9_]*V1|IFS_FS_[A-Z0-9_]*V1|base_v1|IFS_FS_COMMON_EXPORT_V1|infiltrator_filesystem_api_v1' src/core/files_volume_format.c; then
             echo "Retired filesystem ABI found in Files" >&2
             exit 1
           fi

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Detect the current filesystem on a removable volume and offer formatting through any installed Common V2 provider with format support.
+
 ## 0.1.77 — 2026-11-05
 
 - Install the native build record directly as `/System/Resources/Documentation/Files-BUILD-INFO`.

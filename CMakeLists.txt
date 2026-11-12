@@ -123,7 +123,7 @@ add_library(infiltrator-files-ui STATIC
     src/ui/dual_pane_controller.cpp
     src/ui/create_folder_controller.cpp
     src/ui/destructive_operation_controller.cpp
-    src/ui/fat12_format_controller.cpp
+    src/ui/volume_format_controller.cpp
     src/ui/detail_metadata.cpp
     src/ui/directory_mutation_guard.cpp
     src/ui/drag_drop_controller.cpp
@@ -159,16 +159,32 @@ add_executable(files src/main.cpp)
 target_link_libraries(files PRIVATE infiltrator-files-ui)
 infiltrator_enable_warnings(files)
 
-# Privileged, filesystem-neutral block-I/O host. It delegates all FAT12
-# semantics and formatting to the installed FAT12.so using Common V2 only.
-add_executable(files-fat12-format src/core/files_fat12_format.c)
-target_include_directories(files-fat12-format PRIVATE
+# Filesystem-neutral host for installed Common V2 formatters.
+add_executable(files-volume-format src/core/files_volume_format.c)
+target_include_directories(files-volume-format PRIVATE
     "${INFILTRATR_COMMON_DIR}/include")
-target_link_libraries(files-fat12-format PRIVATE ${CMAKE_DL_LIBS})
-install(TARGETS files-fat12-format RUNTIME DESTINATION "/System/Commands")
+target_link_libraries(files-volume-format PRIVATE ${CMAKE_DL_LIBS})
+infiltrator_enable_warnings(files-volume-format)
+install(TARGETS files-volume-format RUNTIME DESTINATION "/System/Commands")
 if(BUILD_TESTING)
-    add_test(NAME files-fat12-format-help
-             COMMAND $<TARGET_FILE:files-fat12-format> --help)
+    add_test(NAME files-volume-format-help
+             COMMAND $<TARGET_FILE:files-volume-format> --help)
+    foreach(format IN ITEMS ntfs custom probe)
+        add_library(files-format-${format}-fixture MODULE tests/volume_formatter_fixture.c)
+        target_include_directories(files-format-${format}-fixture PRIVATE
+            "${INFILTRATR_COMMON_DIR}/include")
+        target_compile_definitions(files-format-${format}-fixture PRIVATE FORMAT_ID="${format}")
+        infiltrator_enable_warnings(files-format-${format}-fixture)
+    endforeach()
+    target_compile_definitions(files-format-probe-fixture PRIVATE PROBE_ONLY=1)
+    add_executable(files-volume-format-test tests/volume_format_test.c)
+    target_include_directories(files-volume-format-test PRIVATE
+        "${INFILTRATR_COMMON_DIR}/include")
+    target_link_libraries(files-volume-format-test PRIVATE ${CMAKE_DL_LIBS})
+    infiltrator_enable_warnings(files-volume-format-test)
+    add_test(NAME files-volume-format-dispatch COMMAND $<TARGET_FILE:files-volume-format-test>
+        $<TARGET_FILE:files-format-ntfs-fixture> $<TARGET_FILE:files-format-custom-fixture>
+        $<TARGET_FILE:files-format-probe-fixture>)
     add_executable(files-physical-media-test tests/physical_media_test.c)
     target_compile_options(files-physical-media-test PRIVATE -Wall -Wextra -Werror)
     add_test(NAME files-physical-media-safety
@@ -344,7 +360,7 @@ set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Infiltrator Projects")
 set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "ca-certificates, fontconfig, curl | wget")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "ca-certificates, fontconfig, curl | wget, util-linux")
 # Optional capabilities are owned by their independent provider packages.
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/ci/temporal-providers.json" FILES_TEMPORAL_PROVIDERS)
 string(JSON FILES_TEMPORAL_PROVIDER_COUNT LENGTH "${FILES_TEMPORAL_PROVIDERS}")

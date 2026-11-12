@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "file_manager_window.hpp"
-#include "fat12_format_controller.hpp"
+#include "volume_format_controller.hpp"
 #include "search_persistence.hpp"
 #include "detail_metadata.hpp"
 #include "item_operation_controller.hpp"
@@ -1492,14 +1492,14 @@ void FileManagerWindow::install_mounted_place_context_menu(GtkWidget *row)
         }), self);
         gtk_box_append(GTK_BOX(actions), open);
 
-        GtkWidget *format = gtk_button_new_with_label("Format containing volume as FAT12…");
+        GtkWidget *format = gtk_button_new_with_label("Format containing volume…");
         gtk_widget_add_css_class(format, "flat");
         gtk_widget_set_halign(format, GTK_ALIGN_FILL);
-        const bool allowed = fat12_format_available(folder);
+        const bool allowed = volume_format_available(folder);
         gtk_widget_set_sensitive(format, allowed);
         if (!allowed)
             gtk_widget_set_tooltip_text(format,
-                "Requires a mounted, physical removable partition and the installed FAT12 formatter");
+                "Requires a mounted, physical removable partition");
         g_object_set_data_full(G_OBJECT(format), "ifm-mounted-folder",
                                g_object_ref(folder), g_object_unref);
         g_signal_connect(format, "clicked", G_CALLBACK(+[](GtkButton *button, gpointer raw) {
@@ -1508,7 +1508,7 @@ void FileManagerWindow::install_mounted_place_context_menu(GtkWidget *row)
             if (GtkWidget *popover = gtk_widget_get_ancestor(GTK_WIDGET(button), GTK_TYPE_POPOVER))
                 gtk_popover_popdown(GTK_POPOVER(popover));
             if (target != nullptr)
-                show_fat12_format_dialog(GTK_WINDOW(self->window_), target);
+                show_volume_format_dialog(GTK_WINDOW(self->window_), target);
         }), self);
         gtk_box_append(GTK_BOX(actions), format);
 
