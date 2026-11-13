@@ -143,7 +143,7 @@ const char *default_variant(std::string_view id)
 {
     constexpr std::pair<std::string_view, const char *> defaults[] = {
         {"fat12", "12"}, {"fat16", "16"}, {"fat32", "32"},
-        {"exfat", "64"}, {"ofs", "0"}, {"swap", "4096"}
+        {"exfat", "64"}, {"ntfs", "1"}, {"ofs", "0"}, {"swap", "4096"}
     };
     for (const auto &[format, value] : defaults)
         if (format == id) return value;

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.84 — 2026-11-13
+
+- Preselect the NTFS format variant when the installed Common V2 NTFS formatter is available.
+
 ## 0.1.83 — 2026-11-13
 
 - Detect the current filesystem on a removable volume and offer formatting through any installed Common V2 provider with format support.
