@@ -22,9 +22,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/random.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 typedef struct { int fd; uint64_t size; int write_started; } BlockHost;
@@ -65,6 +67,40 @@ static int flush_at(void *arg)
 {
     BlockHost *h=(BlockHost *)arg;
     return h && fsync(h->fd)==0 ? 0 : -1;
+}
+static uint64_t clock_nanoseconds(clockid_t clock)
+{
+    struct timespec value;
+    if(clock_gettime(clock,&value)!=0 || value.tv_sec<0 ||
+       (uint64_t)value.tv_sec>UINT64_MAX/UINT64_C(1000000000)) return 0u;
+    uint64_t seconds=(uint64_t)value.tv_sec*UINT64_C(1000000000);
+    if(value.tv_nsec<0 || value.tv_nsec>=1000000000 ||
+       (uint64_t)value.tv_nsec>UINT64_MAX-seconds) return 0u;
+    return seconds+(uint64_t)value.tv_nsec;
+}
+static uint64_t monotonic_ns(void *arg)
+{
+    (void)arg;
+    return clock_nanoseconds(CLOCK_MONOTONIC);
+}
+static uint64_t realtime_ns(void *arg)
+{
+    (void)arg;
+    return clock_nanoseconds(CLOCK_REALTIME);
+}
+static int random_bytes(void *arg,void *destination,uint32_t bytes)
+{
+    unsigned char *output=destination;
+    (void)arg;
+    if(!output && bytes) return -1;
+    while(bytes) {
+        ssize_t count=getrandom(output,bytes,0);
+        if(count<0 && errno==EINTR) continue;
+        if(count<=0) return -1;
+        output+=(size_t)count;
+        bytes-=(uint32_t)count;
+    }
+    return 0;
 }
 static int trusted(int fd,int directory)
 {
@@ -190,7 +226,7 @@ static int format_and_verify(const Formatter *module,const IfsFsHostRuntimeV2 *i
         return 1;
     }
     IfsFsHostRuntimeV2 verify=*io;
-    verify.capabilities=IFS_FS_HOST_READ_ONLY;
+    verify.capabilities=IFS_FS_HOST_READ_ONLY | (io->capabilities&IFS_FS_HOST_CLOCK);
     verify.write_at=NULL;
     verify.flush=NULL;
     uint32_t detected=0u;
@@ -277,7 +313,7 @@ int main(int argc,char **argv)
     }
     io.abi_version=IFS_FS_HOST_ABI_V2;
     io.structure_bytes=sizeof(io);
-    io.capabilities=IFS_FS_HOST_EXCLUSIVE|IFS_FS_HOST_DURABLE;
+    io.capabilities=IFS_FS_HOST_EXCLUSIVE|IFS_FS_HOST_DURABLE|IFS_FS_HOST_CLOCK;
     io.volume_bytes=block.size;
     io.logical_sector_bytes=(uint32_t)sector;
     io.physical_sector_bytes=(uint32_t)physical_sector;
@@ -288,6 +324,9 @@ int main(int argc,char **argv)
     io.flush=flush_at;
     io.allocate=host_alloc;
     io.release=host_free;
+    io.monotonic_ns=monotonic_ns;
+    io.realtime_ns=realtime_ns;
+    io.random_bytes=random_bytes;
     if(!ifs_fs_host_v2_valid(&io)) {
         fputs("Invalid Common V2 host descriptor\n",stderr);
         goto done;

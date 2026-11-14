@@ -5,7 +5,11 @@
 static int probe(const IfsFsHostRuntimeV2 *host,uint32_t *variant)
 {
     unsigned char sector[512];
+    unsigned char entropy[8];
     if(!ifs_fs_host_v2_valid(host) || !(host->capabilities&IFS_FS_HOST_READ_ONLY) ||
+       !(host->capabilities&IFS_FS_HOST_CLOCK) || !host->monotonic_ns(host->context) ||
+       !host->realtime_ns(host->context) ||
+       ifs_fs_host_random_bytes_v2(host,entropy,sizeof entropy)!=IFS_FS_OK ||
        host->read_at(host->context,0,sector,sizeof sector)!=0)
         return IFS_FS_IO_ERROR;
     if(sector[0]!=(unsigned char)FORMAT_ID[0]) return IFS_FS_NOT_FOUND;
@@ -22,7 +26,11 @@ static const IfsFsCoreOpsV2 core={
 static int format(const IfsFsHostRuntimeV2 *host,uint32_t variant,const char *label,uint32_t flags)
 {
     unsigned char sector[512]={(unsigned char)FORMAT_ID[0],(unsigned char)variant};
+    unsigned char entropy[8];
     if(!ifs_fs_host_v2_valid(host) || !(host->capabilities&IFS_FS_HOST_EXCLUSIVE) ||
+       !(host->capabilities&IFS_FS_HOST_CLOCK) || !host->monotonic_ns(host->context) ||
+       !host->realtime_ns(host->context) ||
+       ifs_fs_host_random_bytes_v2(host,entropy,sizeof entropy)!=IFS_FS_OK ||
        variant!=73u || !label || strcmp(label,"TEST")!=0 || flags) return IFS_FS_INVALID;
     return host->write_at(host->context,0,sector,sizeof sector)==0 ? IFS_FS_OK : IFS_FS_IO_ERROR;
 }

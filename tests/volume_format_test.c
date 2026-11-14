@@ -22,10 +22,11 @@ static void exercise_formatter(const char *path,const char *id,const char *diffe
     REQUIRE(ftruncate(block.fd,(off_t)block.size)==0);
     const IfsFsHostRuntimeV2 io={
         .abi_version=IFS_FS_HOST_ABI_V2,.structure_bytes=sizeof io,
-        .capabilities=IFS_FS_HOST_EXCLUSIVE|IFS_FS_HOST_DURABLE,
+        .capabilities=IFS_FS_HOST_EXCLUSIVE|IFS_FS_HOST_DURABLE|IFS_FS_HOST_CLOCK,
         .volume_bytes=block.size,.logical_sector_bytes=512u,.physical_sector_bytes=512u,
         .maximum_transfer_bytes=65536u,.context=&block,
-        .read_at=read_at,.write_at=write_at,.flush=flush_at,.allocate=host_alloc,.release=host_free
+        .read_at=read_at,.write_at=write_at,.flush=flush_at,.allocate=host_alloc,.release=host_free,
+        .monotonic_ns=monotonic_ns,.realtime_ns=realtime_ns,.random_bytes=random_bytes
     };
     unsigned char observed[2];
     REQUIRE(format_and_verify(&formatter,&io,0u,"TEST")==1);
