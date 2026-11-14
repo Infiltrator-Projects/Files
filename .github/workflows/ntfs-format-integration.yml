@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: Files NTFS formatter integration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/core/files_volume_format.c'
+      - 'src/core/physical_media.h'
+      - 'src/infiltratr-common'
+      - 'tests/ntfs_provider_integration.c'
+      - '.github/workflows/ntfs-format-integration.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ntfs-format-integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+      - name: Install the independent NTFS inspection tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ntfs-3g
+      - name: Qualify Files with the actual released NTFS provider
+        shell: bash
+        run: |
+          set -euo pipefail
+          deb="$RUNNER_TEMP/ntfs.deb"
+          curl -fsSL --retry 3 -o "$deb" https://github.com/Infiltrator-Projects/Filesystem-NTFS/releases/download/v1.0.18/infiltrator-filesystem-ntfs_1.0.18_amd64.deb
+          printf '%s  %s\n' 87aff49bc863847bb1a3bb1b8f6dbbb112980204d577d7760017cd74c130d30c "$deb" | sha256sum -c -
+          dpkg-deb -x "$deb" "$RUNNER_TEMP/provider"
+          cc -std=c11 -O2 -Wall -Wextra -Werror -Isrc/infiltratr-common/include tests/ntfs_provider_integration.c -ldl -o "$RUNNER_TEMP/ntfs-test"
+          image="$RUNNER_TEMP/files-ntfs.img"
+          "$RUNNER_TEMP/ntfs-test" "$RUNNER_TEMP/provider/System/Filesystems/NTFS.so" "$image"
+          before=$(sha256sum "$image")
+          test "$(ntfslabel "$image")" = 'V2 Dispatch'
+          ntfsfix -n "$image"
+          test "$(sha256sum "$image")" = "$before"
