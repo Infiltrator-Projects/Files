@@ -239,10 +239,6 @@ int main(int argc,char **argv)
         fputs("Device identity changed or whole-disk target refused\n",stderr);
         goto done;
     }
-    if(!ifm_partition_is_physical_removable(actual_major,actual_minor)) {
-        fputs("Target is not verified removable media\n",stderr);
-        goto done;
-    }
     if(ioctl(fd,BLKROGET,&read_only)!=0 || read_only ||
        ioctl(fd,BLKSSZGET,&sector)!=0 ||
        sector<512 || sector>65536 || (sector&(sector-1)) ||

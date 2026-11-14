@@ -76,9 +76,10 @@ bool find_target(GFile *folder, Target &out)
         GFile *root = g_mount_get_root(mount);
         GFile *system_root = g_file_new_for_path("/");
         const bool is_root = root == nullptr || g_file_equal(root, system_root);
+        const bool selected_volume_root = root != nullptr && g_file_equal(folder, root);
         g_object_unref(system_root);
         if (root != nullptr) g_object_unref(root);
-        if (!is_root) {
+        if (!is_root && selected_volume_root) {
             GVolume *volume = g_mount_get_volume(mount);
             if (volume != nullptr) {
                 char *device = g_volume_get_identifier(
@@ -88,7 +89,7 @@ bool find_target(GFile *folder, Target &out)
                     std::strncmp(device, "/dev/", 5) == 0 &&
                     std::strchr(device + 5, '/') == nullptr &&
                     lstat(device, &st) == 0 && S_ISBLK(st.st_mode) &&
-                    ifm_partition_is_physical_removable(
+                    ifm_partition_is_known(
                         static_cast<unsigned>(major(st.st_rdev)),
                         static_cast<unsigned>(minor(st.st_rdev)))) {
                     out.device = device;
@@ -97,7 +98,7 @@ bool find_target(GFile *folder, Target &out)
                     out.volume = G_VOLUME(g_object_ref(volume));
                     out.major_number = static_cast<unsigned>(major(st.st_rdev));
                     out.minor_number = static_cast<unsigned>(minor(st.st_rdev));
-                    out.mount_name = "the selected removable volume";
+                    out.mount_name = "the selected volume";
                     if (char *name = g_mount_get_name(mount); name != nullptr) {
                         out.mount_name = name;
                         g_free(name);
@@ -462,7 +463,7 @@ void show_volume_format_dialog(GtkWindow *parent, GFile *folder)
     gtk_widget_set_margin_top(layout, 16);
     gtk_widget_set_margin_bottom(layout, 16);
     std::string message =
-        "Formatting erases all files on this removable volume.\n\n" +
+        "Formatting erases all files on this volume.\n\n" +
         req->target.mount_name + "\n" + req->target.device;
     GtkWidget *warning = gtk_label_new(message.c_str());
     gtk_label_set_wrap(GTK_LABEL(warning), TRUE);

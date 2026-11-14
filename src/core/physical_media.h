@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
- * Files volume safety: identify actual removable hardware.
+ * Files volume safety: identify known partitions and removable hardware.
  * A built-in SD reader often exposes /sys/block/mmcblkN/removable as 0.
  * Accept only a removable block device or an MMC subsystem card explicitly
  * identified as SD with a valid non-anonymous card CID. Never accept eMMC.
@@ -41,6 +41,17 @@ static inline int ifm_sysfs_text(const char *path,char *buffer,size_t capacity)
     if (strlen(buffer)!=(size_t)bytes) return 0;
     if (buffer[bytes-1]=='\n') buffer[bytes-1]='\0';
     return 1;
+}
+/* A known partition is eligible for the UI; this is not write authorization.
+ * The privileged host must still open it exclusively and verify its identity. */
+static inline int ifm_partition_is_known(unsigned dev_major,unsigned dev_minor)
+{
+    char path[160],value[32];
+    int n=snprintf(path,sizeof path,"/sys/dev/block/%u:%u/partition",dev_major,dev_minor);
+    if(n<=0 || (size_t)n>=sizeof path || !ifm_sysfs_text(path,value,sizeof value)) return 0;
+    size_t length=strlen(value);
+    if(!length || strspn(value,"0123456789")!=length) return 0;
+    return strspn(value,"0")!=length;
 }
 static inline int ifm_partition_is_physical_removable(unsigned dev_major,
                                                       unsigned dev_minor)

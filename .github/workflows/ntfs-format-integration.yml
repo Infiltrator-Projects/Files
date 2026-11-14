@@ -9,6 +9,11 @@ on:
       - 'src/core/physical_media.h'
       - 'src/infiltratr-common'
       - 'tests/ntfs_provider_integration.c'
+      - 'tests/partition_format_integration.sh'
+      - 'src/ui/volume_format_controller.cpp'
+      - 'src/ui/volume_format_controller.hpp'
+      - 'src/ui/file_manager_window.cpp'
+      - 'docs/ARCHITECTURE.md'
       - '.github/workflows/ntfs-format-integration.yml'
   workflow_dispatch:
 
@@ -30,7 +35,7 @@ jobs:
       - name: Install the independent NTFS inspection tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ntfs-3g
+          sudo apt-get install -y --no-install-recommends ntfs-3g e2fsprogs fdisk
       - name: Qualify Files with the actual released NTFS provider
         shell: bash
         run: |
@@ -46,3 +51,10 @@ jobs:
           test "$(ntfslabel "$image")" = 'V2 Dispatch'
           ntfsfix -n "$image"
           test "$(sha256sum "$image")" = "$before"
+      - name: Qualify mounted and non-removable partition safeguards
+        shell: bash
+        run: |
+          set -euo pipefail
+          cc -std=c11 -O2 -Wall -Wextra -Werror -Isrc/infiltratr-common/include src/core/files_volume_format.c -ldl -o "$RUNNER_TEMP/format-worker"
+          sudo bash tests/partition_format_integration.sh "$RUNNER_TEMP/format-worker" \
+            "$RUNNER_TEMP/provider/System/Filesystems/NTFS.so" "$RUNNER_TEMP"

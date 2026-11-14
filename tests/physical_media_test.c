@@ -18,6 +18,7 @@ int main(void)
     CHECK(!ifm_is_physical_sd_identity("SD","03A1B2C3D4E5F60718293A4B5C6D7E8"));
     CHECK(!ifm_is_physical_sd_identity(NULL,cid));
     CHECK(!ifm_is_physical_sd_identity("SD",NULL));
+    CHECK(!ifm_partition_is_known(0u,0u));
     puts("FILES-PHYSICAL-SD-SAFETY-PASS");
     return 0;
 }

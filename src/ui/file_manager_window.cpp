@@ -1499,7 +1499,7 @@ void FileManagerWindow::install_mounted_place_context_menu(GtkWidget *row)
         gtk_widget_set_sensitive(format, allowed);
         if (!allowed)
             gtk_widget_set_tooltip_text(format,
-                "Requires a mounted, physical removable partition");
+                "Requires an unmountable partition other than the system root");
         g_object_set_data_full(G_OBJECT(format), "ifm-mounted-folder",
                                g_object_ref(folder), g_object_unref);
         g_signal_connect(format, "clicked", G_CALLBACK(+[](GtkButton *button, gpointer raw) {
