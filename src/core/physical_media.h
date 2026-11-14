@@ -9,8 +9,11 @@
 #ifndef INFILTRATOR_FILES_PHYSICAL_MEDIA_H
 #define INFILTRATOR_FILES_PHYSICAL_MEDIA_H
 #include <fcntl.h>
+#include <errno.h>
+#include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -52,6 +55,22 @@ static inline int ifm_partition_is_known(unsigned dev_major,unsigned dev_minor)
     size_t length=strlen(value);
     if(!length || strspn(value,"0123456789")!=length) return 0;
     return strspn(value,"0")!=length;
+}
+/* Linux assigns each newly attached disk a fresh sequence even if its device
+ * number is later reused. Read it before unmounting the selected partition. */
+static inline int ifm_partition_disk_sequence(unsigned dev_major,unsigned dev_minor,
+                                              uint64_t *sequence)
+{
+    char path[160],value[32],*end=NULL;
+    int n=snprintf(path,sizeof path,"/sys/dev/block/%u:%u/../diskseq",dev_major,dev_minor);
+    if(!sequence || n<=0 || (size_t)n>=sizeof path ||
+       !ifm_sysfs_text(path,value,sizeof value) || !value[0] ||
+       strspn(value,"0123456789")!=strlen(value)) return 0;
+    errno=0;
+    unsigned long long result=strtoull(value,&end,10);
+    if(errno || !end || *end || !result || result>UINT64_MAX) return 0;
+    *sequence=(uint64_t)result;
+    return 1;
 }
 static inline int ifm_partition_is_physical_removable(unsigned dev_major,
                                                       unsigned dev_minor)

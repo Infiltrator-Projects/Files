@@ -31,6 +31,7 @@ struct Target {
     std::string mount_name;
     unsigned major_number{0};
     unsigned minor_number{0};
+    std::uint64_t disk_sequence{0};
     ~Target() {
         if (mount != nullptr) g_object_unref(mount);
         if (volume != nullptr) g_object_unref(volume);
@@ -77,9 +78,14 @@ bool find_target(GFile *folder, Target &out)
         GFile *system_root = g_file_new_for_path("/");
         const bool is_root = root == nullptr || g_file_equal(root, system_root);
         const bool selected_volume_root = root != nullptr && g_file_equal(folder, root);
+        struct stat mount_stat{};
+        char *root_path = root != nullptr ? g_file_get_path(root) : nullptr;
+        const bool mount_identity = root_path != nullptr &&
+            stat(root_path, &mount_stat) == 0 && S_ISDIR(mount_stat.st_mode);
+        g_free(root_path);
         g_object_unref(system_root);
         if (root != nullptr) g_object_unref(root);
-        if (!is_root && selected_volume_root) {
+        if (!is_root && selected_volume_root && mount_identity) {
             GVolume *volume = g_mount_get_volume(mount);
             if (volume != nullptr) {
                 char *device = g_volume_get_identifier(
@@ -89,9 +95,13 @@ bool find_target(GFile *folder, Target &out)
                     std::strncmp(device, "/dev/", 5) == 0 &&
                     std::strchr(device + 5, '/') == nullptr &&
                     lstat(device, &st) == 0 && S_ISBLK(st.st_mode) &&
+                    st.st_rdev == mount_stat.st_dev &&
                     ifm_partition_is_known(
                         static_cast<unsigned>(major(st.st_rdev)),
-                        static_cast<unsigned>(minor(st.st_rdev)))) {
+                        static_cast<unsigned>(minor(st.st_rdev))) &&
+                    ifm_partition_disk_sequence(
+                        static_cast<unsigned>(major(st.st_rdev)),
+                        static_cast<unsigned>(minor(st.st_rdev)), &out.disk_sequence)) {
                     out.device = device;
                     // Retain the volume across unmount so an abort before
                     // formatting starts can safely restore its mount.
@@ -385,10 +395,12 @@ void on_unmounted(GObject *object, GAsyncResult *result, gpointer data)
     }
     const std::string major_number = std::to_string(req->target.major_number);
     const std::string minor_number = std::to_string(req->target.minor_number);
+    const std::string disk_sequence = std::to_string(req->target.disk_sequence);
     const char *const argv[] = {
         "pkexec", kWorker, "--format", req->selected.id.c_str(),
         req->selected.module.c_str(), req->selected_variant.c_str(), req->target.device.c_str(),
-        major_number.c_str(), minor_number.c_str(), req->selected_label.c_str(), nullptr
+        major_number.c_str(), minor_number.c_str(), disk_sequence.c_str(),
+        req->selected_label.c_str(), nullptr
     };
     GSubprocess *process = g_subprocess_newv(
         argv, static_cast<GSubprocessFlags>(G_SUBPROCESS_FLAGS_STDOUT_PIPE |

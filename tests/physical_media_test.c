@@ -19,6 +19,9 @@ int main(void)
     CHECK(!ifm_is_physical_sd_identity(NULL,cid));
     CHECK(!ifm_is_physical_sd_identity("SD",NULL));
     CHECK(!ifm_partition_is_known(0u,0u));
+    uint64_t sequence=0;
+    CHECK(!ifm_partition_disk_sequence(0u,0u,&sequence));
+    CHECK(!ifm_partition_disk_sequence(0u,0u,NULL));
     puts("FILES-PHYSICAL-SD-SAFETY-PASS");
     return 0;
 }

@@ -83,6 +83,16 @@ static int parse_uint(const char *text, unsigned *value)
     *value=(unsigned)n;
     return 0;
 }
+static int parse_sequence(const char *text,uint64_t *value)
+{
+    char *end=NULL;
+    if(!text || !*text || strspn(text,"0123456789")!=strlen(text)) return -1;
+    errno=0;
+    unsigned long long n=strtoull(text,&end,10);
+    if(errno || !end || *end || !n || n>UINT64_MAX) return -1;
+    *value=(uint64_t)n;
+    return 0;
+}
 static int module_directory(void)
 {
     int system=open("/System",O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);
@@ -195,6 +205,7 @@ static int format_and_verify(const Formatter *module,const IfsFsHostRuntimeV2 *i
 int main(int argc,char **argv)
 {
     unsigned wanted_major=0,wanted_minor=0,actual_major=0,actual_minor=0,variant=0;
+    uint64_t wanted_sequence=0,actual_sequence=0;
     int fd=-1,directory=-1,read_only=0,sector=0,result=2;
     unsigned long long capacity=0;
     struct stat st;
@@ -207,15 +218,16 @@ int main(int argc,char **argv)
     if(argc==2 && strcmp(argv[1],"--help")==0) {
         puts("Usage: files-volume-format --list-formats\n"
              "       pkexec /System/Commands/files-volume-format "
-             "--format FORMAT_ID MODULE.so VARIANT /dev/PARTITION MAJOR MINOR [LABEL]");
+             "--format FORMAT_ID MODULE.so VARIANT /dev/PARTITION MAJOR MINOR DISK_SEQUENCE [LABEL]");
         return 0;
     }
     if(argc==2 && strcmp(argv[1],"--list-formats")==0) return list_formatters();
-    if((argc!=8 && argc!=9) || strcmp(argv[1],"--format")!=0 ||
+    if((argc!=9 && argc!=10) || strcmp(argv[1],"--format")!=0 ||
        !ifs_fs_format_id_valid(argv[2]) || !module_name_valid(argv[3]) ||
        parse_uint(argv[4],&variant)!=0 || strncmp(argv[5],"/dev/",5)!=0 ||
        !argv[5][5] || strchr(argv[5]+5,'/') ||
        parse_uint(argv[6],&wanted_major)!=0 || parse_uint(argv[7],&wanted_minor)!=0 ||
+       parse_sequence(argv[8],&wanted_sequence)!=0 ||
        geteuid()!=0) {
         fputs("Invalid or unauthorised volume format request\n",stderr);
         return 2;
@@ -234,6 +246,10 @@ int main(int argc,char **argv)
     actual_minor=minor(st.st_rdev);
     if(actual_major!=wanted_major || actual_minor!=wanted_minor) {
         fputs("Device identity changed since selection\n",stderr);
+        goto done;
+    }
+    if(ioctl(fd,BLKGETDISKSEQ,&actual_sequence)!=0 || actual_sequence!=wanted_sequence) {
+        fputs("Disk identity changed since selection\n",stderr);
         goto done;
     }
     if(snprintf(partition,sizeof partition,
@@ -276,7 +292,7 @@ int main(int argc,char **argv)
         fputs("Invalid Common V2 host descriptor\n",stderr);
         goto done;
     }
-    result=format_and_verify(&module,&io,variant,argc==9 ? argv[8] : "");
+    result=format_and_verify(&module,&io,variant,argc==10 ? argv[9] : "");
     /* A provider may reject a variant, label or geometry before writing. */
     if(result!=0 && !block.write_started) result=2;
 done:

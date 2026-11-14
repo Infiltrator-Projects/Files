@@ -31,22 +31,31 @@ loop=$(losetup --find --show --partscan "$disk")
 partition="${loop}p1"
 [[ -b $partition ]]
 mkfs.ext4 -q -F "$partition"
+# Opening a whole loop disk can cause udev to rescan its partition table;
+# let that finish before taking the selection identity used by the UI.
+disk_major=$(stat -c '%t' "$loop"); disk_minor=$(stat -c '%T' "$loop")
+disk_sequence=$(cat "/sys/dev/block/$((16#$disk_major)):$((16#$disk_minor))/diskseq")
+before=$(sha256sum "$disk")
+if "$worker" --format ntfs NTFS.so 1 "$loop" "$((16#$disk_major))" "$((16#$disk_minor))" "$disk_sequence" TEST; then exit 1; fi
+[[ $(sha256sum "$disk") == "$before" ]]
+udevadm settle --timeout=10
 major=$(stat -c '%t' "$partition")
 minor=$(stat -c '%T' "$partition")
 major=$((16#$major)); minor=$((16#$minor))
 [[ $(cat "/sys/dev/block/$major:$minor/../removable") == 0 ]]
+sequence=$(cat "/sys/dev/block/$major:$minor/../diskseq")
+[[ $sequence =~ ^[1-9][0-9]*$ ]]
 
 # Identity mismatch, an entire disk, and a mounted partition must all fail
 # before the provider can write. The loop partition is non-removable.
 before=$(sha256sum "$disk")
-if "$worker" --format ntfs NTFS.so 1 "$partition" "$major" "$((minor+1))" TEST; then exit 1; fi
-disk_major=$(stat -c '%t' "$loop"); disk_minor=$(stat -c '%T' "$loop")
-if "$worker" --format ntfs NTFS.so 1 "$loop" "$((16#$disk_major))" "$((16#$disk_minor))" TEST; then exit 1; fi
+if "$worker" --format ntfs NTFS.so 1 "$partition" "$major" "$((minor+1))" "$sequence" TEST; then exit 1; fi
+if "$worker" --format ntfs NTFS.so 1 "$partition" "$major" "$minor" "$((sequence+1))" TEST; then exit 1; fi
 [[ $(sha256sum "$disk") == "$before" ]]
 mount -o ro,noload "$partition" "$mnt"
 owns_mount=1
 before=$(sha256sum "$disk")
-if "$worker" --format ntfs NTFS.so 1 "$partition" "$major" "$minor" TEST; then exit 1; fi
+if "$worker" --format ntfs NTFS.so 1 "$partition" "$major" "$minor" "$sequence" TEST; then exit 1; fi
 [[ $(sha256sum "$disk") == "$before" ]]
 umount "$mnt"
 owns_mount=0
@@ -55,7 +64,7 @@ printf 'Expected partition: %s %u:%u\n' "$partition" "$major" "$minor"
 stat -c 'Observed partition device: %t:%T' "$partition"
 ls -l "/sys/dev/block/$major:$minor/partition"
 
-"$worker" --format ntfs NTFS.so 1 "$partition" "$major" "$minor" 'Internal Test'
+"$worker" --format ntfs NTFS.so 1 "$partition" "$major" "$minor" "$sequence" 'Internal Test'
 [[ $(ntfslabel "$partition") == 'Internal Test' ]]
 ntfsfix -n "$partition"
 echo 'FILES-NONREMOVABLE-FORMAT-PASS'
