@@ -232,11 +232,14 @@ int main(int argc,char **argv)
     }
     actual_major=major(st.st_rdev);
     actual_minor=minor(st.st_rdev);
-    if(actual_major!=wanted_major || actual_minor!=wanted_minor ||
-       snprintf(partition,sizeof partition,
+    if(actual_major!=wanted_major || actual_minor!=wanted_minor) {
+        fputs("Device identity changed since selection\n",stderr);
+        goto done;
+    }
+    if(snprintf(partition,sizeof partition,
                 "/sys/dev/block/%u:%u/partition",actual_major,actual_minor)
                 >=(int)sizeof partition || access(partition,F_OK)!=0) {
-        fputs("Device identity changed or whole-disk target refused\n",stderr);
+        fputs("Partition identity is unavailable; whole-disk target refused\n",stderr);
         goto done;
     }
     if(ioctl(fd,BLKROGET,&read_only)!=0 || read_only ||

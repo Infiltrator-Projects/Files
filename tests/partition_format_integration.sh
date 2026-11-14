@@ -51,6 +51,10 @@ if "$worker" --format ntfs NTFS.so 1 "$partition" "$major" "$minor" TEST; then e
 umount "$mnt"
 owns_mount=0
 
+printf 'Expected partition: %s %u:%u\n' "$partition" "$major" "$minor"
+stat -c 'Observed partition device: %t:%T' "$partition"
+ls -l "/sys/dev/block/$major:$minor/partition"
+
 "$worker" --format ntfs NTFS.so 1 "$partition" "$major" "$minor" 'Internal Test'
 [[ $(ntfslabel "$partition") == 'Internal Test' ]]
 ntfsfix -n "$partition"
