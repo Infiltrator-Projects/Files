@@ -453,7 +453,7 @@ void show_volume_format_dialog(GtkWindow *parent, GFile *folder)
         return;
     }
     GtkWindow *dialog = GTK_WINDOW(gtk_window_new());
-    gtk_window_set_title(dialog, "Format containing volume");
+    gtk_window_set_title(dialog, "Format volume");
     gtk_window_set_transient_for(dialog, parent);
     gtk_window_set_modal(dialog, TRUE);
     gtk_window_set_default_size(dialog, 560, -1);

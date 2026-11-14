@@ -1492,7 +1492,7 @@ void FileManagerWindow::install_mounted_place_context_menu(GtkWidget *row)
         }), self);
         gtk_box_append(GTK_BOX(actions), open);
 
-        GtkWidget *format = gtk_button_new_with_label("Format containing volume…");
+        GtkWidget *format = gtk_button_new_with_label("Format volume…");
         gtk_widget_add_css_class(format, "flat");
         gtk_widget_set_halign(format, GTK_ALIGN_FILL);
         const bool allowed = volume_format_available(folder);

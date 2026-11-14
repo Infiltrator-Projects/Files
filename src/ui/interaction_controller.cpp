@@ -621,7 +621,7 @@ GtkWidget *InteractionController::build_context_action_box()
     add_command(details, "Open terminal here", "terminal-current",
                 ActionScope::NoSelection, context_proxies_);
     volume_format_actions_.push_back(add_command(
-        details, "Format containing volume…", "format-volume",
+        details, "Format volume…", "format-volume",
         ActionScope::Always, context_proxies_));
     return box;
 }
@@ -1711,9 +1711,8 @@ void InteractionController::update_action_state()
         gtk_widget_set_visible(button, selected_folder_native);
         gtk_widget_set_sensitive(button, selected_folder_native);
     }
-    // A folder context refers to its containing removable volume, never
-    // to an independent filesystem inside the folder. Hide this destructive
-    // action unless Files can prove the required native device identity.
+    // Only the selected mounted partition root is eligible. Hide the action
+    // unless Files can prove the required native device identity.
     GFile *format_target = nullptr;
     bool format_target_owned = false;
     if (count == 0U && native_location) {
